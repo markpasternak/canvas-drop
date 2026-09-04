@@ -1,24 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="158 209 372 432" fill="none" role="img" aria-label="Canvasdrop">
-  <title>Canvasdrop</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --frame: #20303c;
-      --drop: #0c7b88;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --frame: #f3f3f6;
-        --drop: #56c9d3;
-      }
-    }
-  </style>
-  <g stroke-linecap="round" stroke-linejoin="round">
-    <path d="M245 335H218C191.49 335 170 356.49 170 383V581C170 607.51 191.49 629 218 629H470C496.51 629 518 607.51 518 581V383C518 356.49 496.51 335 470 335H443" stroke="var(--frame)" stroke-width="24"/>
-    <path d="M344 222V392" stroke="var(--drop)" stroke-width="27"/>
-    <path d="M291 349L344 402L397 349" stroke="var(--drop)" stroke-width="27"/>
-    <path d="M286 462L241 507L286 552" stroke="var(--drop)" stroke-width="25"/>
-    <path d="M402 462L447 507L402 552" stroke="var(--drop)" stroke-width="25"/>
-    <path d="M366 452L326 566" stroke="var(--drop)" stroke-width="20"/>
-  </g>
+<svg viewBox="0 0 32 32" fill="none" role="img" aria-label="canvas-drop" xmlns="http://www.w3.org/2000/svg"><title>canvas-drop</title><style>:root{color-scheme:light dark;--frame:#20303c;--drop:#0c7b88}@media(prefers-color-scheme:dark){:root{--frame:#f3f3f6;--drop:#56c9d3}}</style>
+  <path d="M9 10H7a3 3 0 0 0-3 3v13a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3V13a3 3 0 0 0-3-3h-2" stroke="var(--frame)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16 2v12m-5-5 5 5 5-5" stroke="var(--drop)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

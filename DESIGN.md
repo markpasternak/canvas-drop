@@ -26,10 +26,11 @@ default indigo-violet SaaS palette.
 
 - **Light is the default**; dark is the system-driven alternate (`prefers-color-scheme`),
   with a manual override via `[data-theme]`.
-- **Color strategy: Restrained in the app, Committed in marketing.** App chrome stays
-  near-monochrome warm neutral + one teal accent (<~10% of any screen). Marketing
-  surfaces (landing, signed-out, big empty-state moments) earn a Committed treatment
-  with a drenched hero and the amber second accent.
+- **Color strategy: quiet chrome, expressive canvases.** The homepage and app share
+  the active skin's neutral surfaces, display face, and primary accent. The homepage
+  leads with a multi-view product walkthrough, including Gallery. Committed example content
+  carries the visual interest; marketing never links visitors into the authenticated Gallery.
+  Avoid introducing a separate hero palette that disconnects marketing from the app.
 
 ## Token layering (re-skin contract)
 
@@ -74,11 +75,10 @@ pops on both warm paper and deep navy.
 - `--accent-hover`, `--accent-fg` (≥4.5:1 on the fill), `--accent-subtle` (selected /
   badge / info backgrounds; `text-accent` on it clears 4.5:1).
 
-### Second accent — warm amber (hue ~72), MARKETING ONLY
-The editorial warm-cool counterpoint. `--amber` `0.78 0.15 72` (`#e0a23a`) /
-`--amber-ink` `0.52 0.13 60` for AA text on paper. Used on the landing/signed-out
-surfaces (drenched hero/CTA, eyebrows, the italic-emphasis move). **The app stays
-single-accent teal.**
+### Legacy marketing accent — warm amber (hue ~72)
+`MARKETING_ACCENT` remains available for existing generated artwork. The homepage
+now uses the active skin's `--accent` family, including its matched button foreground
+and hover state. The app and homepage have one primary accent per active skin.
 
 ### Semantic — `success` (green ~152), `warning` (amber ~58/80-dark), `danger` (red ~27)
 Each has a foreground + a `-subtle` background. **Never encode state in color alone** —

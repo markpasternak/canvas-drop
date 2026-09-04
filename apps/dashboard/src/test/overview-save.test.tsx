@@ -114,6 +114,7 @@ describe("Overview Basics save — optimistic-divergence recovery", () => {
     });
     const user = userEvent.setup();
     renderOverview();
+    await user.click(await screen.findByText("Edit details"));
 
     const title = (await screen.findByLabelText("Title")) as HTMLInputElement;
     expect(title.value).toBe("Server Title");
@@ -137,6 +138,7 @@ describe("Overview Basics save — optimistic-divergence recovery", () => {
     });
     const user = userEvent.setup();
     renderOverview();
+    await user.click(await screen.findByText("Edit details"));
 
     // Server-truth tag is present.
     const tagList = await screen.findByRole("list", { name: /current tags/i });
@@ -164,6 +166,7 @@ describe("Overview Basics save — optimistic-divergence recovery", () => {
     });
     const user = userEvent.setup();
     renderOverview();
+    await user.click(await screen.findByText("Edit details"));
 
     const description = (await screen.findByLabelText("Description")) as HTMLTextAreaElement;
     expect(description.value).toBe("Server description");

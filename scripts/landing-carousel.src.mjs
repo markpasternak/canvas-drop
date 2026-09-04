@@ -3,28 +3,20 @@
 // same-origin by the docs asset route — the marketing landing has no client
 // bundler, so the built file is committed (like the OG card + screenshots).
 //
-// Standard Embla + the autoplay plugin (slide-by-slide dwell — the right fit for a
-// discrete tour, vs auto-scroll's continuous marquee). Embla owns positioning/drag/
-// snapping; we only wire the prev/next arrows, the dots, and pause on hover/focus.
+// Embla owns positioning and dragging. Navigation is manual so the selected
+// screen stays available for reading. Without JavaScript, scroll-snap is native.
 
 import EmblaCarousel from "embla-carousel";
-import Autoplay from "embla-carousel-autoplay";
 
 function setup(root) {
   const viewport = root.querySelector("[data-embla-viewport]");
   if (!viewport) return;
 
-  const reduce =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // Autoplay dwells on each slide; it keeps running after arrow/dot use (resets the
-  // timer) and pauses while the pointer is over the carousel. Skipped under reduced motion.
-  const plugins = reduce
-    ? []
-    : [Autoplay({ delay: 5200, stopOnInteraction: false, stopOnMouseEnter: true })];
-
-  const embla = EmblaCarousel(viewport, { loop: true, align: "center" }, plugins);
+  // Stay on the view the visitor chooses. Without JS the viewport scrolls natively.
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  root.classList.add("is-enhanced");
+  const embla = EmblaCarousel(viewport, { loop: true, align: "center", duration: reduce ? 0 : 25 });
+  root.querySelector("[data-embla-controls]")?.removeAttribute("hidden");
 
   const prev = root.querySelector("[data-embla-prev]");
   const next = root.querySelector("[data-embla-next]");

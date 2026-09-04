@@ -69,7 +69,8 @@ export function TabNav({ items, "aria-label": ariaLabel, className }: TabNavProp
             key={item.to}
             to={item.to}
             params={item.params}
-            activeOptions={item.end ? { exact: true } : undefined}
+            // Tabs identify sections; query parameters only affect the section's content.
+            activeOptions={{ exact: item.end, includeSearch: false }}
             activeProps={{ "aria-current": "page" }}
             className={cn(
               "relative -mb-px shrink-0 border-b-2 border-transparent px-3 py-3 text-sm font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)]",

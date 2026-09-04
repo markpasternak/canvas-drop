@@ -49,8 +49,9 @@ One teal-accent primary CTA per surface (`DetailPanel.primaryClass` = `bg-accent
 shared **concept-colors** map + `Badge`/`StatusBadge`, never colour alone (pair with a
 dot/icon/label). Slop tells to avoid (DESIGN §"Patterns to avoid"): side-stripe accent
 borders, gradient text, indigo-violet, per-section tracked eyebrows, identical card grids.
-Colour energy belongs in canvas covers + the marketing "Committed" treatment (the landing
-hero: teal→navy + the amber second accent), not the app chrome.
+Colour energy belongs in canvas covers and content. Since the September 2026
+publishing-experience round, the homepage leads with the example Gallery and uses the
+active skin's accent on neutral surfaces, replacing its separate gradient/amber hero.
 
 ## Server-rendered pages share the brand layer
 
@@ -69,8 +70,9 @@ self-contained HTML — they must still resolve to the **same tokens** as the SP
   overrides `body`/`main`/`.brand` for its sidebar layout — so a system-style change can
   reach the docs; verify the docs overrides still hold.
 - The brand mark geometry lives once in `@canvas-drop/shared` (`brand/logo.ts`,
-  `viewBox="158 209 372 432"`); server pages use `BRAND_MARK` (driven by
-  `--logo-frame`/`--logo-drop`). A logo change is a single edit.
+  `viewBox="0 0 32 32"`); server pages use `BRAND_MARK` (driven by
+  `--logo-frame`/`--logo-drop`). The dashboard mirror is parity-tested. Run `pnpm brand:build` to regenerate
+  downloadable SVGs, favicons, PWA icons, and social artwork from that geometry.
 
 ## Theme: data-theme + the per-origin caveat
 

@@ -6,7 +6,7 @@ import { cn } from "../lib/cn.js";
 /** The raw upload path for a file (leading slashes stripped). react-dropzone's
  * file-selector adds `path` for dragged folders; the directory picker sets
  * webkitRelativePath; a lone dropped file has only its name. */
-function rawUploadPath(file: File): string {
+export function rawUploadPath(file: File): string {
   const withPath = file as File & { path?: string };
   return (withPath.path || file.webkitRelativePath || file.name).replace(/^\/+/, "");
 }

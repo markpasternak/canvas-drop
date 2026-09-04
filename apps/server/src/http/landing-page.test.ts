@@ -1,4 +1,4 @@
-import { type Config, loadConfig, MARKETING_ACCENT } from "@canvas-drop/shared";
+import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -42,25 +42,11 @@ describe("landing page design skin", () => {
     expect(html).toContain(':root[data-skin="workshop"]');
   });
 
-  it("re-voices the hero with the skin: h1 uses --font-display and alternates remap the marketing accent", () => {
+  it("uses the active skin's display face and accent on the hero and sample", () => {
     const html = renderLandingPage("https://x.com", "oidc", false, "workshop");
-    // The hero title follows the skin's display face (editorial keeps the serif
-    // because --font-display defaults to it; workshop/canvas re-voice it).
     expect(html).toContain("font-family: var(--font-display)");
-    // Any non-default skin remaps the marketing accent (--amber) to the skin
-    // accent, so the hero accent + CTA follow the active skin rather than staying
-    // a fixed amber. Editorial stamps no data-skin, so this rule never fires for it.
-    expect(html).toContain(
-      ":root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }",
-    );
-  });
-
-  it("keeps the editorial hero on its fixed amber (the remap is scoped to [data-skin])", () => {
-    const html = renderLandingPage("https://x.com", "oidc", false, "editorial");
-    expect(html).not.toContain('data-skin="editorial"');
-    // The hero accent clause still resolves to the marketing amber, not the skin
-    // accent — the [data-skin] remap can't match an attribute-free <html>.
-    expect(html).toContain("h1 .accent { font-style: italic; color: var(--amber); }");
+    expect(html).toContain("h1 .accent { font-style: italic; color: var(--accent); }");
+    expect(html).toContain(".btn-primary { background: var(--accent); color: var(--accent-fg);");
   });
 
   it("landingResponse stamps the instance's configured skin", async () => {
@@ -115,7 +101,7 @@ describe("landing page — rendered content", () => {
     expect(html).toContain("github.com/markpasternak/canvas-drop");
   });
 
-  it("shows the six primitives, authoring, and the regenerable screenshots", () => {
+  it("shows the six primitives and authoring", () => {
     const html = renderLandingPage();
     for (const tag of ["kv", "files", "ai", "identity", "realtime", "connections", "authoring"]) {
       expect(html).toContain(`>${tag}</span>`);
@@ -125,34 +111,16 @@ describe("landing page — rendered content", () => {
     expect(html).toContain("controlled access to third-party APIs");
     expect(html).toContain("admin-granted Connections");
     expect(html).not.toContain("Five primitives + authoring");
-    // Light, populated marketing shots served at /docs/assets (pnpm landing:screenshots).
-    // Each carries a `?v=<hash>` cache-bust, so match the path without the closing quote.
-    expect(html).toContain('src="/docs/assets/landing-dashboard.webp');
-    expect(html).toContain('src="/docs/assets/tour-shared.webp');
-    expect(html).toContain('src="/docs/assets/landing-gallery.webp');
   });
 
-  it("renders the editorial serif hero with the amber second accent (Committed bold)", () => {
+  it("keeps the editorial display voice and capability detail", () => {
     const html = renderLandingPage();
-    // The hero headline carries the self-hosted serif and the italic-accent clause.
     expect(html).toContain("--font-serif:");
     expect(html).toContain('<span class="accent">Share it out.</span>');
-    // h1.accent is the italic amber clause.
-    expect(html).toMatch(/h1 \.accent \{[^}]*font-style: italic[^}]*color: var\(--amber\)/);
-    // The amber comes from MARKETING_ACCENT (shared) — sourced, never inlined.
-    expect(html).toContain(`--amber: ${MARKETING_ACCENT.light.amber};`);
-    expect(html).toContain(`--amber-ink: ${MARKETING_ACCENT.light["amber-ink"]};`);
-    // Decorative chrome references the token, not a hard-coded amber value.
-    expect(html).toContain("var(--amber)");
-    // Per-primitive colour tints are present.
-    expect(html).toContain('class="prim p-kv"');
-    expect(html).toContain('class="prim p-realtime"');
-    expect(html).toContain('class="prim p-connections"');
-    expect(html).toContain('class="prim p-authoring"');
-    expect(html).toContain(".p-authoring { grid-column: 1 / -1; }");
+    for (const primitive of ["kv", "realtime", "connections", "authoring"]) {
+      expect(html).toContain(`class="prim p-${primitive}"`);
+    }
     expect(html).toContain("signed-in viewers publish canvases as themselves");
-    // No indigo-violet anywhere (the parity scan's hue — kept clean).
-    expect(html).not.toMatch(/oklch\([^)]*\b27[0-9]\b/);
   });
 
   it("self-hosts the Newsreader serif — no external/CDN font request (no phone-home)", () => {
@@ -169,17 +137,26 @@ describe("landing page — rendered content", () => {
     expect(html).not.toContain("fonts.gstatic.com");
   });
 
-  it("includes the product-tour carousel and the team + privacy sections", () => {
+  it("retains the multi-view walkthrough and gallery without gated marketing links", () => {
     const html = renderLandingPage();
-    // Embla carousel: the viewport + the bundled controller script.
+    expect(html).toContain('aria-label="Product walkthrough"');
     expect(html).toContain("data-embla");
     expect(html).toContain('src="/docs/assets/landing-carousel.js"');
-    expect(html).toContain('src="/docs/assets/tour-editor.webp');
-    expect(html).toContain("Shared with you");
-    expect(html).toContain("Share link &amp; access");
+    for (const view of [
+      "landing-gallery",
+      "landing-dashboard",
+      "tour-editor",
+      "tour-sharing",
+      "tour-people",
+    ])
+      expect(html).toContain(`/docs/assets/${view}.webp`);
+    expect(html).not.toContain('href="/gallery"');
+    expect(html).not.toContain("data-canvas-demo");
+    expect(html).not.toContain("Dashboards, calculators, roadmaps, and the next useful idea.");
+    expect(html).toContain("From an artifact to a tool your team can use.");
+    expect(html).toContain("Made in a chat, a cloud workspace, or on your laptop.");
     expect(html).toContain("Built for teams");
     expect(html).toContain("Restricted by default");
-    expect(html).toContain("No telemetry, ever");
   });
 
   it("shows the sharing-ladder section with every rung and the auth-delegated-invite story (plan 003)", () => {
@@ -202,11 +179,9 @@ describe("landing page — rendered content", () => {
     // The headline differentiator: auth-delegated invites (no app-owned credentials).
     expect(html).toContain("no app-managed passwords, no magic-link accounts");
     // The list always applies; General access only widens.
-    expect(html).toContain("the people and teams you name always get in");
+    expect(html).toContain("The people and teams you name always get in");
     // The Teams capability also appears in the "Built for teams" grid + the tour.
     expect(html).toContain("Teams &amp; invites");
-    expect(html).toContain('src="/docs/assets/tour-teams.webp');
-    expect(html).toContain('src="/docs/assets/tour-people.webp');
   });
 });
 

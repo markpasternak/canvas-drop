@@ -119,12 +119,12 @@ export default function CanvasLayout() {
           >
             Open draft
           </Link>
-          <DeployButton canvasId={id} size="sm" label="Publish" />
+          <DeployButton canvasId={id} size="sm" label="Upload and publish" />
         </>
       ) : (
         // Published: global "upload a new version" affordance — shown on every tab,
         // distinct from the Editor tab's own "Publish" (which publishes the draft).
-        <DeployButton canvasId={id} size="sm" label="New version" />
+        <DeployButton canvasId={id} size="sm" label="Upload new version" />
       )
     ) : canvas?.status === "archived" ? (
       <Button
@@ -160,7 +160,7 @@ export default function CanvasLayout() {
       <CanvasDetailChrome
         id={id}
         title={title}
-        url={canvas?.url}
+        url={canvas?.status === "active" ? canvas.url : undefined}
         draft={isDraft}
         isLoading={isLoading}
         actions={actions}
@@ -191,7 +191,7 @@ export default function CanvasLayout() {
         >
           <span className="font-medium">This canvas has been disabled by an administrator.</span>
           <span className="text-subtle">
-            It is read-only — its public URL is offline and editing, settings, sharing, and
+            It is read-only — its canvas URL is offline and editing, settings, sharing, and
             publishing are turned off until an administrator restores it.
             {canvas?.disabledReason ? (
               <>

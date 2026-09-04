@@ -1,28 +1,23 @@
-import { ArrowSquareOut, CheckCircle, Info, WarningCircle } from "@phosphor-icons/react";
+import { ArrowSquareOut, Info, WarningCircle } from "@phosphor-icons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { accessRungLabel, PublicationBadge } from "../components/Badge.js";
+import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { IconLink } from "../components/IconButton.js";
-import { flatBandClass, Section } from "../components/SettingsSection.js";
+import { flatBandClass } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
 import { TagsEditor } from "../components/TagsEditor.js";
 import { useToast } from "../components/Toast.js";
-import {
-  ApiError,
-  type Canvas,
-  isRestrictedRung,
-  type RootEntry,
-  type VersionInfo,
-} from "../lib/api.js";
+import { ApiError, type Canvas, type RootEntry, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useUpdateSettings } from "../lib/mutations.js";
-import { useCanvas, useVersions } from "../lib/queries.js";
+import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
 
 function rootWorks(entry?: RootEntry): boolean {
   return entry?.reason === "index" || entry?.reason === "single";
@@ -66,7 +61,7 @@ function HealthCard({
     return (
       <StateCard tone="danger" title="Canvas disabled" icon="warning">
         <p>
-          An administrator disabled this canvas, so its public URL is offline.
+          An administrator disabled this canvas, so its canvas URL is offline.
           {canvas.disabledReason ? (
             <>
               {" "}
@@ -100,7 +95,7 @@ function HealthCard({
         tone="warning"
         title="Not published yet"
         icon="warning"
-        actions={<RepairActions id={canvas.id} deployLabel="New version" />}
+        actions={<RepairActions id={canvas.id} deployLabel="Upload new version" />}
       >
         <p>Publish this canvas before sharing it. The URL has no live page.</p>
       </StateCard>
@@ -113,7 +108,7 @@ function HealthCard({
         tone="warning"
         title="Root page missing"
         icon="warning"
-        actions={<RepairActions id={canvas.id} deployLabel="New version" />}
+        actions={<RepairActions id={canvas.id} deployLabel="Upload new version" />}
       >
         {entry.reason === "ambiguous" ? (
           <p>
@@ -148,13 +143,7 @@ function HealthCard({
     );
   }
 
-  return (
-    <StateCard tone="success" title="Canvas is published" icon="check">
-      <p>
-        The root page loads from the current version. Review the public URL before sharing widely.
-      </p>
-    </StateCard>
-  );
+  return null;
 }
 
 function StateCard({
@@ -164,15 +153,14 @@ function StateCard({
   actions,
   children,
 }: {
-  tone: "success" | "warning" | "danger" | "neutral";
+  tone: "warning" | "danger" | "neutral";
   title: string;
-  icon: "check" | "warning" | "info";
+  icon: "warning" | "info";
   actions?: ReactNode;
   children: ReactNode;
 }) {
-  const Icon = icon === "check" ? CheckCircle : icon === "warning" ? WarningCircle : Info;
+  const Icon = icon === "warning" ? WarningCircle : Info;
   const toneClass = {
-    success: "border-success/25 bg-success-subtle/35 text-success",
     warning: "border-warning/30 bg-warning-subtle/45 text-warning",
     danger: "border-danger/30 bg-danger-subtle/40 text-danger",
     neutral: "border-border bg-surface-raised text-muted",
@@ -298,66 +286,79 @@ export default function Overview() {
         </InlineNotice>
       )}
 
-      <Section
-        id="basics"
-        title="Basics"
-        description="Name this canvas so it is easy to scan and share."
+      <section
+        aria-label="Canvas preview and actions"
+        className="grid gap-6 lg:grid-cols-[1.35fr_1fr] lg:items-center"
       >
-        <Field
-          label="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => {
-            if (title !== canvas.title) void save({ title });
-          }}
-          maxLength={200}
-        />
-        <TextareaField
-          label="Description"
-          value={description}
-          rows={3}
-          onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => {
-            if ((description || null) !== canvas.description) {
-              void save({ description: description || null });
-            }
-          }}
-          maxLength={2000}
-        />
-        <TagsEditor
-          value={tags}
-          onChange={(next) => {
-            setTags(next);
-            void save({ tags: next });
-          }}
-          hint="Enter or comma to add"
-          description="Tags help you filter your canvases here, and appear publicly in the gallery once this canvas is listed."
-        />
-      </Section>
+        {canvas.status === "active" && canvas.currentVersionId && rootWorks(current?.entry) ? (
+          <a
+            href={canvas.url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="View published canvas"
+            className="block aspect-[16/9] overflow-hidden rounded-xl border border-border bg-surface-sunken transition-opacity hover:opacity-90"
+          >
+            <CanvasCover
+              key={canvas.currentVersionId}
+              seed={id}
+              title={canvas.title}
+              previewUrl={
+                canvas.previewMode === "off"
+                  ? undefined
+                  : `${previewCoverUrl(canvas.url)}&v=${canvas.updatedAt}`
+              }
+            />
+          </a>
+        ) : (
+          <div className="aspect-[16/9] overflow-hidden rounded-xl border border-border bg-surface-sunken">
+            <CanvasCover seed={id} title={canvas.title} />
+          </div>
+        )}
+        <div className="min-w-0 space-y-5">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted">
+              {canvas.currentVersionId ? "Published version" : "Your canvas"}
+            </p>
+            <h2 className="font-display text-h2 leading-tight tracking-tight">
+              {current
+                ? `Version ${current.number}`
+                : canvas.currentVersionId
+                  ? "Published version"
+                  : "Ready when you are"}
+            </h2>
+            {canvas.description && (
+              <p className="line-clamp-3 text-sm leading-relaxed text-muted">
+                {canvas.description}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <PublicationBadge state={canvas.publicationState} />
+            <span className="text-muted">{accessLabel(canvas)}</span>
+          </div>
+          {canvas.status === "active" && <DraftSummary id={id} />}
+          {canvas.status === "active" && (
+            <div className="flex flex-wrap items-center gap-4">
+              <DraftLink id={id} label="Edit draft" />
+              <Link
+                to="/canvases/$id/share"
+                params={{ id }}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                Manage access
+              </Link>
+            </div>
+          )}
+        </div>
+      </section>
 
       <HealthCard canvas={canvas} current={current} versionsReady={versionsReady} />
 
       <section className={flatBandClass}>
-        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
-          <Fact label="Publication">
-            <PublicationBadge state={canvas.publicationState} />
-          </Fact>
-          <Fact label="Access">
-            <span
-              className={cn(
-                canvas.access === "public_link"
-                  ? "font-medium text-warning"
-                  : !isRestrictedRung(canvas.access)
-                    ? "text-fg"
-                    : "text-muted",
-              )}
-            >
-              {accessLabel(canvas)}
-            </span>
-          </Fact>
+        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
           <Fact label="Current version">
             <span title={current ? fullTime(current.createdAt) : undefined}>
-              {currentVersionLabel(current)}
+              {versionsReady ? currentVersionLabel(current) : "Version details unavailable"}
             </span>
           </Fact>
           <Fact label="Gallery">
@@ -376,20 +377,33 @@ export default function Overview() {
 
       <section className={flatBandClass}>
         <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
-          <Fact label="Public URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
+          <Fact label="Canvas URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
             <div className="flex min-w-0 items-center gap-2">
-              <a
-                href={canvas.url}
-                target="_blank"
-                rel="noreferrer"
-                className="min-w-0 flex-1 truncate font-mono text-xs text-accent hover:underline"
-              >
-                {canvas.url}
-              </a>
+              {canvas.status === "active" && canvas.currentVersionId ? (
+                <a
+                  href={canvas.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate font-mono text-xs text-accent hover:underline"
+                >
+                  {canvas.url}
+                </a>
+              ) : (
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">
+                  {canvas.url}
+                </span>
+              )}
               <CopyButton value={canvas.url} label="Copy" toastMessage="Link copied" />
-              <IconLink href={canvas.url} target="_blank" rel="noreferrer" label="Open live canvas">
-                <ArrowSquareOut size={15} weight="bold" aria-hidden />
-              </IconLink>
+              {canvas.status === "active" && canvas.currentVersionId && (
+                <IconLink
+                  href={canvas.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  label="Open live canvas"
+                >
+                  <ArrowSquareOut size={15} weight="bold" aria-hidden />
+                </IconLink>
+              )}
             </div>
           </Fact>
           <Fact label="Files">
@@ -435,6 +449,67 @@ export default function Overview() {
           )}
         </dl>
       </section>
+      <details id="basics" className={flatBandClass}>
+        <summary className="cursor-pointer font-display text-h2 tracking-tight">
+          Edit details
+        </summary>
+        <p className="mt-2 text-sm text-muted">
+          Title, description, and tags. Changes save when you leave a field.
+        </p>
+        <fieldset disabled={canvas.status === "disabled"} className="mt-5 max-w-3xl space-y-4">
+          <Field
+            label="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => {
+              if (title !== canvas.title) void save({ title });
+            }}
+            maxLength={200}
+          />
+          <TextareaField
+            label="Description"
+            value={description}
+            rows={3}
+            onChange={(e) => setDescription(e.target.value)}
+            onBlur={() => {
+              if ((description || null) !== canvas.description) {
+                void save({ description: description || null });
+              }
+            }}
+            maxLength={2000}
+          />
+          <TagsEditor
+            value={tags}
+            onChange={(next) => {
+              setTags(next);
+              void save({ tags: next });
+            }}
+            hint="Enter or comma to add"
+            description="Tags help you filter your canvases here, and appear publicly in the gallery once this canvas is listed."
+          />
+        </fieldset>
+      </details>
     </TabContentFrame>
+  );
+}
+
+/** Uses the existing editor read, which initializes the draft from the current
+ * version on first open. Never infer saved or published state when it fails. */
+function DraftSummary({ id }: { id: string }) {
+  const { data: draft, isError } = useDraft(id);
+  return (
+    <p className="text-sm leading-relaxed text-muted">
+      {isError
+        ? "Open the editor to review your draft."
+        : !draft
+          ? "Checking your draft…"
+          : draft.stale
+            ? "A newer version was published. Review your draft before publishing."
+            : draft.dirty
+              ? "Your draft has unpublished changes. Publish when it’s ready for the team."
+              : draft.files.length === 0
+                ? "Add content in the editor, then publish when you’re ready."
+                : "Your draft matches the published version. Edits stay in draft until you publish."}
+    </p>
   );
 }

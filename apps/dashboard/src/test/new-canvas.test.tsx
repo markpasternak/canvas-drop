@@ -22,6 +22,18 @@ function mockFetch(handlers: Record<string, () => Response>) {
     calls.push({ method, url: path, body: init?.body as string | undefined });
     const handler = handlers[`${method} ${path}`];
     if (handler) return handler();
+    if (path === "/api/me")
+      return json({
+        id: "u1",
+        name: "Owner",
+        email: "owner@example.com",
+        isAdmin: false,
+        canPublishPublic: true,
+        orgs: [],
+        baseUrl: "http://localhost:3000",
+        urlMode: "path",
+        authMode: "dev",
+      });
     return json({ error: "not_mocked" }, 500);
   });
   vi.stubGlobal("fetch", fn);
@@ -52,6 +64,7 @@ describe("create flow — backend choice", () => {
   it("defaults the backend toggle to off", async () => {
     mockFetch({});
     renderNew();
+    await userEvent.click(await screen.findByText("Optional settings"));
     expect(await screen.findByRole("switch", { name: /enable backend/i })).toHaveAttribute(
       "aria-checked",
       "false",
@@ -66,7 +79,8 @@ describe("create flow — backend choice", () => {
     const user = userEvent.setup();
     renderNew();
 
-    await user.click(await screen.findByRole("switch", { name: /enable backend/i }));
+    await user.click(await screen.findByText("Optional settings"));
+    await user.click(screen.getByRole("switch", { name: /enable backend/i }));
     await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
     await user.click(screen.getByRole("button", { name: /create and publish/i }));
 
@@ -84,7 +98,8 @@ describe("create flow — backend choice", () => {
     const user = userEvent.setup();
     renderNew();
 
-    await user.click(await screen.findByRole("switch", { name: /enable backend/i }));
+    await user.click(await screen.findByText("Optional settings"));
+    await user.click(screen.getByRole("switch", { name: /enable backend/i }));
     await user.click(screen.getByRole("button", { name: /use the api/i }));
     await user.click(screen.getByRole("button", { name: /create key/i }));
 
@@ -121,27 +136,28 @@ describe("create flow — source-first ordering (U16)", () => {
     // The source/method picker (the four methods) is present.
     const methodRegion = await screen.findByRole("region", { name: /creation method/i });
     const pasteButton = within(methodRegion).getByRole("button", { name: /paste html/i });
-    const backendSwitch = await screen.findByRole("switch", { name: /enable backend/i });
+    await userEvent.click(screen.getByText("Optional settings"));
+    const backendSwitch = screen.getByRole("switch", { name: /enable backend/i });
 
     // DOM order: the source choice precedes the backend toggle.
     const position = pasteButton.compareDocumentPosition(backendSwitch);
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("renders the source picker inside a boxed panel (brand structure, U20)", async () => {
+  it("puts the HTML before naming and optional settings", async () => {
     mockFetch({});
     renderNew();
-    // The method picker is a labeled region rendered as an on-brand boxed panel
-    // (rounded border + surface + panel shadow), not a loose list.
-    const methodRegion = await screen.findByRole("region", { name: /creation method/i });
-    expect(methodRegion.className).toMatch(/rounded-xl/);
-    expect(methodRegion.className).toMatch(/border-border/);
-    expect(methodRegion.className).toMatch(/bg-surface/);
+    const html = await screen.findByLabelText("HTML");
+    const title = screen.getByLabelText("Title");
+    expect(html.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("switch", { name: /enable backend/i })).not.toBeVisible();
+    expect(screen.getByText("Optional settings")).toBeVisible();
   });
 
   it("frames the backend toggle as optional", async () => {
     mockFetch({});
     renderNew();
+    await userEvent.click(await screen.findByText("Optional settings"));
     expect(
       await screen.findByRole("switch", { name: /enable backend \(optional\)/i }),
     ).toBeInTheDocument();
@@ -186,6 +202,7 @@ describe("create flow — source-first ordering (U16)", () => {
     renderNew();
 
     await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
+    await user.click(screen.getByText("Optional settings"));
     const slugInput = await screen.findByLabelText(/custom slug|slug/i);
     await user.type(slugInput, "taken-slug");
 
