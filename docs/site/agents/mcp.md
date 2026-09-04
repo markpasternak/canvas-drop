@@ -126,7 +126,7 @@ Minimum role: editor. These keep working on a disabled canvas.
 
 | Tool | Input | Result |
 |---|---|---|
-| `get_canvas` | `id` | View + `owner`, `role`, `teamIds` (the team grants on the people-and-teams list, at any `access` value; `[]` when none), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, and `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued). |
+| `get_canvas` | `id` | View + `owner`, `role`, `publicLinkEnabled`, `teamIds` (the team grants on the people-and-teams list, at any `access` value; `[]` when none), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, and `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued). |
 | `list_versions` | `id` | `{versions: [{number, source, status, createdBy, createdByName, createdByEmail, createdAt, fileCount, totalBytes, current, downloadUrl}]}`. `downloadUrl` is `{base}/mcp/canvases/{id}/versions/{n}/download`, a ZIP of that version. |
 | `get_canvas_file` | `id`, `path?` | Without `path`: `{version, fileCount, files: [{path, size, mime, hash}]}` for the live version. With `path`: `{version, path, size, mime, hash, encoding: "utf8" \| "base64", content}`. A file over 256 KiB returns `truncated: true` and a `note` instead of `content`; compare the `hash`. Fails with `this canvas has no live version yet` or `no file at "…"`. |
 | `get_canvas_usage` | `id` | `{totalViews, uniqueViewers, lastViewedAt, viewsByDay, kvOps, fileOps, fileCount, fileBytes, aiCalls, aiTokens, aiCostUsd, realtimeConnects}`. |
@@ -256,6 +256,9 @@ Team error codes: `NOT_A_MEMBER`, `TEAM_NOT_FOUND`, `TEAM_NAME_TAKEN`, `FORBIDDE
 `AUTH_ADMISSION_REQUIRED`, `RATE_LIMITED`.
 
 ## Return shapes
+
+Single-canvas management responses (`get_canvas`, `update_canvas`, and the dashboard HTTP view) include `publicLinkEnabled`: true only when Public link is selected, the instance allows public sharing, and the owner retains permission to publish publicly. Lifecycle, password, and expiry still apply separately. This field is resolved from the same policy as content access; it does not use the requesting editor's public-publishing permission.
+
 
 **View**, the canvas projection every canvas tool echoes:
 

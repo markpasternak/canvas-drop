@@ -25,6 +25,7 @@ export function CanvasDetailChrome({
   isLoading,
   actions,
   badge,
+  audience,
 }: {
   id: string;
   title?: ReactNode;
@@ -36,6 +37,8 @@ export function CanvasDetailChrome({
   actions?: ReactNode;
   /** Optional status pill rendered next to the title (e.g. gallery/template state). */
   badge?: ReactNode;
+  /** Current audience and protection beside the link controls. */
+  audience?: ReactNode;
 }) {
   return (
     <header>
@@ -64,9 +67,7 @@ export function CanvasDetailChrome({
               <span aria-hidden>·</span>
               <span>not live yet — publish to make the URL reachable</span>
             </p>
-          ) : !url ? (
-            <Skeleton className="h-5 w-72" />
-          ) : (
+          ) : !url ? null : (
             <div className="flex min-w-0 items-center gap-1.5">
               <a
                 href={url}
@@ -78,15 +79,16 @@ export function CanvasDetailChrome({
               </a>
               <CopyButton
                 value={url}
-                label="Copy"
+                label="Copy link"
                 toastMessage="Link copied"
-                className="h-7 px-1.5"
+                className="h-8 shrink-0 whitespace-nowrap px-2"
               />
               <IconLink href={url} target="_blank" rel="noreferrer" label="Open live canvas">
                 <ArrowSquareOut size={15} weight="bold" aria-hidden />
               </IconLink>
             </div>
           )}
+          {!isLoading && !draft && audience}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>

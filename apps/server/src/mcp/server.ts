@@ -7,7 +7,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
-import { memberPrincipal } from "../canvas/authorization.js";
+import { memberPrincipal, resolvePublicLinkEnabled } from "../canvas/authorization.js";
 import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
@@ -179,10 +179,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     teamIds?: string[],
   ) {
     const owner = await deps.users.findById(cv.ownerId);
-    return canvasView(deps.config, cv, hasPreview, teamIds, {
-      owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
-      role,
-    });
+    return {
+      ...canvasView(deps.config, cv, hasPreview, teamIds, {
+        owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+        role,
+      }),
+      publicLinkEnabled: await resolvePublicLinkEnabled(deps.canvases, cv, deps.publicLinksEnabled),
+    };
   }
 
   /** The caller as a member principal — identity from the verified token, org

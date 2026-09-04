@@ -57,7 +57,13 @@ async function jsonOf<T>(res: Response): Promise<T> {
 /** Build a management app that authenticates as a chosen user (no gateway needed). */
 function buildApp(
   client: DbClient,
-  actor: { id: string; isAdmin: boolean; canPublishPublic?: boolean; orgIds?: Set<string> },
+  actor: {
+    id: string;
+    isAdmin: boolean;
+    canPublishPublic?: boolean;
+    publicLinksEnabled?: boolean;
+    orgIds?: Set<string>;
+  },
   storage = memStorage(),
   // biome-ignore lint/suspicious/noExplicitAny: optional spy hub for revoke-hook tests
   hub?: any,
@@ -132,7 +138,7 @@ function buildApp(
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
       invites: makeInviteService(client, cfg),
       invitations: invitationsRepository(client),
-      publicLinksEnabled: () => Promise.resolve(true),
+      publicLinksEnabled: () => Promise.resolve(actor.publicLinksEnabled ?? true),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
       screenshots,
       teams: teamsRepository(client),
@@ -159,6 +165,43 @@ describe("managementRoutes", () => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
+  });
+
+  it("reports public availability from the owner and instance policy, including to an editor", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const users = usersRepository(client);
+    await users.setPublishPublic(owner.id, true);
+    await users.setPublishPublic(editor.id, false);
+    const canvases = canvasesRepository(client);
+    const cv = await canvases.create({
+      ownerId: owner.id,
+      slug: "public-policy",
+      apiKeyHash: "hash",
+    });
+    await canvases.updateSettings(cv.id, { access: "public_link" });
+    await canvases.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const get = async (publicLinksEnabled: boolean) => {
+      const app = buildApp(client, {
+        id: editor.id,
+        isAdmin: false,
+        canPublishPublic: false,
+        publicLinksEnabled,
+      });
+      const res = await app.request(`/api/canvases/${cv.id}`);
+      expect(res.status).toBe(200);
+      return jsonOf<{ publicLinkEnabled: boolean }>(res);
+    };
+    expect((await get(true)).publicLinkEnabled).toBe(true);
+    expect((await get(false)).publicLinkEnabled).toBe(false);
+    await users.setPublishPublic(owner.id, false);
+    expect((await get(true)).publicLinkEnabled).toBe(false);
   });
 
   it("lists only sanitized connection authority for a canvas manager", async () => {

@@ -263,6 +263,18 @@ export interface CanvasAccessDeps {
   publicLinksEnabled?: () => Promise<boolean>;
 }
 
+/** Current public-sharing policy for a canvas. Shared by serving, HTTP and MCP
+ * management views; lifecycle, expiry and password remain separate constraints. */
+export async function resolvePublicLinkEnabled(
+  canvases: Pick<CanvasesRepository, "isOwnerPublishEnabled">,
+  canvas: Pick<Canvas, "access" | "ownerId">,
+  publicLinksEnabled?: () => Promise<boolean>,
+): Promise<boolean> {
+  if (canvas.access !== "public_link") return false;
+  const globalEnabled = publicLinksEnabled ? await publicLinksEnabled() : true;
+  return globalEnabled && (await canvases.isOwnerPublishEnabled(canvas.ownerId));
+}
+
 /**
  * Resolve the parts of {@link AccessContext} that need a DB lookup, for a given
  * principal + canvas. The single canonical allowlist check (KTD4) every caller
@@ -300,8 +312,7 @@ export async function resolveAccessContext(
   // deny a canvas whose owner lost the grant, independent of the write-time sweep
   // (defense-in-depth; the two layers together honor §12.0 #3/#5).
   if (canvas?.access === "public_link") {
-    const globalEnabled = opts.publicLinksEnabled ? await opts.publicLinksEnabled() : true;
-    ctx.publicEnabled = globalEnabled && (await canvases.isOwnerPublishEnabled(canvas.ownerId));
+    ctx.publicEnabled = await resolvePublicLinkEnabled(canvases, canvas, opts.publicLinksEnabled);
   }
   // The people-and-teams list (restricted access model): resolved at EVERY rung, for any
   // principal that can be on it — a member (by id) or the canvas's OWN guest (by email).

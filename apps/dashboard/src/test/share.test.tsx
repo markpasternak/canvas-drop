@@ -377,7 +377,7 @@ describe("share route", () => {
     ).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Share link" })).toBeNull();
     expect(screen.getByRole("link", { name: CANVAS.url })).toHaveAttribute("href", CANVAS.url);
-    expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeEnabled();
     expect(document.getElementById("locks")).toHaveTextContent("Protection");
 
     const sectionNames = screen

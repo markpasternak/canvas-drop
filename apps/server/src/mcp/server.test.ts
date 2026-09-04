@@ -85,7 +85,13 @@ async function seedUser(client: DbClient, email: string, isAdmin = false): Promi
  *  toggles the effective preview pipeline (plan 004); the real repo always backs it. */
 async function connect(
   client: DbClient,
-  caller: { userId: string; isAdmin?: boolean; orgIds?: Set<string>; tenancyActive?: boolean },
+  caller: {
+    userId: string;
+    isAdmin?: boolean;
+    orgIds?: Set<string>;
+    tenancyActive?: boolean;
+    publicLinksEnabled?: boolean;
+  },
   screenshotsEnabled = false,
   // Config the MCP server runs under. Defaults to the org-less config; team-grant tests
   // pass a tenancy config so `update_canvas access=team` sees tenancy active (the guard
@@ -165,6 +171,7 @@ async function connect(
       log: silent,
       screenshots: screenshotsRepository(client),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
+      publicLinksEnabled: () => Promise.resolve(caller.publicLinksEnabled ?? true),
     },
     {
       userId: caller.userId,
@@ -261,6 +268,38 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(serialized).toContain("encryption_key_unavailable");
     expect(serialized).not.toContain("authorization");
     expect(serialized).not.toContain("opaque-ciphertext");
+  });
+
+  it("get_canvas and update_canvas report the same public-link availability as HTTP", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: cv.id, zipBase64: zip({ "index.html": "<h1>Public policy</h1>" }) },
+    });
+    const updated = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: cv.id, access: "public_link" },
+      }),
+    );
+    expect(updated.publicLinkEnabled).toBe(true);
+    expect(
+      payload(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))
+        .publicLinkEnabled,
+    ).toBe(true);
+    const paused = await connect(client, { userId, publicLinksEnabled: false });
+    expect(
+      payload(await paused.callTool({ name: "get_canvas", arguments: { id: cv.id } }))
+        .publicLinkEnabled,
+    ).toBe(false);
+    await usersRepository(client).setPublishPublic(userId, false);
+    expect(
+      payload(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))
+        .publicLinkEnabled,
+    ).toBe(false);
   });
 
   it("create_canvas then deploy_canvas succeeds in one session (AE5), no per-canvas key handled", async () => {

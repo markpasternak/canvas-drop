@@ -9,6 +9,7 @@ import {
   ScopeBadge,
 } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
+import { CanvasAudience } from "../components/CanvasAudience.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DeployButton } from "../components/DeployButton.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -162,6 +163,9 @@ export default function CanvasLayout() {
         title={title}
         url={canvas?.status === "active" ? canvas.url : undefined}
         draft={isDraft}
+        audience={
+          canvas && <CanvasAudience canvas={canvas} orgs={me?.orgs} isGuest={me?.isGuest} />
+        }
         isLoading={isLoading}
         actions={actions}
         badge={
