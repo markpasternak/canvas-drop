@@ -1,41 +1,17 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { type Config, MARKETING_ACCENT, rampCssVars, type SkinName } from "@canvas-drop/shared";
+import { type Config, rampCssVars, type SkinName } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
 import { resolveRequest } from "../routing/resolve-request.js";
 import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
+import { LANDING_GALLERY, LANDING_LAYOUT } from "./landing-design.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
-/**
- * Public marketing front door (`/`) for signed-out visitors.
- *
- * Unlike the deliberately-plain legal pages (`/privacy`, `/terms`), this is a
- * designed, multi-section landing page: it introduces canvas-drop, drives
- * sign-in, and links out to docs, the gallery (as a screenshot; the live
- * gallery is gated), the OSS project, and the legal pages. It is self-rendered
- * static HTML with inline CSS + a sliver of vanilla JS (no SPA bundle, no
- * server-side build step) and is served BEFORE the auth gateway by `landingGate`
- * in `app.ts`, but only when the visitor has no session. A signed-in request to
- * `/` still falls through to the dashboard SPA.
- *
- * Visual language derives from the canonical BRAND_TOKENS (Editorial Creator OS):
- * a warm-paper / deep-navy ramp + a single deep-teal accent, authored in OKLCH,
- * via rampCssVars(), the same source the dashboard uses. Screenshots are the
- * committed, regenerable dark assets served at
- * `/docs/assets/landing-*.webp` (refresh with `pnpm landing:screenshots`).
- *
- * Operator-/instance-specific copy is centralized in `SITE` below, the single
- * place a self-hoster edits to re-flavor the page (mirrors `OPERATOR` in
- * `legal-pages.ts`). Everything else is generic to the canvas-drop product.
- */
+/** Public front door with an example gallery and auth-mode-aware sign-in. */
 
 /** Instance-specific copy. A self-hoster edits this one constant to re-flavor. */
 const SITE = {
@@ -49,7 +25,7 @@ const SITE = {
   headline: "Drop it in. Share it out.",
   /** Sub-headline beneath the H1. */
   subhead:
-    "Your team builds working web tools, often with AI, then has nowhere safe to put them. canvas-drop is where they land: paste HTML or drop a folder, get a live URL in seconds, and share it behind your org sign-in, not as a screenshot in a slide deck.",
+    "Give your team’s small web tools a home. Paste HTML or drop a folder, publish a canvas, and share a working link behind your sign-in.",
   /** Open-source project URL. */
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
@@ -122,15 +98,15 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
 const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Deploy in seconds",
-    body: "Paste HTML, drag a folder, upload a ZIP, or curl one to the Deploy API. Connect an AI agent over MCP and it creates, edits, and publishes canvases for you. A canvas is static files: no build to wait on, nothing to provision.",
+    body: "Paste HTML, upload a folder or ZIP, or let your agent publish over MCP. Your static files become a working canvas, without a build pipeline.",
   },
   {
-    title: "Shared exactly as far as you mean",
-    body: "Name people and teams as viewers or editors, then pick who else may open it: Restricted, Whole org, or a Public link. Add a password or an expiry. An editor publishes, rolls back, and changes sharing with you; you stay the owner. Revoke anytime and the next request is refused.",
+    title: "Share with the right people",
+    body: "Start Restricted. Add people and teams, open it to your org, or use a public link when your admin allows it. You choose who can view and who can edit.",
   },
   {
-    title: "Versions you can roll back",
-    body: "Every publish is an immutable version, and the last ten are kept. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current again in one click, or download any version as a ZIP. Saves are checked per file, so two editors never overwrite each other silently.",
+    title: "Keep making it better",
+    body: "Edit a draft while the published canvas stays live. Preview your changes, publish an update, and return to an earlier version whenever you need to.",
   },
 ];
 
@@ -150,77 +126,6 @@ const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?:
     rung: "Public link",
     who: "Anyone with the URL. Static files only; admins can switch it off instance-wide or per account.",
     tag: "admin",
-  },
-];
-
-/** Product-tour carousel slides → committed light screenshots at /docs/assets.
- *  Refresh with `pnpm landing:screenshots` (after `pnpm seed:canvases`). */
-const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
-  {
-    img: "landing-dashboard",
-    label: "Your dashboard",
-    caption:
-      "Every canvas you own or edit. Search by title, description, tag, or slug; filter by access, status, or role; and see the current version and sharing at a glance.",
-  },
-  {
-    img: "tour-editor",
-    label: "In-browser editor",
-    caption:
-      "Edit files with autosave, preview the draft, and publish a new version. No local setup, no deploy pipeline.",
-  },
-  {
-    img: "tour-shared",
-    label: "Shared with you",
-    caption:
-      "Canvases other people opened to you, directly or through a team or the whole org. Search, sort by owner or last update, and open the right one fast.",
-  },
-  {
-    img: "landing-gallery",
-    label: "Opt-in gallery",
-    caption:
-      "Browse public canvases and the org-wide ones their owners chose to list. Search, filter by tag, and start from any one marked as a template. Admins can feature their picks.",
-  },
-  {
-    img: "tour-preview",
-    label: "Preview covers",
-    caption:
-      "Choose each canvas's cover: an automatic screenshot on publish where your instance has capture switched on, none, or an image you upload that survives every publish.",
-  },
-  {
-    img: "tour-sharing",
-    label: "Share link & access",
-    caption:
-      "Copy the live URL, choose who else can open it — Restricted, Whole org, or Public link — and add a password or an expiry. People and teams you add always get in.",
-  },
-  {
-    img: "tour-people",
-    label: "People & editors",
-    caption:
-      "One people list per canvas. Add a person or a team as a viewer or an editor. Editors run the canvas with you, and the owner can hand it to any editor from the same list.",
-  },
-  {
-    img: "tour-teams",
-    label: "Teams & invites",
-    caption:
-      "Make a team once and grant it on any canvas. Add people by email before they have ever signed in; they're in the moment they first sign in through your org's auth, with no password for you to manage.",
-  },
-  {
-    img: "tour-capabilities",
-    label: "Backend in a click",
-    caption:
-      "The backend is off until you switch it on. Then add data, files, AI, identity, realtime, or controlled third-party requests through admin-granted Connections.",
-  },
-  {
-    img: "tour-admin",
-    label: "Admin & control",
-    caption:
-      "Set AI quotas, manage members, disable a canvas with a stated reason, and choose who may publish public links.",
-  },
-  {
-    img: "tour-usage",
-    label: "Usage insight",
-    caption:
-      "Views, unique viewers, and a 30-day trend for every canvas, plus KV, file, AI, and realtime usage once the backend is on.",
   },
 ];
 
@@ -360,320 +265,22 @@ ${rampCssVars("light", "  ")}
   /* Display face defaults to the editorial serif; a [data-skin] re-voices it. */
   --font-display: var(--font-serif);
   --radius-scale: 1;
-  --amber: ${MARKETING_ACCENT.light.amber};
-  --amber-ink: ${MARKETING_ACCENT.light["amber-ink"]};
-  --shadow-color: 40 30% 38%;
-  --shadow-panel: 0 1px 2px hsl(var(--shadow-color)/0.05), 0 8px 22px hsl(var(--shadow-color)/0.09);
-  --shadow-lg: 0 24px 56px hsl(var(--shadow-color)/0.18), 0 8px 18px hsl(var(--shadow-color)/0.12);
-  --ink: oklch(0.16 0.008 266);
-  --ink-2: oklch(0.205 0.011 266);
-  --on-ink: oklch(0.97 0.003 266);
-  --on-ink-muted: oklch(0.74 0.012 266);
-  --on-ink-border: oklch(1 0 0 / 0.1);
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --maxw: 72rem;
+
 }
 @media (prefers-color-scheme: dark) {
   :root {
 ${rampCssVars("dark", "    ")}
-    --shadow-color: 265 50% 1%;
-    --ink: oklch(0.115 0.006 266);
-    --ink-2: oklch(0.16 0.008 266);
-    --amber: ${MARKETING_ACCENT.dark.amber};
-    --amber-ink: ${MARKETING_ACCENT.dark["amber-ink"]};
+
   }
 }
-/* Non-default skins re-voice the marketing accent: any [data-skin] remaps the
-   landing's --amber family to the active skin accent, so the hero and the rest
-   of the page follow the admin-chosen skin. Editorial stamps no data-skin and
-   keeps its signature amber. */
-:root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
-body {
-  margin: 0;
-  background: var(--canvas);
-  color: var(--fg);
-  font: 16px/1.6 "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-a { color: inherit; text-decoration: none; }
-.wrap { width: min(100%, var(--maxw)); margin-inline: auto; padding-inline: clamp(1.25rem, 5vw, 2.5rem); }
-.mono { font-family: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace; }
-.serif { font-family: var(--font-display); font-optical-sizing: auto; }
-
-/* --- top bar --- */
-header {
-  position: sticky; top: 0; z-index: 20;
-  background: color-mix(in oklab, var(--ink) 78%, transparent);
-  backdrop-filter: saturate(1.4) blur(12px);
-  border-bottom: 1px solid var(--on-ink-border);
-}
-.nav { display: flex; align-items: center; gap: 1rem; height: 4rem; }
-.brand { display: flex; align-items: center; gap: .55rem; font-weight: 650; letter-spacing: -.012em; color: var(--on-ink); }
-.brand .mark { width: 1.65rem; height: 1.65rem; }
-.brand--ink { --logo-frame: var(--on-ink); --logo-drop: oklch(0.78 0.11 195); }
-.nav .spacer { flex: 1; }
-.nav-links { display: flex; align-items: center; gap: .35rem; }
-.nav a.link { color: var(--on-ink-muted); padding: .45rem .7rem; border-radius: .5rem; font-size: .92rem; transition: color .15s var(--ease), background .15s var(--ease); }
-.nav a.link:hover { color: var(--on-ink); background: oklch(1 0 0 / 0.06); }
-@media (max-width: 640px) { .nav a.link.hide-sm { display: none; } }
-
-/* --- buttons --- */
-.btn {
-  display: inline-flex; align-items: center; gap: .5rem;
-  padding: .62rem 1.05rem; border-radius: .625rem;
-  font-weight: 560; font-size: .94rem; letter-spacing: -.005em;
-  border: 1px solid transparent; cursor: pointer;
-  transition: transform .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease), box-shadow .15s var(--ease);
-}
-.btn-primary { background: var(--amber); color: oklch(0.25 0.08 60); box-shadow: 0 1px 0 oklch(1 0 0 / 0.25) inset, 0 8px 24px oklch(0.18 0.06 220 / 0.35); }
-.btn-primary:hover { background: oklch(0.83 0.14 75); transform: translateY(-1px); }
-.btn-ghost { background: oklch(1 0 0 / 0.04); color: var(--on-ink); border-color: var(--on-ink-border); }
-.btn-ghost:hover { background: oklch(1 0 0 / 0.09); transform: translateY(-1px); }
-.btn-outline { background: transparent; color: var(--fg); border-color: var(--border); }
-.btn-outline:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
-.btn svg { width: 1.05em; height: 1.05em; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: .25rem; }
-
-/* hero: drenched teal→navy "Committed" band with a warm amber glow */
-.hero {
-  position: relative; overflow: hidden;
-  background:
-    radial-gradient(90% 120% at 82% -12%, oklch(0.78 0.15 72 / 0.42), transparent 46%),
-    radial-gradient(80% 120% at 10% 6%, oklch(0.55 0.12 196 / 0.55), transparent 52%),
-    linear-gradient(160deg, oklch(0.32 0.095 205) 0%, oklch(0.21 0.075 212) 55%, oklch(0.15 0.05 222) 100%);
-  color: var(--on-ink);
-  border-bottom: 1px solid var(--on-ink-border);
-}
-.hero::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background-image: linear-gradient(var(--on-ink-border) 1px, transparent 1px), linear-gradient(90deg, var(--on-ink-border) 1px, transparent 1px);
-  background-size: 56px 56px;
-  -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 72%);
-  mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 72%);
-  opacity: .5;
-}
-.hero-inner { position: relative; padding-block: clamp(0.75rem, 2vw, 1.5rem) clamp(1.25rem, 2.5vw, 2rem); }
-.eyebrow {
-  display: inline-flex; align-items: center; gap: .5rem;
-  font-size: .8rem; letter-spacing: .16em; text-transform: uppercase; color: var(--amber); font-weight: 600;
-  border: 1px solid oklch(0.78 0.15 72 / 0.32); border-radius: 100px; padding: .3rem .75rem;
-  background: oklch(0.78 0.15 72 / 0.08);
-}
-.eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: var(--amber); box-shadow: 0 0 0 4px oklch(0.78 0.15 72 / 0.22); }
-h1 {
-  margin: 1.1rem 0 0; max-width: 15ch;
-  font-family: var(--font-display); font-optical-sizing: auto;
-  font-size: clamp(2.7rem, 7vw, 4.8rem); line-height: 1.0; letter-spacing: -.02em; font-weight: 460;
-}
-h1 .accent { font-style: italic; color: var(--amber); }
-.lede { margin: 1.4rem 0 0; max-width: 48ch; font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.06rem, 2.2vw, 1.3rem); line-height: 1.5; color: oklch(0.88 0.025 205); }
-.cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
-.cue { margin-top: 1rem; font-size: .85rem; color: var(--on-ink-muted); }
-.cue .mono { color: var(--on-ink); }
-
-/* --- section scaffolding --- */
-section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
-.kicker { font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; color: var(--amber-ink); font-weight: 600; }
-.s-head { max-width: 34ch; margin: .7rem 0 0; font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.06; letter-spacing: -.015em; font-weight: 440; }
-.s-sub { max-width: 52ch; margin: .9rem 0 0; color: var(--muted); font-size: 1.05rem; }
-.skins-figure { margin: clamp(1.5rem, 3.5vw, 2.25rem) 0 0; border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-lg); }
-.skins-figure img { display: block; width: 100%; height: auto; }
-
-/* value band: editorial cards with a coloured top-rule + big serif numeral */
-.values { display: grid; gap: clamp(1.25rem, 3vw, 1.75rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
-@media (max-width: 800px) { .values { grid-template-columns: 1fr; } }
-.value { position: relative; padding: 1.7rem 1.5rem 1.5rem; border: 1px solid var(--border); border-radius: .875rem; background: var(--surface); overflow: hidden; }
-.value::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; }
-.value:nth-child(1)::before { background: var(--accent); }
-.value:nth-child(2)::before { background: var(--amber); }
-.value:nth-child(3)::before { background: oklch(0.6 0.16 168); }
-.value h3 { margin: .5rem 0; font-family: var(--font-serif); font-weight: 500; font-size: 1.35rem; letter-spacing: -.01em; }
-.value .num { font-family: var(--font-serif); font-weight: 500; font-size: 2.3rem; line-height: 1; }
-.value:nth-child(1) .num { color: var(--accent); }
-.value:nth-child(2) .num { color: var(--amber-ink); }
-.value:nth-child(3) .num { color: oklch(0.5 0.14 168); }
-.value p { margin: .25rem 0 0; color: var(--muted); }
-
-/* sharing ladder: the access model as an editorial list, the people-and-teams entry accented */
-.ladder { display: grid; gap: .55rem; max-width: 62ch; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
-.rung { display: grid; grid-template-columns: 1.6rem 1fr; gap: 1rem; align-items: start; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); }
-.rung .r-step { font-family: var(--font-serif); font-weight: 500; font-size: 1.5rem; line-height: 1.1; color: var(--muted); text-align: right; }
-.rung .r-name { font-family: var(--font-serif); font-weight: 500; font-size: 1.2rem; letter-spacing: -.01em; }
-.rung .r-who { margin: .15rem 0 0; color: var(--muted); font-size: .98rem; }
-.rung.feature { border-color: var(--amber); background: color-mix(in oklab, var(--amber) 7%, var(--surface)); box-shadow: 0 0 0 1px var(--amber) inset; }
-.rung.feature .r-step { color: var(--amber-ink); }
-.r-tag { display: inline-block; margin-left: .55rem; font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--amber-ink); border: 1px solid var(--amber); border-radius: 100px; padding: .12rem .5rem; vertical-align: middle; }
-.ladder-note { max-width: 62ch; margin: 1.25rem 0 0; color: var(--muted); font-size: .98rem; line-height: 1.55; }
-.ladder-note strong { color: var(--fg); font-weight: 600; }
-
-/* primitives showcase */
-.prims { display: grid; gap: 1px; grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
-@media (max-width: 900px) { .prims { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 520px) { .prims { grid-template-columns: 1fr; } }
-.prim { background: var(--surface); padding: 1.5rem 1.35rem; transition: background .15s var(--ease), transform .15s var(--ease); }
-.prim:hover { background: var(--surface-sunken); }
-.prim .ic { width: 2.1rem; height: 2.1rem; display: grid; place-items: center; border-radius: .55rem; border: 1px solid var(--border); color: var(--accent); margin-bottom: .9rem; }
-.prim .ic svg { width: 1.15rem; height: 1.15rem; }
-.prim h4 { margin: 0; font-family: var(--font-serif); font-weight: 500; font-size: 1.08rem; letter-spacing: -.01em; }
-.prim .tag { font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: .72rem; padding: .1rem .4rem; border-radius: 6px; vertical-align: .08em; }
-.prim p { margin: .5rem 0 0; font-size: .9rem; color: var(--muted); line-height: 1.5; }
-/* per-primitive colour tints: expressive editorial pop, no indigo */
-.p-kv .ic, .p-kv .tag { color: oklch(0.45 0.10 200); }
-.p-kv .tag { background: oklch(0.93 0.05 197); }
-.p-files .ic, .p-files .tag { color: oklch(0.48 0.15 65); }
-.p-files .tag { background: oklch(0.95 0.06 75); }
-.p-ai .ic, .p-ai .tag { color: oklch(0.45 0.15 168); }
-.p-ai .tag { background: oklch(0.94 0.05 168); }
-.p-identity .ic, .p-identity .tag { color: oklch(0.48 0.17 350); }
-.p-identity .tag { background: oklch(0.95 0.05 350); }
-.p-realtime .ic, .p-realtime .tag { color: oklch(0.46 0.16 240); }
-.p-realtime .tag { background: oklch(0.94 0.05 240); }
-.p-connections .ic, .p-connections .tag { color: oklch(0.45 0.14 115); }
-.p-connections .tag { background: oklch(0.95 0.05 115); }
-.p-authoring .ic, .p-authoring .tag { color: oklch(0.48 0.14 28); }
-.p-authoring .tag { background: oklch(0.95 0.05 28); }
-.p-authoring { grid-column: 1 / -1; }
-@media (prefers-color-scheme: dark) {
-  .p-kv .tag, .p-files .tag, .p-ai .tag, .p-identity .tag, .p-realtime .tag, .p-connections .tag, .p-authoring .tag { background: oklch(1 0 0 / 0.06); }
-}
-
-/* framed screenshot (carousel slides) */
-.shot { border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-panel); background: var(--surface); }
-.shot img { display: block; width: 100%; height: auto; }
-
-/* open-source CTA: drenched teal→navy closing band with an amber glow + CTA */
-.oss {
-  position: relative; overflow: hidden; color: var(--on-ink);
-  background:
-    radial-gradient(80% 140% at 85% 8%, oklch(0.78 0.15 72 / 0.34), transparent 50%),
-    linear-gradient(150deg, oklch(0.33 0.095 205), oklch(0.17 0.06 220));
-  border-block: 1px solid var(--on-ink-border);
-}
-.oss .wrap { position: relative; text-align: center; }
-.oss .kicker { color: var(--amber); }
-.oss .s-head { margin-inline: auto; max-width: 22ch; }
-.oss .s-head em { font-style: italic; color: var(--amber); }
-.oss .s-sub { margin-inline: auto; color: oklch(0.88 0.025 205); }
-.oss .cta-row { justify-content: center; }
-.oss a { color: var(--amber); }
-
-/* footer */
-footer { background: var(--surface); border-top: 1px solid var(--border); padding-block: 3rem; }
-.foot { display: flex; flex-wrap: wrap; gap: 1.5rem 2.5rem; align-items: center; }
-.foot .spacer { flex: 1; }
-.foot-links { display: flex; flex-wrap: wrap; gap: .35rem 1.25rem; }
-.foot-links a { color: var(--muted); font-size: .92rem; transition: color .15s var(--ease); }
-.foot-links a:hover { color: var(--fg); }
-.colophon { width: 100%; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: .82rem; }
-
-/* product tour carousel: Embla (embla-carousel + autoplay), bundled at
-   /docs/assets/landing-carousel.js. Embla translates the container; viewport just
-   clips. JS (the bundle) wires the arrows/dots/autoplay. */
-.carousel { position: relative; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
-.viewport { overflow: hidden; }
-.embla-container { display: flex; touch-action: pan-y pinch-zoom; }
-/* Each slide is exactly the viewport width. margin:0 resets the UA default figure
-   margin-inline (40px), which would otherwise offset the slide. */
-.slide { flex: 0 0 100%; min-width: 0; margin: 0; }
-.slide .shot { box-shadow: var(--shadow-lg); }
-.slide figcaption { margin: 1.1rem auto 0; max-width: 54ch; text-align: center; color: var(--muted); font-size: 1.02rem; }
-.slide figcaption strong { color: var(--fg); font-weight: 600; }
-.car-btn {
-  position: absolute; top: calc(50% - 2.5rem); transform: translateY(-50%);
-  display: grid; place-items: center; width: 2.6rem; height: 2.6rem;
-  border-radius: 100px; border: 1px solid var(--border); background: var(--surface);
-  color: var(--fg); cursor: pointer; box-shadow: var(--shadow-panel);
-  transition: background .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease);
-}
-.car-btn:hover { border-color: var(--accent); color: var(--accent); }
-.car-btn:active { transform: translateY(-50%) scale(.94); }
-.car-btn svg { width: 1.2rem; height: 1.2rem; }
-.car-prev { left: -.6rem; }
-.car-next { right: -.6rem; }
-@media (max-width: 760px) { .car-btn { display: none; } }
-.dots { display: flex; gap: .5rem; justify-content: center; margin-top: 1.4rem; }
-.dot {
-  width: .5rem; height: .5rem; padding: 0; border: 0; border-radius: 100px;
-  background: var(--border); cursor: pointer; transition: background .2s var(--ease), width .2s var(--ease);
-}
-.dot[aria-current="true"] { background: var(--accent); width: 1.5rem; }
-
-/* feature grids (Built for teams / Restricted by default) */
-.feats { display: grid; grid-template-columns: repeat(2, 1fr); gap: clamp(1.25rem, 3vw, 2.25rem); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
-@media (max-width: 720px) { .feats { grid-template-columns: 1fr; } }
-.feat { border-top: 1px solid var(--border); padding-top: 1rem; }
-.feat h3 { margin: 0 0 .35rem; display: flex; align-items: flex-start; gap: .55rem; font-size: 1.05rem; letter-spacing: -.01em; }
-.feat h3 svg { width: 1.05rem; height: 1.05rem; flex: 0 0 auto; margin-top: .15rem; color: var(--accent); }
-.feat p { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.55; }
-
-/* dark band (Restricted by default): reuse the hero ink + on-ink tokens */
-.band-dark { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-top: 1px solid var(--on-ink-border); }
-.band-dark .s-sub { color: var(--on-ink-muted); }
-.band-dark .kicker { color: var(--amber); }
-.band-dark .feat { border-top-color: var(--on-ink-border); }
-.band-dark .feat h3 { color: var(--on-ink); }
-.band-dark .feat h3 svg { color: var(--amber); }
-.band-dark .feat p { color: var(--on-ink-muted); }
-.band-dark a { color: var(--amber); }
-
-/* --- entrance + scroll reveal --- */
-.reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
-.reveal.in { opacity: 1; transform: none; }
-.hero [data-stagger] { opacity: 0; transform: translateY(14px); animation: rise .7s var(--ease) forwards; }
-.hero [data-stagger="1"] { animation-delay: .05s; }
-.hero [data-stagger="2"] { animation-delay: .14s; }
-.hero [data-stagger="3"] { animation-delay: .23s; }
-.hero [data-stagger="4"] { animation-delay: .32s; }
-.hero [data-stagger="5"] { animation-delay: .44s; }
-@keyframes rise { to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  html, .viewport { scroll-behavior: auto; }
-  .reveal, .hero [data-stagger] { opacity: 1; transform: none; animation: none; transition: none; }
-}
+${LANDING_LAYOUT}
 `;
 
-const check = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 13 4 4L19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const ghIcon = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.1.63-1.35-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>`;
 const arrow = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-const arrowLeft = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-// The screenshot assets are served with a 1-day cache under a STABLE filename, so a
-// refreshed shot (e.g. `pnpm landing:screenshots`) would otherwise stay stale in
-// browser/CDN caches for up to a day. Append a short content hash so a changed image
-// busts caches immediately while an unchanged one keeps caching. Resolved from the same
-// committed dir the docs route serves (apps/server/src|dist/http → ../../../.. = repo root).
-const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../..", "docs/site/assets");
-const assetVerCache = new Map<string, string>();
-function assetSrc(img: string): string {
-  let ver = assetVerCache.get(img);
-  if (ver === undefined) {
-    try {
-      ver = createHash("sha256")
-        .update(readFileSync(join(ASSETS_DIR, `${img}.webp`)))
-        .digest("hex")
-        .slice(0, 8);
-    } catch {
-      ver = ""; // asset unreadable (shouldn't happen in a real deploy) → no cache-bust
-    }
-    assetVerCache.set(img, ver);
-  }
-  return ver ? `/docs/assets/${img}.webp?v=${ver}` : `/docs/assets/${img}.webp`;
-}
-
-/** One carousel slide: a framed dark screenshot + a caption. */
-function tourSlide(t: (typeof TOUR)[number]): string {
-  return `<figure class="slide">
-  <div class="shot"><img src="${assetSrc(t.img)}" width="1440" height="900" alt="${escapeHtml(`${t.label}. ${t.caption}`)}" loading="lazy" decoding="async"></div>
-  <figcaption><strong>${escapeHtml(t.label)}.</strong> ${escapeHtml(t.caption)}</figcaption>
-</figure>`;
-}
-
-/** One feature item (check glyph + title + blurb) for the Teams / Privacy grids. */
+/** Details keep the main story short while preserving capability information. */
 function featItem(f: { title: string; body: string }): string {
-  return `<div class="feat"><h3>${check}${escapeHtml(f.title)}</h3><p>${escapeHtml(f.body)}</p></div>`;
+  return `<details class="feat"><summary>${escapeHtml(f.title)}</summary><p>${escapeHtml(f.body)}</p></details>`;
 }
 
 /** One rung of the sharing-ladder marketing visual. */
@@ -717,7 +324,7 @@ export function renderLandingPage(
 
   const values = VALUES.map(
     (v, i) =>
-      `<div class="value reveal"><span class="num">0${i + 1}</span><h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.body)}</p></div>`,
+      `<div class="value"><span class="num">0${i + 1}</span><h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.body)}</p></div>`,
   ).join("\n");
 
   // editorial is the attribute-free base (matches the SPA's applySkin, which removes the
@@ -732,165 +339,43 @@ ${head(origin)}
 <body>
 <header>
   <div class="wrap nav">
-    <a class="brand brand--ink" href="/">${BRAND_MARK}<span>${escapeHtml(SITE.name)}</span></a>
-    <span class="spacer"></span>
-    <nav class="nav-links" aria-label="Primary">
-      <a class="link hide-sm" href="/docs">Docs</a>
-      <a class="link hide-sm" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a class="btn btn-ghost" href="${cta.href}">${cta.short}</a>
-    </nav>
+    <a class="brand" href="/">${BRAND_MARK}<span>${escapeHtml(SITE.name)}</span></a><span class="spacer"></span>
+    <nav class="nav-links" aria-label="Primary"><a class="link" href="/docs">Docs</a><a class="link hide-sm" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a><a class="btn btn-ghost" href="${cta.href}">${cta.short}</a></nav>
   </div>
 </header>
-
 <main>
-  <section class="hero">
+  <section class="hero" aria-label="Introducing canvas-drop">
     <div class="wrap hero-inner">
-      <span class="eyebrow" data-stagger="1"><span class="dot"></span>${escapeHtml(SITE.eyebrow)}</span>
-      <h1 data-stagger="2">Drop it in.<br><span class="accent">Share it out.</span></h1>
-      <p class="lede" data-stagger="3">${escapeHtml(SITE.subhead)}</p>
-      <div class="cta-row" data-stagger="4">
-        <a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a>
-        <a class="btn btn-ghost" href="/docs">Read the docs</a>
+      <div class="hero-copy">
+        <span class="eyebrow">${escapeHtml(SITE.eyebrow)}</span>
+        <h1>Drop it in.<br><span class="accent">Share it out.</span></h1>
       </div>
-      <p class="cue" data-stagger="4">Connect your agent over <span class="mono">MCP</span>, or <span class="mono">curl</span> a ZIP straight to a live URL.</p>
-    </div>
-  </section>
-
-  <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
-    <div class="wrap">
-      <p class="kicker reveal">A guided tour</p>
-      <h2 class="s-head reveal">The whole workflow, screen by screen.</h2>
-      <p class="s-sub reveal">Create, edit, share, govern. Every surface of canvas-drop, from the first paste to the admin console.</p>
-      <div class="carousel reveal" data-embla aria-roledescription="carousel" aria-label="Product tour">
-        <div class="viewport" data-embla-viewport>
-          <div class="embla-container">
-${TOUR.map(tourSlide).join("\n")}
-          </div>
-        </div>
-        <button class="car-btn car-prev" type="button" data-embla-prev aria-label="Previous screen">${arrowLeft}</button>
-        <button class="car-btn car-next" type="button" data-embla-next aria-label="Next screen">${arrow}</button>
-        <div class="dots" role="tablist" aria-label="Choose screen">
-${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" data-embla-dot aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}
-        </div>
+      <div class="hero-description">
+        <p class="lede">${escapeHtml(SITE.subhead)}</p>
+        <div class="cta-row"><a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a><a class="btn btn-ghost" href="#how-it-works">How it works</a></div>
+        <p class="cue">Built with AI or by hand. <a href="/docs">Connect your agent over MCP.</a></p>
       </div>
     </div>
   </section>
-
-  <section>
-    <div class="wrap">
-      <p class="kicker reveal">Why canvas-drop</p>
-      <h2 class="s-head reveal">From “I built a thing” to “the team is using it,” without a deploy pipeline.</h2>
-      <div class="values">
-${values}
-      </div>
+  ${LANDING_GALLERY}
+  <section class="section" id="how-it-works" aria-label="From files to a shared canvas"><div class="wrap values">${values}</div></section>
+  <section class="section section-tint">
+    <div class="wrap split">
+      <div><p class="kicker">Sharing</p><h2 class="s-head">A working link.<br>The right people.</h2><p class="s-sub">An access ladder that fits how people actually share. The people and teams you name always get in. General access says who else does.</p><p class="ladder-note"><strong>Add people by email</strong>, even before their first sign-in. They enter through your instance’s auth: no app-managed passwords, no magic-link accounts. Inviting someone from outside your domain follows your admin’s policy.</p></div>
+      <div class="ladder">${LADDER.map(ladderRung).join("\n")}</div>
     </div>
   </section>
-
-  <section>
-    <div class="wrap">
-      <p class="kicker reveal">Sharing</p>
-      <h2 class="s-head reveal">An access ladder that fits how people actually share.</h2>
-      <p class="s-sub reveal">Two controls, the way you already share documents: the people and teams you name always get in, and General access says who else does — from nobody to anyone with the link. Teams you create once can be granted anywhere.</p>
-      <div class="ladder reveal">
-${LADDER.map(ladderRung).join("\n")}
-      </div>
-      <p class="ladder-note reveal"><strong>Add people by email</strong>, before they have ever signed in. They're in the moment they sign in through your instance's auth: <strong>no app-managed passwords, no magic-link accounts</strong>. Anyone can add a colleague in your domain; inviting someone from outside it is an admin's call, or a policy admins can hand to members. Personal teams need no org setup at all.</p>
-    </div>
+  <section class="section">
+    <div class="wrap"><p class="kicker">Six primitives + authoring</p><h2 class="s-head">Start with a page.<br>Give it superpowers.</h2><p class="s-sub">Static files first, with no server build. Six runtime primitives add data, files, AI, identity, realtime, and controlled access to third-party APIs through admin-granted Connections. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Secrets stay server-side.</p><div class="prims">${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}</div></div>
   </section>
-
-  <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
-    <div class="wrap">
-      <p class="kicker reveal">Six primitives + authoring</p>
-      <h2 class="s-head reveal">Static files first. A backend when you ask for one.</h2>
-      <p class="s-sub reveal">A canvas ships as static files, with no server build. Six runtime primitives add data, files, AI, identity, realtime, and controlled access to third-party APIs. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Every capability is enforced on each request. Secrets stay server-side, always.</p>
-      <div class="prims reveal">
-${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <p class="kicker reveal">Built for teams</p>
-      <h2 class="s-head reveal">Control, without the overhead.</h2>
-      <p class="s-sub reveal">Built for a whole org from the first sign-in: who gets in, who can publish where, what AI may cost, and a record of what changed.</p>
-      <div class="feats reveal">
-${TEAM.map(featItem).join("\n")}
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <p class="kicker reveal">Make it yours</p>
-      <h2 class="s-head reveal">Same app, your look.</h2>
-      <p class="s-sub reveal">Pick one of four design skins in the admin console and the whole instance re-voices its accent colour, display type, and corner radius: dashboard, editor, and this page. No restart, no code.</p>
-      <figure class="skins-figure reveal">
-        <img src="${assetSrc("landing-skins")}" width="2320" height="824" alt="The same canvas-drop dashboard shown in two design skins side by side: Editorial (deep-teal serif) and Canvas (violet, bold). Shows the admin-flippable skin layer." loading="lazy" decoding="async">
-      </figure>
-    </div>
-  </section>
-
-  <section class="band-dark">
-    <div class="wrap">
-      <p class="kicker reveal">Restricted by default</p>
-      <h2 class="s-head reveal">Your tools, your data, your infrastructure.</h2>
-      <p class="s-sub reveal">Privacy is the default posture, not a setting. canvas-drop keeps what it needs to run and reports to no one.</p>
-      <div class="feats reveal">
-${PRIVACY.map(featItem).join("\n")}
-      </div>
-      <p class="s-sub reveal" style="margin-top:1.75rem">Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>.</p>
-    </div>
-  </section>
-
-  <section class="oss">
-    <div class="wrap">
-      <p class="kicker reveal">Open source</p>
-      <h2 class="s-head reveal">Yours to run. <em>MIT-licensed</em>, self-hostable.</h2>
-      <p class="s-sub reveal">canvas-drop is open source and self-contained: your database, your storage, your sign-in. SQLite or Postgres, local disk or S3, path or subdomain URLs, each a config change. A Docker image and compose file are included. Host it on one VPS or bring your own cloud.</p>
-      <div class="cta-row reveal">
-        <a class="btn btn-ghost" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a>
-        <a class="btn btn-ghost" href="/docs">Self-host guide ${arrow}</a>
-      </div>
+  <section class="section section-tint">
+    <div class="wrap split">
+      <div><p class="kicker">Built for teams</p><h2 class="s-head">A small tool.<br>A proper home.</h2><p class="s-sub">Your sign-in, your workspace, your rules. Give colleagues room to build, with the controls your organization needs.</p><div class="feats">${TEAM.map(featItem).join("\n")}</div></div>
+      <div><p class="kicker">Restricted by default</p><h2 class="s-head">Yours to run.<br>Yours to trust.</h2><p class="s-sub">Open source under the MIT license. Self-host with Docker on a VPS or your own cloud. SQLite or Postgres, local disk or S3: each a config change.</p><div class="feats">${PRIVACY.map(featItem).join("\n")}</div><div class="cta-row"><a class="btn btn-outline" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a><a class="btn btn-outline" href="/docs">Self-host guide ${arrow}</a></div></div>
     </div>
   </section>
 </main>
-
-<footer>
-  <div class="wrap">
-    <div class="foot">
-      <a class="brand" style="color:var(--fg)" href="/">${BRAND_MARK}<span>${escapeHtml(SITE.name)}</span></a>
-      <span class="spacer"></span>
-      <nav class="foot-links" aria-label="Footer">
-        <a href="/docs">Docs</a>
-        <a href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="/terms">Terms</a>
-        <a href="/privacy">Privacy</a>
-        <a href="${cta.href}">${cta.short}</a>
-      </nav>
-    </div>
-    <div class="colophon">${escapeHtml(SITE.name)} is where your organization's small web tools, AI-built or hand-built, get deployed and shared. Inspired by Shopify's Quick, not affiliated with Shopify. Open source under the MIT license.</div>
-  </div>
-</footer>
-
-<script>
-var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-// Scroll-reveal (skipped entirely under reduced-motion).
-(function () {
-  if (REDUCE) {
-    document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
-    return;
-  }
-  var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (e) {
-      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
-    });
-  }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
-  document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
-})();
-</script>
-<!-- Product-tour carousel: Embla + autoplay (bundled, served same-origin). -->
-<script src="/docs/assets/landing-carousel.js" defer></script>
+<footer><div class="wrap"><div class="foot"><a class="brand" href="/">${BRAND_MARK}<span>${escapeHtml(SITE.name)}</span></a><span class="spacer"></span><nav class="foot-links" aria-label="Footer"><a href="/docs">Docs</a><a href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></nav></div><div class="colophon">Small web tools, built by your team. Open source under the MIT license. Inspired by Shopify's Quick; not affiliated with Shopify.</div></div></footer>
 </body>
 </html>`;
 }
@@ -946,7 +431,7 @@ export function landingResponse(
   const headers = new Headers();
   baseSecurityHeaders(headers);
   headers.set("Content-Type", "text/html; charset=utf-8");
-  // Inline <style> + one inline <script> for the scroll-reveal; lock down framing.
+  // Inline styles and JSON-LD; no client script needed for the gallery preview.
   headers.set(
     "Content-Security-Policy",
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",

@@ -49,8 +49,9 @@ One teal-accent primary CTA per surface (`DetailPanel.primaryClass` = `bg-accent
 shared **concept-colors** map + `Badge`/`StatusBadge`, never colour alone (pair with a
 dot/icon/label). Slop tells to avoid (DESIGN §"Patterns to avoid"): side-stripe accent
 borders, gradient text, indigo-violet, per-section tracked eyebrows, identical card grids.
-Colour energy belongs in canvas covers + the marketing "Committed" treatment (the landing
-hero: teal→navy + the amber second accent), not the app chrome.
+Colour energy belongs in canvas covers and content. Since the September 2026
+publishing-experience round, the homepage leads with the example Gallery and uses the
+active skin's accent on neutral surfaces, replacing its separate gradient/amber hero.
 
 ## Server-rendered pages share the brand layer
 
