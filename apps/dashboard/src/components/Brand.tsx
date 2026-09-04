@@ -17,7 +17,7 @@ export function BrandMark({
   // bundle @canvas-drop/shared) — keep these paths in sync when the mark changes.
   return (
     <svg
-      viewBox="158 209 372 432"
+      viewBox="0 0 32 32"
       fill="none"
       role={decorative ? undefined : "img"}
       aria-hidden={decorative ? true : undefined}
@@ -25,49 +25,23 @@ export function BrandMark({
       {...props}
     >
       <title>{title}</title>
-      {/* frame — the drop container */}
-      <path
-        d="M245 335H218C191.49 335 170 356.49 170 383V581C170 607.51 191.49 629 218 629H470C496.51 629 518 607.51 518 581V383C518 356.49 496.51 335 470 335H443"
-        stroke="var(--logo-frame, var(--fg))"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="24"
-      />
-      {/* download arrow */}
-      <path
-        d="M344 222V392"
-        stroke="var(--logo-drop, var(--accent))"
-        strokeLinecap="round"
-        strokeWidth="27"
-      />
-      <path
-        d="M291 349L344 402L397 349"
-        stroke="var(--logo-drop, var(--accent))"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="27"
-      />
-      {/* code </> */}
-      <path
-        d="M286 462L241 507L286 552"
-        stroke="var(--logo-drop, var(--accent))"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="25"
-      />
-      <path
-        d="M402 462L447 507L402 552"
-        stroke="var(--logo-drop, var(--accent))"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="25"
-      />
-      <path
-        d="M366 452L326 566"
-        stroke="var(--logo-drop, var(--accent))"
-        strokeLinecap="round"
-        strokeWidth="20"
-      />
+      <g strokeLinecap="round" strokeLinejoin="round">
+        <path
+          d="M9 10H7a3 3 0 0 0-3 3v13a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3V13a3 3 0 0 0-3-3h-2"
+          stroke="var(--logo-frame, var(--fg))"
+          strokeWidth="2"
+        />
+        <path
+          d="M16 2v12m-5-5 5 5 5-5"
+          stroke="var(--logo-drop, var(--accent))"
+          strokeWidth="2.5"
+        />
+        <path
+          d="M11 20l-3 3 3 3m10-6 3 3-3 3m-3-7-4 8"
+          stroke="var(--logo-drop, var(--accent))"
+          strokeWidth="1.75"
+        />
+      </g>
     </svg>
   );
 }

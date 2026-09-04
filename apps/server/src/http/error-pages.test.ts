@@ -1,4 +1,4 @@
-import { type Config, loadConfig } from "@canvas-drop/shared";
+import { type Config, LOGO_PATHS, LOGO_VIEWBOX, loadConfig } from "@canvas-drop/shared";
 import type { User } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
@@ -120,8 +120,8 @@ describe("errorPageMiddleware", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     const html = await res.text();
     expect(html).toContain("canvas-drop");
-    expect(html).toContain('viewBox="158 209 372 432"');
-    expect(html).toContain("M245 335H218");
+    expect(html).toContain(`viewBox="${LOGO_VIEWBOX}"`);
+    expect(html).toContain(LOGO_PATHS.frame.d);
     expect(html).toContain("Page not found");
     expect(html).toContain("No &lt;page&gt; &amp; no stack");
     expect(html).toContain("/missing");
