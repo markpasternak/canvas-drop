@@ -14,8 +14,8 @@ Make the canvas itself prominent, reduce the decisions before content entry, and
 
 ## Scope and decisions
 
-- Build on the existing stack, brand tokens, and instance-selected skins. Editorial remains the default; no instance setting is changed. Lead with the existing Gallery preview, as Mark requested during implementation. Label its seeded examples and pictured Editorial skin; the surrounding page follows the active skin. Keep documentation/tour assets available for existing consumers.
-- The gallery preview uses committed, seeded sample imagery, with a keyboard-accessible link to the normally authenticated Gallery. No invented publish simulation, uploads, sign-in bypass, or server mutations. It remains readable without JavaScript and respects reduced motion.
+- Build on the existing stack, brand tokens, and instance-selected skins. Editorial remains the default; no instance setting is changed. Retain Mark’s existing multi-view product walkthrough, including Gallery, dashboard, editor, and sharing. Frame it around the problem of getting a working tool safely into a team’s hands. Label its example content and pictured Editorial skin; the surrounding page follows the active skin.
+- The marketing gallery and walkthrough are public visual previews using committed, seeded sample imagery. Mark explicitly ruled out links into the authenticated Gallery because marketing visitors cannot access it. No invented publish simulation, uploads, sign-in bypass, or server mutations. It remains readable without JavaScript and respects reduced motion.
 - Paste HTML, upload files/folder/ZIP, and API creation remain supported. Legacy `?method=folder|zip|api|paste` links work. Files are selected for review, then explicitly published; selection alone no longer creates a canvas. HTML receives a non-executing, network-blocked document preview. Multi-file/ZIP uploads receive a file/archive summary rather than a misleading partial-site render. Full-site preview continues to use the existing authenticated draft flow after creation.
 - Workspace and audience stay visible. Optional slug/backend settings are disclosed on demand. API creation retains its one-time-key result; ordinary publishing gets a link-led success surface with an explicit save-or-continue key choice. Partial sharing failure reports Restricted and links to recovery without redeploying or deleting the published canvas.
 - Overview leads with a cover, publication/draft state, audience, and useful actions. Existing lifecycle-specific actions remain. Basics move into an expandable editing section, preserving autosave. Editor action names distinguish upload replacement, draft save, and publish. The existing scripted-preview opt-in and sandbox are preserved.
@@ -25,9 +25,9 @@ Make the canvas itself prominent, reduce the decisions before content entry, and
 
 Files: landing-page.ts, landing-design.ts, and tests; existing docs/site/assets; brand guidance where current text is stale.
 
-Approach: short hero with a prominent gallery of existing sample canvases, succinct publish/share/version story, compact capability detail, and team/self-host guidance. Keep SEO, self-hosted fonts, all six primitives plus authoring, legal links, skin propagation, safe escaping, routing, CSP, and signed-in/auth-mode CTA behavior. Use token colors, type and consistent light/dark surfaces; remove the invented demo and keep the gallery as the main product visual.
+Approach: short problem-led hero with the existing multi-view product walkthrough, succinct publish/share/version story, compact capability detail, and team/self-host guidance. Keep SEO, self-hosted fonts, all six primitives plus authoring, legal links, skin propagation, safe escaping, routing, CSP, and signed-in/auth-mode CTA behavior. Use token colors, type and consistent light/dark surfaces; remove the invented demo and preserve the gallery and other product views, with manual navigation that stays on the view the visitor chooses.
 
-Verification: rendered-content/routing/security/skin tests, gallery image and destination tests; browser keyboard/tap, desktop/mobile, light/dark, reduced-motion, and multiple skins. HTML and JS work without external services.
+Verification: rendered-content/routing/security/skin tests, walkthrough image, no-gated-link, and destination tests; browser keyboard/tap, desktop/mobile, light/dark, reduced-motion, and multiple skins. HTML and JS work without external services.
 
 ## U2 — Put content and the result first in Create
 

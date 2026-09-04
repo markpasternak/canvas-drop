@@ -137,18 +137,26 @@ describe("landing page — rendered content", () => {
     expect(html).not.toContain("fonts.gstatic.com");
   });
 
-  it("leads with the example gallery and keeps its live destination behind normal sign-in", () => {
+  it("retains the multi-view walkthrough and gallery without gated marketing links", () => {
     const html = renderLandingPage();
-    expect(html).toContain('aria-label="Explore the gallery"');
-    expect(html).toContain('src="/docs/assets/landing-gallery.webp"');
-    expect(html).toContain('href="/gallery"');
-    expect(html).toContain("Example canvases in the Editorial skin");
+    expect(html).toContain('aria-label="Product walkthrough"');
+    expect(html).toContain("data-embla");
+    expect(html).toContain('src="/docs/assets/landing-carousel.js"');
+    for (const view of [
+      "landing-gallery",
+      "landing-dashboard",
+      "tour-editor",
+      "tour-sharing",
+      "tour-people",
+    ])
+      expect(html).toContain(`/docs/assets/${view}.webp`);
+    expect(html).not.toContain('href="/gallery"');
     expect(html).not.toContain("data-canvas-demo");
-    expect(html).not.toContain("landing-demo.js");
-    expect(html).not.toContain("opacity: 0;");
+    expect(html).not.toContain("Dashboards, calculators, roadmaps, and the next useful idea.");
+    expect(html).toContain("From an artifact to a tool your team can use.");
+    expect(html).toContain("Made in a chat, a cloud workspace, or on your laptop.");
     expect(html).toContain("Built for teams");
     expect(html).toContain("Restricted by default");
-    expect(html).toContain("No telemetry, ever");
   });
 
   it("shows the sharing-ladder section with every rung and the auth-delegated-invite story (plan 003)", () => {

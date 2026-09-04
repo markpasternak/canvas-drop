@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type Config, rampCssVars, type SkinName } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
@@ -5,7 +9,7 @@ import { SESSION_COOKIE } from "../auth/session.js";
 import { resolveRequest } from "../routing/resolve-request.js";
 import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
-import { LANDING_GALLERY, LANDING_LAYOUT } from "./landing-design.js";
+import { LANDING_LAYOUT } from "./landing-design.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
@@ -25,7 +29,7 @@ const SITE = {
   headline: "Drop it in. Share it out.",
   /** Sub-headline beneath the H1. */
   subhead:
-    "Give your team’s small web tools a home. Paste HTML or drop a folder, publish a canvas, and share a working link behind your sign-in.",
+    "Made in a chat, a cloud workspace, or on your laptop. Useful work shouldn’t stay trapped where it was created. Give it a home your team can access, improve, and use together.",
   /** Open-source project URL. */
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
@@ -97,16 +101,16 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
 /** Three editorial value props for the band under the hero. */
 const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   {
-    title: "Deploy in seconds",
-    body: "Paste HTML, upload a folder or ZIP, or let your agent publish over MCP. Your static files become a working canvas, without a build pipeline.",
+    title: "Bring your work with you",
+    body: "Publish exported HTML, a folder, or a ZIP from the tools you already use. Connect an agent over MCP to create and update canvases directly.",
   },
   {
-    title: "Share with the right people",
-    body: "Start Restricted. Add people and teams, open it to your org, or use a public link when your admin allows it. You choose who can view and who can edit.",
+    title: "Let the right people use it",
+    body: "Share through your organization’s sign-in. Add colleagues and teams as viewers or editors, with access you can change or revoke. Public links follow your admin’s policy.",
   },
   {
-    title: "Keep making it better",
-    body: "Edit a draft while the published canvas stays live. Preview your changes, publish an update, and return to an earlier version whenever you need to.",
+    title: "Keep building on it",
+    body: "Edit and preview a draft while the current version stays available. Publish updates to the same link, restore an earlier version, or offer your canvas as a template.",
   },
 ];
 
@@ -126,6 +130,77 @@ const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?:
     rung: "Public link",
     who: "Anyone with the URL. Static files only; admins can switch it off instance-wide or per account.",
     tag: "admin",
+  },
+];
+
+/** Product-tour carousel slides → committed light screenshots at /docs/assets.
+ *  Refresh with `pnpm landing:screenshots` (after `pnpm seed:canvases`). */
+const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
+  {
+    img: "landing-dashboard",
+    label: "Your dashboard",
+    caption:
+      "Every canvas you own or edit. Search by title, description, tag, or slug; filter by access, status, or role; and see the current version and sharing at a glance.",
+  },
+  {
+    img: "tour-editor",
+    label: "In-browser editor",
+    caption:
+      "Edit files with autosave, preview the draft, and publish a new version. No local setup, no deploy pipeline.",
+  },
+  {
+    img: "tour-shared",
+    label: "Shared with you",
+    caption:
+      "Canvases other people opened to you, directly or through a team or the whole org. Search, sort by owner or last update, and open the right one fast.",
+  },
+  {
+    img: "landing-gallery",
+    label: "Opt-in gallery",
+    caption:
+      "Browse public canvases and the org-wide ones their owners chose to list. Search, filter by tag, and start from any one marked as a template. Admins can feature their picks.",
+  },
+  {
+    img: "tour-preview",
+    label: "Preview covers",
+    caption:
+      "Choose each canvas's cover: an automatic screenshot on publish where your instance has capture switched on, none, or an image you upload that survives every publish.",
+  },
+  {
+    img: "tour-sharing",
+    label: "Share link & access",
+    caption:
+      "Copy the live URL, choose who else can open it — Restricted, Whole org, or Public link — and add a password or an expiry. People and teams you add always get in.",
+  },
+  {
+    img: "tour-people",
+    label: "People & editors",
+    caption:
+      "One people list per canvas. Add a person or a team as a viewer or an editor. Editors run the canvas with you, and the owner can hand it to any editor from the same list.",
+  },
+  {
+    img: "tour-teams",
+    label: "Teams & invites",
+    caption:
+      "Make a team once and grant it on any canvas. Add people by email before they have ever signed in; they're in the moment they first sign in through your org's auth, with no password for you to manage.",
+  },
+  {
+    img: "tour-capabilities",
+    label: "Backend in a click",
+    caption:
+      "The backend is off until you switch it on. Then add data, files, AI, identity, realtime, or controlled third-party requests through admin-granted Connections.",
+  },
+  {
+    img: "tour-admin",
+    label: "Admin & control",
+    caption:
+      "Set AI quotas, manage members, disable a canvas with a stated reason, and choose who may publish public links.",
+  },
+  {
+    img: "tour-usage",
+    label: "Usage insight",
+    caption:
+      "Views, unique viewers, and a 30-day trend for every canvas, plus KV, file, AI, and realtime usage once the backend is on.",
   },
 ];
 
@@ -278,6 +353,37 @@ ${LANDING_LAYOUT}
 
 const ghIcon = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.1.63-1.35-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>`;
 const arrow = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+// The screenshot assets are served with a 1-day cache under a STABLE filename, so a
+// refreshed shot (e.g. `pnpm landing:screenshots`) would otherwise stay stale in
+// browser/CDN caches for up to a day. Append a short content hash so a changed image
+// busts caches immediately while an unchanged one keeps caching. Resolved from the same
+// committed dir the docs route serves (apps/server/src|dist/http → ../../../.. = repo root).
+const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../..", "docs/site/assets");
+const assetVerCache = new Map<string, string>();
+function assetSrc(img: string): string {
+  let ver = assetVerCache.get(img);
+  if (ver === undefined) {
+    try {
+      ver = createHash("sha256")
+        .update(readFileSync(join(ASSETS_DIR, `${img}.webp`)))
+        .digest("hex")
+        .slice(0, 8);
+    } catch {
+      ver = ""; // asset unreadable (shouldn't happen in a real deploy) → no cache-bust
+    }
+    assetVerCache.set(img, ver);
+  }
+  return ver ? `/docs/assets/${img}.webp?v=${ver}` : `/docs/assets/${img}.webp`;
+}
+
+/** One carousel slide: a framed dark screenshot + a caption. */
+function tourSlide(t: (typeof TOUR)[number]): string {
+  return `<figure class="slide">
+  <div class="shot"><img src="${assetSrc(t.img)}" width="1440" height="900" alt="${escapeHtml(`${t.label}. ${t.caption}`)}" loading="lazy" decoding="async"></div>
+  <figcaption><strong>${escapeHtml(t.label)}.</strong> ${escapeHtml(t.caption)}</figcaption>
+</figure>`;
+}
+
 /** Details keep the main story short while preserving capability information. */
 function featItem(f: { title: string; body: string }): string {
   return `<details class="feat"><summary>${escapeHtml(f.title)}</summary><p>${escapeHtml(f.body)}</p></details>`;
@@ -353,11 +459,23 @@ ${head(origin)}
       <div class="hero-description">
         <p class="lede">${escapeHtml(SITE.subhead)}</p>
         <div class="cta-row"><a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a><a class="btn btn-ghost" href="#how-it-works">How it works</a></div>
-        <p class="cue">Built with AI or by hand. <a href="/docs">Connect your agent over MCP.</a></p>
+        <p class="cue">Bring your files, or <a href="/docs/agents/mcp">connect your agent over MCP.</a></p>
       </div>
     </div>
   </section>
-  ${LANDING_GALLERY}
+  <section class="tour wrap" aria-label="Product walkthrough">
+    <h2 class="s-head">From an artifact to a tool your team can use.</h2>
+    <p class="s-sub">A shared home, controlled access, and a way to keep improving what you made.</p>
+    <div class="carousel" data-embla aria-roledescription="carousel" aria-label="Product tour">
+      <div class="viewport" data-embla-viewport tabindex="0" role="region" aria-label="Product screens"><div class="embla-container">${TOUR.map(tourSlide).join("\n")}</div></div>
+      <div class="tour-controls" data-embla-controls hidden>
+        <button class="btn btn-outline" type="button" data-embla-prev aria-label="Previous screen">Previous</button>
+        <div class="dots" role="group" aria-label="Choose screen">${TOUR.map((t, i) => `<button class="dot" type="button" data-embla-dot aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}</div>
+        <button class="btn btn-outline" type="button" data-embla-next aria-label="Next screen">Next</button>
+      </div>
+    </div>
+    <p class="tour-note">Product walkthrough with example content, shown in the Editorial skin.</p>
+  </section>
   <section class="section" id="how-it-works" aria-label="From files to a shared canvas"><div class="wrap values">${values}</div></section>
   <section class="section section-tint">
     <div class="wrap split">
@@ -376,6 +494,7 @@ ${head(origin)}
   </section>
 </main>
 <footer><div class="wrap"><div class="foot"><a class="brand" href="/">${BRAND_MARK}<span>${escapeHtml(SITE.name)}</span></a><span class="spacer"></span><nav class="foot-links" aria-label="Footer"><a href="/docs">Docs</a><a href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></nav></div><div class="colophon">Small web tools, built by your team. Open source under the MIT license. Inspired by Shopify's Quick; not affiliated with Shopify.</div></div></footer>
+<script src="/docs/assets/landing-carousel.js" defer></script>
 </body>
 </html>`;
 }
@@ -431,7 +550,7 @@ export function landingResponse(
   const headers = new Headers();
   baseSecurityHeaders(headers);
   headers.set("Content-Type", "text/html; charset=utf-8");
-  // Inline styles and JSON-LD; no client script needed for the gallery preview.
+  // Inline styles and JSON-LD; the product-tour controller is served same-origin.
   headers.set(
     "Content-Security-Policy",
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
