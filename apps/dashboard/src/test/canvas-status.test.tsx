@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -75,11 +75,11 @@ function mockStatus(
   return calls;
 }
 
-function renderStatus() {
+function renderStatus(path = "/canvases/c1") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/canvases/c1"] }),
+    history: createMemoryHistory({ initialEntries: [path] }),
   });
   render(
     <ThemeProvider>
@@ -96,6 +96,31 @@ function renderStatus() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("canvas Overview tab", () => {
+  it.each(["", "/", "?live=true", "?live=false", "?live=1"])(
+    "marks Overview as selected regardless of its publication query (%s)",
+    async (suffix) => {
+      mockStatus();
+      renderStatus(`/canvases/c1${suffix}`);
+      const nav = await screen.findByRole("navigation", { name: "Canvas sections" });
+      expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(within(nav).getByRole("link", { name: "Editor" })).not.toHaveAttribute("aria-current");
+      await userEvent.click(within(nav).getByRole("link", { name: "Versions" }));
+      await waitFor(() => {
+        const currentNav = screen.getByRole("navigation", { name: "Canvas sections" });
+        expect(within(currentNav).getByRole("link", { name: "Versions" })).toHaveAttribute(
+          "aria-current",
+          "page",
+        );
+        expect(within(currentNav).getByRole("link", { name: "Overview" })).not.toHaveAttribute(
+          "aria-current",
+        );
+      });
+    },
+  );
+
   it.each([
     [
       { files: [{ path: "index.html" }], dirty: true, stale: false },

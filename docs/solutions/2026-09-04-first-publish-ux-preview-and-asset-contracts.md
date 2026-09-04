@@ -55,6 +55,13 @@ views. An image remount alone cannot bypass the browser's five-minute HTTP cache
 Do not expose live links for archived or disabled canvases or claim unavailable
 version details are an unpublished canvas. Draft lookup errors remain unknown state.
 
+Tab selection must compare routes without search parameters. TanStack's exact-link
+matching includes search by default; Overview's validated `live=false` default then
+differs from the parent-route link's search, so the selected underline disappears
+even at the correct URL. `TabNav` uses `includeSearch: false` while retaining exact
+path matching for Overview. Real-router regression tests cover bare/trailing-slash
+URLs, all supported `live` values, and navigation to another section.
+
 `pnpm brand:build` generates vectors, PNG icons, and social cards from the canonical
 32-unit mark. Dashboard mirror tests compare path geometry and stroke widths. Sharp's
 `extend` only paints added border pixels; `flatten` is also required for an opaque
