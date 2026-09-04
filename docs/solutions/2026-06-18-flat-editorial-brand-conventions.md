@@ -70,8 +70,9 @@ self-contained HTML — they must still resolve to the **same tokens** as the SP
   overrides `body`/`main`/`.brand` for its sidebar layout — so a system-style change can
   reach the docs; verify the docs overrides still hold.
 - The brand mark geometry lives once in `@canvas-drop/shared` (`brand/logo.ts`,
-  `viewBox="158 209 372 432"`); server pages use `BRAND_MARK` (driven by
-  `--logo-frame`/`--logo-drop`). A logo change is a single edit.
+  `viewBox="0 0 32 32"`); server pages use `BRAND_MARK` (driven by
+  `--logo-frame`/`--logo-drop`). The dashboard mirror is parity-tested. Run `pnpm brand:build` to regenerate
+  downloadable SVGs, favicons, PWA icons, and social artwork from that geometry.
 
 ## Theme: data-theme + the per-origin caveat
 

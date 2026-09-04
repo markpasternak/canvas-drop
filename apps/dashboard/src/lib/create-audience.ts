@@ -44,8 +44,8 @@ export type CreateAudienceOutcome =
 
 /**
  * Apply initial sharing only after publish. Failure is returned as data so the
- * create flow can preserve the published canvas + one-time key and explain that
- * access safely remained Restricted.
+ * create flow can preserve the published canvas + one-time key. A rejected or lost
+ * response does not prove the requested settings were never committed.
  */
 export async function applyCreateAudience(
   canvasId: string,

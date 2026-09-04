@@ -53,7 +53,11 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function mockStatus(canvas = CANVAS, versions: unknown[] = [VERSION]) {
+function mockStatus(
+  canvas = CANVAS,
+  versions: unknown[] = [VERSION],
+  draft: unknown = { files: [], dirty: false, stale: false },
+) {
   const calls: { method: string; url: string; body?: string }[] = [];
   vi.stubGlobal(
     "fetch",
@@ -63,7 +67,7 @@ function mockStatus(canvas = CANVAS, versions: unknown[] = [VERSION]) {
       calls.push({ method, url: path, body: init?.body as string | undefined });
       if (path === "/api/canvases/c1") return json(canvas);
       if (path === "/api/canvases/c1/settings") return json(canvas);
-      if (path === "/api/canvases/c1/draft") return json({ files: [], dirty: false, stale: false });
+      if (path === "/api/canvases/c1/draft") return json(draft);
       if (path === "/api/canvases/c1/versions") return json({ versions });
       return json({ error: "not_mocked" }, 500);
     }),
@@ -92,11 +96,35 @@ function renderStatus() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("canvas Overview tab", () => {
+  it.each([
+    [
+      { files: [{ path: "index.html" }], dirty: true, stale: false },
+      "Your draft has unpublished changes.",
+    ],
+    [
+      { files: [{ path: "index.html" }], dirty: true, stale: true },
+      "A newer version was published.",
+    ],
+    [
+      { files: [{ path: "index.html" }], dirty: false, stale: false },
+      "Your draft matches the published version.",
+    ],
+  ])("reports the existing editor draft state", async (draft, message) => {
+    const calls = mockStatus(CANVAS, [VERSION], draft);
+    renderStatus();
+    expect(await screen.findByText((text) => text.startsWith(message))).toBeInTheDocument();
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
+
   it("puts the canvas and draft actions before collapsed metadata", async () => {
     mockStatus();
     renderStatus();
     const preview = await screen.findByRole("link", { name: "View published canvas" });
     expect(preview).toHaveAttribute("href", CANVAS.url);
+    expect(preview.querySelector("img")).toHaveAttribute(
+      "src",
+      `${CANVAS.url}/__canvasdrop_preview?rendition=card&v=${CANVAS.updatedAt}`,
+    );
     expect(screen.getByLabelText("Title")).not.toBeVisible();
     expect(screen.getByRole("link", { name: "Edit draft" })).toHaveAttribute(
       "href",
@@ -354,6 +382,10 @@ describe("canvas Overview tab", () => {
     // Disabled is NOT a draft: no draft reframing, no Open draft / Publish primaries.
     expect(screen.queryByText(/not live yet/i)).toBeNull();
     expect(screen.queryByRole("link", { name: "Open draft" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "View published canvas" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open live canvas" })).toBeNull();
+    await userEvent.click(screen.getByText("Edit details"));
+    expect(screen.getByLabelText("Title")).toBeDisabled();
   });
 
   it("keeps the archived state explicit", async () => {

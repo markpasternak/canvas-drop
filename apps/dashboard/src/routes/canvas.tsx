@@ -160,7 +160,7 @@ export default function CanvasLayout() {
       <CanvasDetailChrome
         id={id}
         title={title}
-        url={canvas?.url}
+        url={canvas?.status === "active" ? canvas.url : undefined}
         draft={isDraft}
         isLoading={isLoading}
         actions={actions}

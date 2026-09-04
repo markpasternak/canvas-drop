@@ -124,7 +124,7 @@ describe("Create canvas — audience shortcut", () => {
     expect(screen.getByText(/public links are unavailable for your account/i)).toBeInTheDocument();
   });
 
-  it("keeps a published canvas Restricted when sharing fails and sends recovery to Share", async () => {
+  it("preserves the published canvas when sharing is uncertain and sends recovery to Share", async () => {
     const calls = mockFetch({ ...ME, orgs: [] }, true);
     const router = renderNew();
 
@@ -133,9 +133,7 @@ describe("Create canvas — audience shortcut", () => {
     await userEvent.type(screen.getByLabelText("HTML"), "<h1>Hello</h1>");
     await userEvent.click(screen.getByRole("button", { name: "Create and publish" }));
 
-    expect(
-      await screen.findByText(/canvas is published and still Restricted/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/sharing couldn’t be confirmed/i)).toBeInTheDocument();
     expect(calls.some((call) => call.method === "DELETE")).toBe(false);
     await userEvent.click(
       screen.getByRole("button", { name: "Continue without saving · Open Share" }),
@@ -229,13 +227,45 @@ describe("Create canvas — content and result", () => {
     expect(deploy).toHaveBeenCalledWith("c1", bytes, expect.any(Function));
   });
 
-  it("clears an old selection when a mixed archive selection is invalid", async () => {
+  it.each(["webkitRelativePath", "path"])(
+    "keeps ZIP assets inside folders with %s paths",
+    async (pathKey) => {
+      mockFetch();
+      const deploy = vi.spyOn(api, "deployFolder").mockResolvedValue(DEPLOYED);
+      const zip = vi.spyOn(api, "deployZip");
+      renderNew("/new?method=folder");
+      await screen.findByRole("button", { name: "Choose files" });
+      const archive = new File(["download"], "dataset.zip");
+      Object.defineProperty(archive, pathKey, { value: "site/downloads/dataset.zip" });
+      chooseFiles([archive]);
+      expect(screen.queryByText("ZIP archive ready")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Create and publish" }));
+      await screen.findByRole("heading", { name: "Your canvas is published" });
+      expect([...(deploy.mock.calls[0]?.[1].keys() ?? [])]).toEqual(["downloads/dataset.zip"]);
+      expect(zip).not.toHaveBeenCalled();
+    },
+  );
+
+  it("publishes a ZIP asset alongside unpacked HTML without extracting it", async () => {
+    mockFetch();
+    const deploy = vi.spyOn(api, "deployFolder").mockResolvedValue(DEPLOYED);
+    const zip = vi.spyOn(api, "deployZip");
+    renderNew("/new?method=folder");
+    await screen.findByRole("button", { name: "Choose files" });
+    chooseFiles([new File(["zip"], "download.zip"), new File(["html"], "index.html")]);
+    await userEvent.click(screen.getByRole("button", { name: "Create and publish" }));
+    await screen.findByRole("heading", { name: "Your canvas is published" });
+    expect([...(deploy.mock.calls[0]?.[1].keys() ?? [])]).toEqual(["download.zip", "index.html"]);
+    expect(zip).not.toHaveBeenCalled();
+  });
+
+  it("clears an old selection when a standalone archive is empty", async () => {
     const calls = mockFetch();
     renderNew("/new?method=folder");
     await screen.findByRole("button", { name: "Choose files" });
     chooseFiles([new File(["html"], "index.html")]);
-    chooseFiles([new File(["zip"], "site.zip"), new File(["html"], "index.html")]);
-    expect(screen.getByText(/Choose one non-empty ZIP/)).toBeVisible();
+    chooseFiles([new File([], "site.zip")]);
+    expect(screen.getByText(/This ZIP is empty/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Create and publish" })).toBeDisabled();
     expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });

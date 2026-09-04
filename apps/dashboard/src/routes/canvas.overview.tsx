@@ -1,4 +1,4 @@
-import { ArrowSquareOut, CheckCircle, Info, WarningCircle } from "@phosphor-icons/react";
+import { ArrowSquareOut, Info, WarningCircle } from "@phosphor-icons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { accessRungLabel, PublicationBadge } from "../components/Badge.js";
@@ -13,13 +13,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
 import { TagsEditor } from "../components/TagsEditor.js";
 import { useToast } from "../components/Toast.js";
-import {
-  ApiError,
-  type Canvas,
-  isRestrictedRung,
-  type RootEntry,
-  type VersionInfo,
-} from "../lib/api.js";
+import { ApiError, type Canvas, type RootEntry, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useUpdateSettings } from "../lib/mutations.js";
@@ -159,15 +153,14 @@ function StateCard({
   actions,
   children,
 }: {
-  tone: "success" | "warning" | "danger" | "neutral";
+  tone: "warning" | "danger" | "neutral";
   title: string;
-  icon: "check" | "warning" | "info";
+  icon: "warning" | "info";
   actions?: ReactNode;
   children: ReactNode;
 }) {
-  const Icon = icon === "check" ? CheckCircle : icon === "warning" ? WarningCircle : Info;
+  const Icon = icon === "warning" ? WarningCircle : Info;
   const toneClass = {
-    success: "border-success/25 bg-success-subtle/35 text-success",
     warning: "border-warning/30 bg-warning-subtle/45 text-warning",
     danger: "border-danger/30 bg-danger-subtle/40 text-danger",
     neutral: "border-border bg-surface-raised text-muted",
@@ -309,7 +302,11 @@ export default function Overview() {
               key={canvas.currentVersionId}
               seed={id}
               title={canvas.title}
-              previewUrl={canvas.previewMode === "off" ? undefined : previewCoverUrl(canvas.url)}
+              previewUrl={
+                canvas.previewMode === "off"
+                  ? undefined
+                  : `${previewCoverUrl(canvas.url)}&v=${canvas.updatedAt}`
+              }
             />
           </a>
         ) : (
@@ -323,7 +320,11 @@ export default function Overview() {
               {canvas.currentVersionId ? "Published version" : "Your canvas"}
             </p>
             <h2 className="font-display text-h2 leading-tight tracking-tight">
-              {current ? `Version ${current.number}` : "Ready when you are"}
+              {current
+                ? `Version ${current.number}`
+                : canvas.currentVersionId
+                  ? "Published version"
+                  : "Ready when you are"}
             </h2>
             {canvas.description && (
               <p className="line-clamp-3 text-sm leading-relaxed text-muted">
@@ -357,7 +358,7 @@ export default function Overview() {
         <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
           <Fact label="Current version">
             <span title={current ? fullTime(current.createdAt) : undefined}>
-              {currentVersionLabel(current)}
+              {versionsReady ? currentVersionLabel(current) : "Version details unavailable"}
             </span>
           </Fact>
           <Fact label="Gallery">
@@ -378,18 +379,31 @@ export default function Overview() {
         <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
           <Fact label="Canvas URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
             <div className="flex min-w-0 items-center gap-2">
-              <a
-                href={canvas.url}
-                target="_blank"
-                rel="noreferrer"
-                className="min-w-0 flex-1 truncate font-mono text-xs text-accent hover:underline"
-              >
-                {canvas.url}
-              </a>
+              {canvas.status === "active" && canvas.currentVersionId ? (
+                <a
+                  href={canvas.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate font-mono text-xs text-accent hover:underline"
+                >
+                  {canvas.url}
+                </a>
+              ) : (
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">
+                  {canvas.url}
+                </span>
+              )}
               <CopyButton value={canvas.url} label="Copy" toastMessage="Link copied" />
-              <IconLink href={canvas.url} target="_blank" rel="noreferrer" label="Open live canvas">
-                <ArrowSquareOut size={15} weight="bold" aria-hidden />
-              </IconLink>
+              {canvas.status === "active" && canvas.currentVersionId && (
+                <IconLink
+                  href={canvas.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  label="Open live canvas"
+                >
+                  <ArrowSquareOut size={15} weight="bold" aria-hidden />
+                </IconLink>
+              )}
             </div>
           </Fact>
           <Fact label="Files">
@@ -442,7 +456,7 @@ export default function Overview() {
         <p className="mt-2 text-sm text-muted">
           Title, description, and tags. Changes save when you leave a field.
         </p>
-        <div className="mt-5 max-w-3xl space-y-4">
+        <fieldset disabled={canvas.status === "disabled"} className="mt-5 max-w-3xl space-y-4">
           <Field
             label="Title"
             value={title}
@@ -473,7 +487,7 @@ export default function Overview() {
             hint="Enter or comma to add"
             description="Tags help you filter your canvases here, and appear publicly in the gallery once this canvas is listed."
           />
-        </div>
+        </fieldset>
       </details>
     </TabContentFrame>
   );

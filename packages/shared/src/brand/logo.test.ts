@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { brandMarkSvg, LOGO_PATHS, LOGO_VIEWBOX } from "./logo.js";
 
@@ -9,7 +10,20 @@ describe("brand geometry parity", () => {
     const wordmark = readFileSync("apps/dashboard/public/brand/canvasdrop-logo.svg", "utf8");
     for (const source of [dashboard, download, wordmark, brandMarkSvg()]) {
       expect(source).toContain(`viewBox="${LOGO_VIEWBOX}"`);
-      for (const path of [LOGO_PATHS.frame, ...LOGO_PATHS.drop]) expect(source).toContain(path.d);
+      for (const path of [LOGO_PATHS.frame, ...LOGO_PATHS.drop]) {
+        const element = source.match(/<path\b[^>]*>/g)?.find((element) => element.includes(path.d));
+        expect(element).toMatch(new RegExp(`stroke-?[Ww]idth="${path.width}"`));
+      }
+    }
+  });
+
+  it("gives installed app icons an opaque background", async () => {
+    for (const file of [
+      "apple-touch-icon.png",
+      "brand/canvasdrop-mark-192.png",
+      "brand/canvasdrop-mark-512.png",
+    ]) {
+      expect((await sharp(`apps/dashboard/public/${file}`).stats()).isOpaque).toBe(true);
     }
   });
 

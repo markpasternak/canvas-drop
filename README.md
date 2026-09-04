@@ -66,7 +66,7 @@ Every deploy produces the same thing: an immutable version served at an unguessa
 3. **Edit in the browser**: a file tree plus CodeMirror editor work against a mutable **draft** with autosave; **Publish** snapshots it into an immutable version. A single-HTML draft also gets an on-page text-editing mode.
 4. **Deploy API**: `PUT` a ZIP with the canvas's secret key. `deploy = live`, no draft loop.
 
-Paste, folder, and ZIP also work as **New version** on a canvas that already exists.
+Paste, folder, and ZIP also work as **Upload new version** on a canvas that already exists.
 
 ```bash
 curl -X PUT "$BASE_URL/v1/canvases/$CANVAS_ID/deploy" \
@@ -204,6 +204,8 @@ BUILD_BRIEF.md     the product spec the units are built from
 Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usage stats, server-side list filters and search, the docs system (`/docs`, `/llms.txt`, `/skill.zip`), clone-as-template, custom slugs, the MCP server (47 tools, dashboard parity), the staged content-addressed upload, the signed-out landing page, preview covers with an optional screenshot pipeline, admin-flippable [design skins](docs/site/self-hosting/configuration.md#design-skins), the org boundary (tenancy) with teams and auth-delegated invites, the [authoring capability](docs/site/sdk/authoring.md) and managed shares, prompt caching for the AI proxy, version download and delete, the org-scoped gallery, popularity sort and bulk actions, **editor roles with ownership transfer**, the simplified **Sharing and permissions** hierarchy with direct/team viewer clone parity, and admin-granted [outbound Connections](docs/site/sdk/connections.md).
 
 **M10 ops/packaging is the one open milestone.**
+
+The [first-publish UX round](docs/plans/2026-09-04-001-feat-publishing-experience-plan.md) adds problem-led marketing with the original multi-view walkthrough, staged uploads and an isolated HTML preview, link-led publish results, clearer canvas and draft actions, and a refined SVG identity. **Before deploying this round, refresh the marketing walkthrough and documentation screenshots against the final UI.** The current product screenshots show the previous version.
 
 | Shipped | Still deferred |
 |---------|----------------|

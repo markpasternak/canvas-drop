@@ -21,9 +21,9 @@ curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
 
 | Source | Where | What it does |
 |---|---|---|
-| **Paste HTML** | `/new`, or **New version** on a canvas | Stores your markup as `index.html` and publishes it in one step |
-| **Files or folder** | `/new`, or **New version** | Uploads with relative paths preserved and publishes |
-| **Upload ZIP** | `/new`, or **New version** | Extracts the archive server-side and publishes |
+| **Paste HTML** | `/new`, or **Upload new version** on a canvas | Stores your markup as `index.html` and publishes it in one step |
+| **Files or folder** | `/new`, or **Upload new version** | Uploads with relative paths preserved and publishes |
+| **Upload ZIP** | `/new`, or **Upload new version** | Extracts the archive server-side and publishes |
 | **Use the API** | `/new` | Mints an empty canvas plus its key; the first `PUT …/deploy` publishes |
 | **Editor** | The **Editor** tab | Autosaves a **draft**; you click **Publish** when ready |
 | **Deploy API / MCP** | Scripts and agents | Publishes directly to live with a key or over MCP |
@@ -63,10 +63,10 @@ After you pick a source, `/new` asks for:
 - **Title** (optional, up to 200 characters). Rename later from the **Overview** tab.
 - **Slug** (under **Optional settings**). Leave it empty for a readable random slug, or choose your own; availability is checked as you type. See [Custom slug](#custom-slug).
 - **Workspace**, always visible. **Personal** means only you and the people you specifically add. Picking your org homes the canvas there so it can later open to the **Whole org** rung. This choice is fixed once the canvas exists: a Personal canvas cannot be opened to Whole org later. Accounts without an org can select only Personal.
-- **Audience** (not shown for **Use the API**). **Restricted** is the default: only you and people or teams you add can open it. A workspace canvas offers **Everyone in {workspace}** with a **List in Shared** toggle (off by default) so members can find it. A Personal canvas offers **Public link**, when the instance and your account allow public links, with an optional **Require password**. Changing the Workspace resets the audience to Restricted. The audience is applied after the first publish; if that fails, the published result reports Restricted and offers a route to Share after you save or explicitly skip the key. The full ladder, named people, teams, and expiry live on the **Share** tab.
+- **Audience** (not shown for **Use the API**). **Restricted** is the default: only you and people or teams you add can open it. A workspace canvas offers **Everyone in {workspace}** with a **List in Shared** toggle (off by default) so members can find it. A Personal canvas offers **Public link**, when the instance and your account allow public links, with an optional **Require password**. Changing the Workspace resets the audience to Restricted. The audience is applied after the first publish; if that request fails, the published result says sharing could not be confirmed and offers a route to Share after you save or explicitly skip the key. The full ladder, named people, teams, and expiry live on the **Share** tab.
 - **Enable backend** (under **Optional settings**, off by default). Turns on identity and, subject to what your instance allows, KV, files, AI, and realtime. Change it any time on the **Backend** tab. See [Capabilities](/docs/authoring/capabilities).
 
-The **Upload files** source accepts files, a folder, or one ZIP. Selection stays in your browser until you click **Create and publish**; review the file paths or archive summary first. If publishing fails after creation, the empty canvas is removed and your selection remains available to retry.
+The **Upload files** source accepts files, a folder, or one ZIP. Selection stays in your browser until you click **Create and publish**; review the file paths or archive summary first. If publishing fails after creation, Canvas Drop attempts to remove the temporary canvas and keeps your selection available to retry.
 
 The published result leads with your canvas link and audience. Open the canvas or manage sharing in a new tab while the result stays available. The deploy key is optional for dashboard use: expand **Save your deploy key (shown once)** to copy it, or explicitly continue without saving it. It is never stored in your browser.
 
@@ -84,9 +84,9 @@ Upload a `.zip` (not a tar) and the server extracts it. Extraction is path-safe:
 
 For a one-file canvas, paste HTML directly. canvas-drop stores it as a single `index.html` and publishes it. From `/new` this creates and publishes in one request; on an existing canvas it publishes the next version.
 
-## New version on an existing canvas
+## Upload a new version on an existing canvas
 
-The **New version** button sits on every tab of a canvas you own or edit. It opens the same three sources (**Paste HTML**, **Files or folder**, **ZIP**) and publishes the next version to everyone as soon as it succeeds. Use it when your files are built elsewhere. An archived canvas refuses new versions (`NOT_ACTIVE`) until you unarchive it.
+The **Upload new version** button sits on every tab of a canvas you own or edit. It opens the same three sources (**Paste HTML**, **Files or folder**, **ZIP**) and publishes the next version to everyone as soon as it succeeds. Use it when your files are built elsewhere. An archived canvas refuses new versions (`NOT_ACTIVE`) until you unarchive it.
 
 ## Editor
 

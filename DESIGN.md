@@ -28,7 +28,8 @@ default indigo-violet SaaS palette.
   with a manual override via `[data-theme]`.
 - **Color strategy: quiet chrome, expressive canvases.** The homepage and app share
   the active skin's neutral surfaces, display face, and primary accent. The homepage
-  leads with a gallery of existing example canvases; their content carries the visual interest.
+  leads with a multi-view product walkthrough, including Gallery. Committed example content
+  carries the visual interest; marketing never links visitors into the authenticated Gallery.
   Avoid introducing a separate hero palette that disconnects marketing from the app.
 
 ## Token layering (re-skin contract)

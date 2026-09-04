@@ -26,8 +26,8 @@ export function CreateSuccess({
       <PageHeader title="Your canvas is published" description={result.audience} />
       {result.shareFailed && (
         <InlineNotice tone="warning">
-          Your canvas is published and still Restricted. Sharing wasn’t applied. Open Share to
-          update access.
+          Your canvas is published. Sharing couldn’t be confirmed. Open Share to check who can
+          access it before distributing the link.
         </InlineNotice>
       )}
       <div className="space-y-4">

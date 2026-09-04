@@ -59,7 +59,7 @@ erased. When the canvas's preview mode is **auto** and the instance has
 [screenshots](/docs/self-hosting/screenshots) on, a fresh cover is captured after each
 publish.
 
-The **Publish** / **New version** button in the canvas header is a different thing: it
+The **Upload and publish** / **Upload new version** button in the canvas header is a different thing: it
 uploads files (paste, folder, or ZIP) as a direct deploy. Only the Editor tab's
 **Publish** ships the draft.
 

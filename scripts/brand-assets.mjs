@@ -46,6 +46,7 @@ export async function buildIcons() {
         right: padding,
         background: "#f7f4ed",
       })
+      .flatten({ background: "#f7f4ed" })
       .png()
       .toFile(join(publicDir, file));
   }

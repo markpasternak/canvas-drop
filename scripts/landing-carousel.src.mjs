@@ -3,9 +3,8 @@
 // same-origin by the docs asset route — the marketing landing has no client
 // bundler, so the built file is committed (like the OG card + screenshots).
 //
-// Standard Embla + the autoplay plugin (slide-by-slide dwell — the right fit for a
-// discrete tour, vs auto-scroll's continuous marquee). Embla owns positioning/drag/
-// snapping; we only wire the prev/next arrows, the dots, and pause on hover/focus.
+// Embla owns positioning and dragging. Navigation is manual so the selected
+// screen stays available for reading. Without JavaScript, scroll-snap is native.
 
 import EmblaCarousel from "embla-carousel";
 

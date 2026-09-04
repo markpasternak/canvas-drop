@@ -11,7 +11,7 @@ export function createDocumentPreview(html: string): { document: string; title: 
   template.innerHTML = html;
   const title = template.content.querySelector("title")?.textContent?.trim().slice(0, 200) ?? "";
   for (const node of template.content.querySelectorAll(
-    "script,iframe,frame,frameset,object,embed,link,meta,base,portal,svg,math,template",
+    "script,noscript,iframe,frame,frameset,object,embed,link,meta,base,portal,svg,math,template",
   ))
     node.remove();
   for (const node of template.content.querySelectorAll("*")) {

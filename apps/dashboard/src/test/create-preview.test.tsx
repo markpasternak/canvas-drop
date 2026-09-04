@@ -26,4 +26,13 @@ describe("Create document preview isolation", () => {
     expect(createDocumentPreview("  ")).toBeNull();
     expect(createDocumentPreview("a".repeat(250_001))).toBeNull();
   });
+
+  it("removes noscript content before it can be reparsed in the script-free iframe", () => {
+    const result = createDocumentPreview(
+      '<noscript><img src="https://external.invalid/pixel"></noscript><h1>Kept</h1>',
+    );
+    expect(result?.document).not.toContain("noscript");
+    expect(result?.document).not.toContain("external.invalid");
+    expect(result?.document).toContain("Kept");
+  });
 });

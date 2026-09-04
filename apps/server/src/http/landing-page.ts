@@ -15,7 +15,7 @@ import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
-/** Public front door with an example gallery and auth-mode-aware sign-in. */
+/** Public front door with a multi-view product walkthrough and auth-mode-aware sign-in. */
 
 /** Instance-specific copy. A self-hoster edits this one constant to re-flavor. */
 const SITE = {
@@ -484,7 +484,7 @@ ${head(origin)}
     </div>
   </section>
   <section class="section">
-    <div class="wrap"><p class="kicker">Six primitives + authoring</p><h2 class="s-head">Start with a page.<br>Give it superpowers.</h2><p class="s-sub">Static files first, with no server build. Six runtime primitives add data, files, AI, identity, realtime, and controlled access to third-party APIs through admin-granted Connections. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Secrets stay server-side.</p><div class="prims">${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}</div></div>
+    <div class="wrap"><p class="kicker">Six primitives + authoring</p><h2 class="s-head">Let it do more.</h2><p class="s-sub">Keep shared data, respond to people, and connect to approved services. Static files first, with no server build. Six runtime primitives add data, files, AI, identity, realtime, and controlled access to third-party APIs through admin-granted Connections. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Secrets stay server-side.</p><div class="prims">${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}</div></div>
   </section>
   <section class="section section-tint">
     <div class="wrap split">

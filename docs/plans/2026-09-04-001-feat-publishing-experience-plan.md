@@ -8,7 +8,7 @@ origin: docs/brainstorms/2026-09-04-canvas-drop-ux-direction.md
 
 ## Goal and authorization
 
-Mark approved the proposed first round with “lets go”: homepage + Create/success + Overview/editor hierarchy. Execute all three units on one feature branch and one PR, with unit commits, local gates, code review, CI, squash merge, and issue closure per AGENTS.md. Production deployment is outside this round.
+Mark approved the proposed first round with “lets go”: homepage + Create/success + Overview/editor hierarchy. Execute all four units on one feature branch and one PR, with unit commits, local gates, code review, CI, squash merge, and issue closure per AGENTS.md. Production deployment is outside this round.
 
 Make the canvas itself prominent, reduce the decisions before content entry, and distinguish a saved draft from a published canvas. Preserve the existing static-first, tenant, access, one-time-key, and preview-isolation contracts.
 
@@ -17,7 +17,7 @@ Make the canvas itself prominent, reduce the decisions before content entry, and
 - Build on the existing stack, brand tokens, and instance-selected skins. Editorial remains the default; no instance setting is changed. Retain Mark’s existing multi-view product walkthrough, including Gallery, dashboard, editor, and sharing. Frame it around the problem of getting a working tool safely into a team’s hands. Label its example content and pictured Editorial skin; the surrounding page follows the active skin.
 - The marketing gallery and walkthrough are public visual previews using committed, seeded sample imagery. Mark explicitly ruled out links into the authenticated Gallery because marketing visitors cannot access it. No invented publish simulation, uploads, sign-in bypass, or server mutations. It remains readable without JavaScript and respects reduced motion.
 - Paste HTML, upload files/folder/ZIP, and API creation remain supported. Legacy `?method=folder|zip|api|paste` links work. Files are selected for review, then explicitly published; selection alone no longer creates a canvas. HTML receives a non-executing, network-blocked document preview. Multi-file/ZIP uploads receive a file/archive summary rather than a misleading partial-site render. Full-site preview continues to use the existing authenticated draft flow after creation.
-- Workspace and audience stay visible. Optional slug/backend settings are disclosed on demand. API creation retains its one-time-key result; ordinary publishing gets a link-led success surface with an explicit save-or-continue key choice. Partial sharing failure reports Restricted and links to recovery without redeploying or deleting the published canvas.
+- Workspace and audience stay visible. Optional slug/backend settings are disclosed on demand. API creation retains its one-time-key result; ordinary publishing gets a link-led success surface with an explicit save-or-continue key choice. Partial sharing failure reports unconfirmed access and links to recovery without redeploying or deleting the published canvas.
 - Overview leads with a cover, publication/draft state, audience, and useful actions. Existing lifecycle-specific actions remain. Basics move into an expandable editing section, preserving autosave. Editor action names distinguish upload replacement, draft save, and publish. The existing scripted-preview opt-in and sandbox are preserved.
 - No new backend primitives, DB/schema changes, new permission semantics, telemetry, library pins, broad search, gallery redesign, or quick-share panel. Those are separate proposals. No new durable management operation is introduced, so existing HTTP/MCP service parity is retained.
 
@@ -43,9 +43,7 @@ Files: routes/canvas.overview.tsx, routes/canvas.tsx, components/PublishBar.tsx,
 
 Approach: substantial cover with link to live canvas when available, compact current-version and draft summary, Edit draft/Share/View live actions subject to lifecycle gates. Move existing Basics fields to progressive disclosure without changing autosave sequencing. Say Canvas URL for a restricted-capable link. On editor, keep Publish/Publish update primary and clearly label Upload new version separately. Tighten scripted-preview explanation; retain the opaque sandbox and explicit opt-in, full-preview route, focus and refresh behavior.
 
-Verification: draft/published/expired/unpublished/archived/disabled states, missing home page, owner/editor gates, debounced metadata saves including trailing cleanup, absent/failed covers, long titles/mobile, publish busy/conflict states, same sandbox attributes and opt-in behavior. No false claim that a cover verifies runtime health.
-
-## Verification and Definition of Done
+Verification: draft/published/expired/unpublished/archived/disabled states, missing home page, owner/editor gates, on-blur metadata saves and failure recovery, absent/failed covers, long titles/mobile, publish busy/conflict states, same sandbox attributes and opt-in behavior. No false claim that a cover verifies runtime health.
 
 ## U4 — Refine the SVG identity
 
@@ -59,8 +57,15 @@ asset generation. No changes to instance settings or production deployment.
 
 ## Final gates
 
+**Deployment prerequisite (Mark, 2026-09-04):** once the UI is final, capture fresh
+marketing walkthrough and documentation screenshots. The existing screenshots show
+the previous site and logo; replace them with the final Create, Overview, editor,
+Gallery, and other walkthrough views before deploying. This round does not deploy.
+Carry this prerequisite into the PR and release notes; do not treat current screenshots
+as final release assets.
+
 Before each unit, sync from main. Use focused tests to prove changed behavior and run pnpm lint, pnpm typecheck, and full pnpm test (SQLite + pglite + dashboard) before each unit commit. Run pnpm build for final UI validation, regenerate docs when their source changes, and follow generated-asset checks. Keep local preview artifacts and logs outside commits.
 
 Run ce-code-review with the repo's sequential tool mapping, addressing correctness, security/preview isolation, reliability, type safety, accessibility/design, maintainability, tests, and agent parity. Fix real P0/P1 and high-value P2 findings and record a receipt. Capture non-obvious learnings in docs/solutions. Required GitHub CI checks must pass before squash merge; close the tracking issue and update current status pointers. No private production content appears in samples, tests, screenshots, or the PR.
 
-Done when all three units are implemented, reviewed, validated, documented, merged through green CI, and the tracking issue is closed. Unit progress lives in commits and the issue, not this plan body.
+Done when all four units are implemented, reviewed, validated, documented, merged through green CI, and the tracking issue is closed. Unit progress lives in commits and the issue, not this plan body.

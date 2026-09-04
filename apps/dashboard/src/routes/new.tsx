@@ -10,6 +10,7 @@ import {
   canvasRelativePaths,
   FileDropOrProgress,
   folderFormFromFiles,
+  rawUploadPath,
 } from "../components/DeployFiles.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { SlugField } from "../components/SlugField.js";
@@ -33,9 +34,6 @@ type SelectedUpload = { kind: "folder" | "zip"; files: File[]; paths: string[] }
 type MethodConfig = {
   id: Method;
   label: string;
-  blurb: string;
-  panelTitle: string;
-  panelDescription: string;
   icon: Icon;
 };
 
@@ -43,26 +41,16 @@ const METHODS = [
   {
     id: "paste",
     label: "Paste HTML",
-    blurb: "Fastest for snippets",
-    panelTitle: "Paste HTML and publish",
-    panelDescription:
-      "Drop in a single HTML document. canvas-drop creates the canvas and publishes it.",
     icon: FileHtml,
   },
   {
     id: "upload",
     label: "Upload files",
-    blurb: "Files, a folder, or a ZIP",
-    panelTitle: "Choose your files",
-    panelDescription: "Review your files, then publish when you’re ready.",
     icon: FolderOpen,
   },
   {
     id: "api",
     label: "Use the API",
-    blurb: "For agents and scripts",
-    panelTitle: "Create an API target",
-    panelDescription: "Generate a canvas and one-time secret key for programmatic deploys.",
     icon: Code,
   },
 ] satisfies [MethodConfig, ...MethodConfig[]];
@@ -139,8 +127,9 @@ export default function CreateCanvas() {
     setBusy(false);
     setProgress(null);
     const shareFailed = outcome.kind === "failed";
-    const access =
-      shareFailed || audience.choice === "private"
+    const access = shareFailed
+      ? "Check sharing before distributing the link"
+      : audience.choice === "private"
         ? "Restricted · Only you can open it"
         : audience.choice === "workspace"
           ? `Everyone in ${orgs.find((org) => org.id === homeOrgId)?.name ?? "your workspace"}`
@@ -252,9 +241,15 @@ export default function CreateCanvas() {
     setUpload(null);
     setError(null);
     if (!files.length) return;
-    const archives = files.filter((file) => /\.zip$/i.test(file.name));
-    if (archives.length && (files.length !== 1 || files[0]?.size === 0)) {
-      setError("Choose one non-empty ZIP, or select the unpacked files and folders.");
+    const first = files[0];
+    // A ZIP inside a selected folder is a downloadable asset, not a deploy archive.
+    const archive =
+      files.length === 1 &&
+      first &&
+      /\.zip$/i.test(first.name) &&
+      !rawUploadPath(first).includes("/");
+    if (archive && first.size === 0) {
+      setError("This ZIP is empty. Choose a ZIP containing your site.");
       return;
     }
     const paths = canvasRelativePaths(files);
@@ -262,11 +257,10 @@ export default function CreateCanvas() {
       setError("Two files have the same path. Choose files with unique paths.");
       return;
     }
-    setUpload({ kind: archives.length ? "zip" : "folder", files, paths });
+    setUpload({ kind: archive ? "zip" : "folder", files, paths });
   }
 
   if (leaving) return <PageHeader title="Opening your canvas…" />;
-  const activeMethod = METHODS.find((m) => m.id === method) ?? METHODS[0];
   const blocked =
     slugBlocked || (method !== "api" && audienceBlocked) || meQuery.isPending || meQuery.isError;
   if (revealed)
@@ -349,7 +343,7 @@ export default function CreateCanvas() {
           {method === "upload" && (
             <div className="space-y-4">
               <p className="text-sm text-muted">
-                {activeMethod.panelDescription} Relative paths are preserved.
+                Review your files, then publish when you’re ready. Relative paths are preserved.
               </p>
               <FileDropOrProgress
                 busy={busy}
@@ -504,11 +498,21 @@ export default function CreateCanvas() {
           </Button>
           <p className="text-xs text-muted">
             Start another way:{" "}
-            <a href="/gallery?templatable=true" className="text-accent hover:underline">
+            <a
+              href="/gallery?templatable=true"
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent hover:underline"
+            >
               find a template
             </a>{" "}
             ·{" "}
-            <a href="/docs/agents/mcp" className="text-accent hover:underline">
+            <a
+              href="/docs/agents/mcp"
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent hover:underline"
+            >
               connect an agent
             </a>
           </p>
