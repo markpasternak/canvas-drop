@@ -23,7 +23,7 @@ import {
 } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { type Concept, conceptColor, conceptIcon } from "../components/concept-colors.js";
+import { type Concept, conceptColor } from "../components/concept-colors.js";
 import { DetailDrawer } from "../components/DetailDrawer.js";
 import { DetailPanel } from "../components/DetailPanel.js";
 import {
@@ -376,76 +376,6 @@ function ViewToggle({ value, onChange }: { value: CanvasView; onChange: (v: Canv
   );
 }
 
-function SummaryStrip({
-  summary,
-  archivedView,
-}: {
-  summary: CanvasOwnerSummary;
-  archivedView: boolean;
-}) {
-  const items: Array<{
-    label: string;
-    value: number;
-    concept: Concept;
-    active?: boolean;
-  }> = [
-    { label: "Active", value: summary.active, concept: "active", active: !archivedView },
-    { label: "Archived", value: summary.archived, concept: "archived", active: archivedView },
-    { label: "Templates", value: summary.templates, concept: "templates" },
-    { label: "Never deployed", value: summary.neverDeployed, concept: "neverDeployed" },
-    { label: "Protected", value: summary.protected, concept: "protected" },
-  ];
-  return (
-    <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-5">
-      {items.map((item, index) => {
-        // Each stat is a per-concept accent-coloured icon tile + a label + an
-        // expressive number. The tile carries the colour (the concept's -subtle
-        // wash behind the concept-coloured glyph, both from the shared concept
-        // map); the surface itself stays calm warm-paper/deep-navy. The active
-        // lifecycle scope still gets its accent wash so the current scope stands
-        // out. Icon + colour are read from one source, so they can't drift.
-        const color = conceptColor(item.concept);
-        const Icon = conceptIcon(item.concept);
-        return (
-          <div
-            key={item.label}
-            data-concept={item.concept}
-            className={cn(
-              "flex items-center gap-2.5 bg-surface px-3 py-2.5",
-              index === items.length - 1 && "col-span-2 sm:col-span-1",
-              item.active && "bg-accent-subtle",
-            )}
-          >
-            <span
-              className={cn(
-                "flex size-9 shrink-0 items-center justify-center rounded-lg",
-                color.bg,
-                color.text,
-              )}
-              aria-hidden
-            >
-              <Icon size={18} weight="duotone" />
-            </span>
-            <div className="min-w-0">
-              <dt className="truncate text-[0.6875rem] font-medium uppercase tracking-wide text-subtle">
-                {item.label}
-              </dt>
-              <dd
-                className={cn(
-                  "text-2xl font-bold leading-none tracking-tight tabular-nums text-fg",
-                  item.active && "text-accent",
-                )}
-              >
-                {item.value}
-              </dd>
-            </div>
-          </div>
-        );
-      })}
-    </dl>
-  );
-}
-
 /** Shown when the owner has NO active canvases at all (not merely a filtered-empty
  * view). A brand-new user gets the onboarding first-run page; a user whose canvases
  * are ALL archived gets a pointer to the Archived view instead (showing "get
@@ -523,6 +453,17 @@ export default function CanvasList() {
           search.undeployed,
       );
   const filtering = Boolean(q) || hasNonSearchFilters;
+  const activeFilterCount = archivedView
+    ? 0
+    : Number(Boolean(access)) +
+      tags.length +
+      Number(Boolean(role)) +
+      STATE_CHIPS.filter((chip) => Boolean(search[chip.key])).length;
+  const [filtersOpen, setFiltersOpen] = useState(hasNonSearchFilters);
+  // Reveal a newly narrowed view; a manually collapsed view still shows the count.
+  useEffect(() => {
+    if (hasNonSearchFilters) setFiltersOpen(true);
+  }, [hasNonSearchFilters]);
 
   // Search box ⇆ URL `q`, debounced (shared with the admin canvases/users lists).
   const [text, setText] = useDebouncedUrlSearch(q, "/");
@@ -570,6 +511,7 @@ export default function CanvasList() {
     page,
     q,
     access,
+    role,
     // Joined into a stable string so a tag add/remove resets selection without an
     // array-identity dependency.
     tags.join(","),
@@ -817,7 +759,7 @@ export default function CanvasList() {
           on every page). No duplicate here. */}
       <PageHeader
         title="Your canvases"
-        description="Manage drafts, published versions, sharing, and settings from one place."
+        description="Pick up a draft or open something you've published."
       />
 
       {/* Two-pane layout (U3): the library + an additive right rail. At `xl` the rail
@@ -839,8 +781,6 @@ export default function CanvasList() {
                   Condition-driven (no dismiss); absent on a dense or filtered view. */}
               {finishCanvas && <FinishStrip canvas={finishCanvas} />}
 
-              <SummaryStrip summary={summary} archivedView={archivedView} />
-
               <div className="flex flex-wrap items-center gap-3">
                 <SearchInput
                   value={text}
@@ -855,12 +795,15 @@ export default function CanvasList() {
                   summary={summary}
                 />
                 {!archivedView && (
-                  <FilterSelect
-                    label="Filter by access"
-                    options={ACCESS_FILTER_OPTIONS}
-                    value={access ?? "all"}
-                    onValueChange={setAccess}
-                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-expanded={filtersOpen}
+                    aria-controls="canvas-library-filters"
+                    onClick={() => setFiltersOpen((open) => !open)}
+                  >
+                    Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+                  </Button>
                 )}
                 <FilterSelect
                   label="Sort your canvases"
@@ -871,68 +814,65 @@ export default function CanvasList() {
                 <ViewToggle value={view} onChange={setView} />
               </div>
 
-              {/* Attribute filters apply to the live set only — hidden in the archive.
-                  "Clear all" trails the whole chip row (only while a filter is active),
-                  not wedged between two chips. */}
+              {/* Attribute filters apply to the live set only. */}
               {!archivedView && (
-                <FilterBar>
-                  {/* Tag filter (U9) leads the filter row — a richer multi-select that
+                <div id="canvas-library-filters" hidden={!filtersOpen}>
+                  <FilterBar>
+                    <FilterSelect
+                      label="Filter by access"
+                      options={ACCESS_FILTER_OPTIONS}
+                      value={access ?? "all"}
+                      onValueChange={setAccess}
+                    />
+                    {/* Tag filter (U9) leads the filter row — a richer multi-select that
                       sits in the same hierarchy as the quick attribute toggles, set off
                       by a hairline. Hidden when no tags exist; "Clear all" (trailing)
                       wipes every param incl. ?tag=. */}
-                  <TagFilter availableTags={availableTags} selected={tags} onChange={setTags} />
-                  {availableTags.length > 0 && (
-                    <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
-                  )}
-                  {/* Owned / edited narrowing (editor-roles plan, R16) — shown only once the
+                    <TagFilter availableTags={availableTags} selected={tags} onChange={setTags} />
+                    {availableTags.length > 0 && (
+                      <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
+                    )}
+                    {/* Owned / edited narrowing (editor-roles plan, R16) — shown only once the
                       actor edits something that isn't theirs, so a solo owner's chip row is
                       unchanged. */}
-                  {summary.edited > 0 && (
-                    <>
-                      <FilterChip active={role === "owned"} onClick={() => setRole("owned")}>
-                        <span>Owned by me</span>
+                    {summary.edited > 0 && (
+                      <>
+                        <FilterChip active={role === "owned"} onClick={() => setRole("owned")}>
+                          <span>Owned by me</span>
+                          <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                            {summary.owned}
+                          </span>
+                        </FilterChip>
+                        <FilterChip active={role === "edited"} onClick={() => setRole("edited")}>
+                          <span>Editing</span>
+                          <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                            {summary.edited}
+                          </span>
+                        </FilterChip>
+                      </>
+                    )}
+                    {STATE_CHIPS.map((chip) => (
+                      <FilterChip
+                        key={chip.key}
+                        active={Boolean(search[chip.key])}
+                        onClick={() => toggle(chip.key)}
+                        dotClassName={conceptColor(chip.concept).dot}
+                      >
+                        <span>{chip.label}</span>
                         <span className="text-xs tabular-nums text-subtle" aria-hidden>
-                          {summary.owned}
+                          {summary[chip.countKey]}
                         </span>
                       </FilterChip>
-                      <FilterChip active={role === "edited"} onClick={() => setRole("edited")}>
-                        <span>Editing</span>
-                        <span className="text-xs tabular-nums text-subtle" aria-hidden>
-                          {summary.edited}
-                        </span>
-                      </FilterChip>
-                    </>
-                  )}
-                  {STATE_CHIPS.map((chip) => (
-                    <FilterChip
-                      key={chip.key}
-                      active={search[chip.key] === true}
-                      onClick={() => toggle(chip.key)}
-                      dotClassName={conceptColor(chip.concept).dot}
-                    >
-                      <span>{chip.label}</span>
-                      <span className="text-xs tabular-nums text-subtle" aria-hidden>
-                        {summary[chip.countKey]}
-                      </span>
-                    </FilterChip>
-                  ))}
-                  {filtering && (
-                    <button
-                      type="button"
-                      onClick={clearFilters}
-                      className="ml-1 h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-                    >
-                      Clear all
-                    </button>
-                  )}
-                </FilterBar>
+                    ))}
+                  </FilterBar>
+                </div>
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-xs text-subtle">
                   {isLoading ? "Loading canvases..." : resultLabel}
                 </p>
-                {archivedView && filtering && (
+                {filtering && (
                   <button
                     type="button"
                     onClick={clearFilters}

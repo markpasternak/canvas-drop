@@ -168,8 +168,10 @@ describe("list row badges", () => {
       canvas({ id: "draft", slug: "draft", title: "Draft one" }), // base: draft, lastDeploy null
     ]);
     await screen.findByText("Shipped one");
-    // Deployed: the "Published" stat column carries the live version + footprint.
-    expect(screen.getByText("v1")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View details for Shipped one" })).toHaveAttribute(
+      "href",
+      "/canvases/shipped",
+    );
     // The draft row reads "Draft" in a near-title chip.
     expect(screen.getAllByText("Draft").length).toBeGreaterThan(0);
     expect(screen.queryByText("0 B")).toBeNull();

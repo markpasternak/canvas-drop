@@ -2,7 +2,7 @@ import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { type CanvasListItem, isRestrictedRung } from "../lib/api.js";
-import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
+import { fullTime, relativeTime } from "../lib/format.js";
 import { useMe } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import {
@@ -155,13 +155,6 @@ function metaLine(canvas: CanvasListItem): string {
     .join(" · ");
 }
 
-/** The deployed footprint, e.g. "12 kB · 4 files", or null when never deployed. */
-function deployFootprint(canvas: CanvasListItem): string | null {
-  const d = canvas.lastDeploy;
-  if (!d) return null;
-  return `${formatBytes(d.totalBytes)} · ${d.fileCount} ${d.fileCount === 1 ? "file" : "files"}`;
-}
-
 /** Popularity summary (plan 004), shared by the row + card so the two never drift.
  *  `recentViews` is the trending 30-day count the "Most popular" sort ranks by; the
  *  tooltip adds the all-time total. `lastViewed` is a relative "Viewed Nd ago" line,
@@ -293,10 +286,8 @@ export function CanvasRow({
 }) {
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
-  const deploy = canvas.lastDeploy;
   // The canvas's unified description (the field the overview edits, also shown in the
   // gallery — U21) so the line on the row matches what populates when you open it.
-  const footprint = deployFootprint(canvas);
   const views = viewsSummary(canvas);
   const navigate = useNavigate();
   // The whole-row body click (and keyboard Enter/Space) opens the canvas's detail /
@@ -318,7 +309,7 @@ export function CanvasRow({
         <Link
           to="/canvases/$id"
           params={{ id: canvas.id }}
-          className="min-w-0 truncate rounded-sm font-display text-[0.95rem] text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+          className="min-w-0 basis-full truncate rounded-sm font-display text-lg leading-snug text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
           aria-label={`View details for ${title}`}
         >
           {title}
@@ -326,12 +317,9 @@ export function CanvasRow({
       }
       badges={<RowBadges canvas={canvas} />}
       meta={
-        <>
-          <span className="block truncate font-mono text-subtle">{canvas.slug}</span>
-          <span className="mt-0.5 block truncate" title={fullTime(lastActivity(canvas))}>
-            {metaLine(canvas)}
-          </span>
-        </>
+        <span className="mt-0.5 block truncate" title={fullTime(lastActivity(canvas))}>
+          {metaLine(canvas)}
+        </span>
       }
       description={canvas.description}
       tags={tags.length > 0 ? <RowTags tags={tags} /> : undefined}
@@ -347,24 +335,12 @@ export function CanvasRow({
         ) : undefined
       }
       stats={
-        <>
-          <StatCol
-            label={deploy ? "Published" : "Status"}
-            primary={deploy ? `v${deploy.version}` : "Not deployed"}
-            secondary={footprint}
-          />
-          <StatCol
-            label="Views"
-            primary={`${views.count}`}
-            secondary={views.lastViewed}
-            title={views.title}
-          />
-          <StatCol
-            label="Created"
-            primary={relativeTime(canvas.createdAt)}
-            title={fullTime(canvas.createdAt)}
-          />
-        </>
+        <StatCol
+          label="Views"
+          primary={`${views.count}`}
+          secondary={views.lastViewed}
+          title={views.title}
+        />
       }
       actions={actions ?? <DefaultRowActions canvas={canvas} />}
     />

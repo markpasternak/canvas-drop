@@ -25,7 +25,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function mockFetch() {
+function mockFetch(hasPreview = false) {
   const calls: { method: string; pathname: string; search: string }[] = [];
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
@@ -44,7 +44,7 @@ function mockFetch() {
             tags: ["handoff"],
             access: { kind: "team", label: "Design", teamIds: ["t1"], teamNames: ["Design"] },
             hasPassword: false,
-            hasPreview: false,
+            hasPreview,
             owner: { id: "u2", name: "Colleague", avatarUrl: null },
             createdAt: 1,
             updatedAt: 2,
@@ -87,6 +87,17 @@ afterEach(() => {
 });
 
 describe("shared page", () => {
+  it("uses the canvas update time to refresh covers in both layouts", async () => {
+    mockFetch(true);
+    renderShared();
+    const link = await screen.findByRole("link", { name: "Team Thing" });
+    const cover = () => document.querySelector('img[src*="__canvasdrop_preview"]');
+    expect(link).toBeInTheDocument();
+    expect(cover()).toHaveAttribute("src", expect.stringContaining("&v=2"));
+    await userEvent.click(screen.getByRole("button", { name: "Grid view" }));
+    expect(cover()).toHaveAttribute("src", expect.stringContaining("&v=2"));
+  });
+
   it("renders searchable paged shared canvases in list mode", async () => {
     const calls = mockFetch();
     const user = userEvent.setup();

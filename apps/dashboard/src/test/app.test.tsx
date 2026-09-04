@@ -186,10 +186,10 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    // "My Canvas" also appears in the U11 finish-this strip above the list; assert the
-    // row rendered via the (unique) slug rather than the now-duplicated title.
-    expect((await screen.findAllByText("My Canvas")).length).toBeGreaterThan(0);
-    expect(screen.getByText("quiet-otter")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "View details for My Canvas" })).toHaveAttribute(
+      "href",
+      "/canvases/c1",
+    );
   });
 
   it("mobile menu: the menu button toggles a second copy of the section links", async () => {
