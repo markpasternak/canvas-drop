@@ -89,13 +89,15 @@ const PRICING_CALCULATOR_HTML = `<!doctype html>
         color: var(--ink);
         background: #ecfeff;
         -webkit-font-smoothing: antialiased;
-        min-height: 100vh;
-        padding: 32px;
+        min-height: 100dvh;
+        padding: clamp(20px, 4vw, 56px);
+        max-width: 1200px;
+        margin: 0 auto;
       }
-      h1 { font-size: 22px; letter-spacing: -0.02em; }
+      h1 { font-size: clamp(24px, 3vw, 38px); letter-spacing: -0.02em; }
       .muted { color: var(--muted); }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 760px; }
-      .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: clamp(20px, 3vw, 36px); }
       label { display: block; font-size: 13px; margin: 14px 0 6px; }
       label:first-of-type { margin-top: 0; }
       input[type="range"] { width: 100%; accent-color: var(--accent); }
@@ -107,13 +109,17 @@ const PRICING_CALCULATOR_HTML = `<!doctype html>
         font: inherit;
       }
       .total { background: linear-gradient(160deg, #0891b2, #0e7490); color: #fff; border: none; }
-      .total .amount { font-size: 44px; font-weight: 800; letter-spacing: -0.03em; margin: 6px 0; }
+      .total .amount { font-size: clamp(40px, 5vw, 64px); font-weight: 800; letter-spacing: -0.03em; margin: 6px 0; }
       .line {
         display: flex;
         justify-content: space-between;
         padding: 8px 0;
         border-top: 1px solid rgba(255, 255, 255, 0.18);
         font-size: 14px;
+      }
+      @media (max-width: 600px) {
+        .grid { grid-template-columns: 1fr; }
+        select, input[type="number"] { font-size: 16px; }
       }
     </style>
   </head>

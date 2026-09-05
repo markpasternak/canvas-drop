@@ -6,7 +6,9 @@ The shortest path, from a signed-in dashboard:
 
 1. Open `/new` and pick **Paste HTML**.
 2. Paste your markup and review the document preview. Give it a title, choose its workspace and audience, then click **Create and publish**.
-3. Save the key from the dialog (it is shown once), then **Go to canvas**. The **Overview** tab has the URL: `{base}/c/{slug}/` in `path` mode, `https://{slug}.canvases.example.com/` in `subdomain` mode.
+3. Copy the link or choose **Open canvas**. Save the optional deploy key if you plan to publish through the API; it is shown once. The **Overview** tab also has the URL: `{base}/c/{slug}/` in `path` mode, `https://{slug}.canvases.example.com/` in `subdomain` mode.
+
+![Create a canvas: HTML, document preview, title, workspace, and audience](/docs/assets/new-canvas.webp)
 
 The same from a terminal, with the canvas id and key shown when you create a canvas:
 
@@ -25,7 +27,7 @@ curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
 | **Files or folder** | `/new`, or **Upload new version** | Uploads with relative paths preserved and publishes |
 | **Upload ZIP** | `/new`, or **Upload new version** | Extracts the archive server-side and publishes |
 | **Use the API** | `/new` | Mints an empty canvas plus its key; the first `PUT …/deploy` publishes |
-| **Editor** | The **Editor** tab | Autosaves a **draft**; you click **Publish** when ready |
+| **Editor** | The **Editor** tab | Autosaves a **draft**; you choose **Review and publish** when ready |
 | **Deploy API / MCP** | Scripts and agents | Publishes directly to live with a key or over MCP |
 
 ```mermaid

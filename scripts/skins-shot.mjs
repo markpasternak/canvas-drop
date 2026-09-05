@@ -26,12 +26,13 @@ const SKINS = [
 
 async function setSkin(page, value) {
   await page.evaluate(async (v) => {
-    await fetch("/api/admin/config/core.designSkin", {
+    const response = await fetch("/api/admin/config/core.designSkin", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ value: v }),
     });
+    if (!response.ok) throw new Error(`Could not set skin: ${response.status}`);
   }, value);
 }
 
@@ -52,6 +53,7 @@ async function main() {
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
+    colorScheme: "light",
   });
   // Establish the dev-auth session, remember the original skin to restore later.
   await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
@@ -62,16 +64,24 @@ async function main() {
   );
 
   const panels = [];
-  for (const skin of SKINS) {
-    await setSkin(page, skin.key);
-    // The full, populated grid shows the skin's accent, typography, radius, and cards.
-    await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
-    await page.waitForTimeout(900); // let cards + fonts settle
-    panels.push({ png: await page.screenshot({ fullPage: false }), label: skin.label });
+  try {
+    for (const skin of SKINS) {
+      await setSkin(page, skin.key);
+      await page.goto(`${BASE}/?tag=showcase`, { waitUntil: "networkidle", timeout: 20000 });
+      await page.locator("main h1").first().waitFor({ state: "visible" });
+      await page.evaluate(() => document.fonts.ready);
+      const filters = page.getByRole("button", { name: /^Filters/ });
+      if ((await filters.getAttribute("aria-expanded")) === "true") await filters.click();
+      await page.waitForTimeout(900);
+      panels.push({ png: await page.screenshot({ fullPage: false }), label: skin.label });
+    }
+  } finally {
+    try {
+      await setSkin(page, original);
+    } finally {
+      await browser.close();
+    }
   }
-
-  await setSkin(page, original); // leave the instance as we found it
-  await browser.close();
 
   // Composite: two panels side by side on a dark-navy card, each labelled.
   const PANEL_W = 1100; // display width per panel

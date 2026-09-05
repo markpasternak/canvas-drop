@@ -1,6 +1,6 @@
 # canvas-drop
 
-**Deploy and share the small web tools your org builds, behind your sign-in. Drop a folder, get a URL, on infrastructure you control.**
+**From a working artifact to a tool your team uses. Publish files from your laptop, cloud workspace, or AI agent. Give them a stable address and decide who can open them.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/markpasternak/canvas-drop/actions/workflows/ci.yml/badge.svg)](https://github.com/markpasternak/canvas-drop/actions/workflows/ci.yml)
@@ -10,9 +10,9 @@
   <img src="docs/site/assets/tour.webp" alt="canvas-drop: the dashboard, Shared, in-browser editor, gallery, sharing, backend, and admin" width="100%">
 </p>
 
-AI builds a working dashboard, form, or internal tool in minutes. Then it stalls, because there is nowhere safe and instant to put it: a zip in an email, a project on someone else's cloud outside your org boundary, or a ticket to a platform team. canvas-drop closes that last mile. It is the creation-and-sharing layer for AI-built tools, prototypes, dashboards, demos, and lightweight internal apps: self-hosted inside your trust boundary, MIT-licensed, with **no telemetry and no phone-home**.
+A useful tool should not depend on who has the latest ZIP, which chat created it, or who can open its cloud workspace. canvas-drop gives those artifacts a shared home: a live URL, named viewers and editors, and a version history you can recover from. Keep building in the tools you already use; publish here when someone else needs to use the result.
 
-It is inspired by [Quick](https://shopify.engineering/quick), Shopify's internal "drop a folder, get a URL" platform. Quick lives inside Shopify; canvas-drop is the open way to run the same idea on your own infrastructure, with a real backend, versioning, and a sharing model an org can govern.
+Self-hosted on your infrastructure. MIT licensed. No telemetry or phone-home. Inspired by Shopify's [Quick](https://shopify.engineering/quick).
 
 Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/docs)**. Every instance serves the same pages at `{base}/docs`; the source is [`docs/site/`](docs/site/).
 
@@ -20,17 +20,12 @@ Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/doc
 
 ## Why canvas-drop
 
-- **Distribution is the problem it solves.** AI build tools make the artifact. canvas-drop is where it lands: every canvas sits behind your org sign-in, on infra you control, reachable at an unguessable URL the moment it deploys. No new vendor, no data leaving the boundary.
-- **Agents ship from where they already work.** A keyed Deploy API, an installable [agent skill](docs/site/agents/skill.md), and a connect-once [MCP server](docs/site/agents/mcp.md) with 47 tools let an AI agent create and ship a canvas from your editor, terminal, or CI with no human in the loop.
-- **A real backend when you need it.** Six built-in primitives (KV, files, AI, identity, realtime, and admin-granted outbound connections) plus an authoring capability behind one `<script>` tag, no provisioning, **no secrets in the browser**. Authoring lets signed-in viewers create and manage canvases as themselves. The backend and authoring are off per canvas until you switch them on; stay fully static when you do not need them.
-- **The whole lifecycle is scriptable.** Create, deploy (including a content-addressed staged upload that sends only changed blobs), read back and verify, versions, rollback, unpublish, sharing, and the full draft-editor loop. The agent contract is one machine-readable page at `{base}/llms.txt`.
-- **Versioned, content-addressed storage.** Every publish is an immutable version; roll back to any of the last 10 in one click. Blobs are keyed by hash and versions are manifests over shared blobs, so a re-deploy writes only what changed.
-- **Roles on the people list.** Anyone on a canvas's people list, a person or a whole team, is a **viewer** or an **editor**. Editors manage the canvas as fully as the owner (content, deploys, settings, sharing, the people list); only deleting, transferring, and the guest-AI opt-in stay with the owner. Ownership moves in one step to an existing editor, and an admin can reassign a departed owner's canvases. Two editors on the same file get a named conflict, never a silent overwrite.
-- **Sharing that reads the way you expect.** Name people and teams (a self-serve group, personal or attached to your org) as viewers or editors — that list always applies — then pick General access: Restricted, Whole org, or a static Public link that admins can switch off globally or revoke per account. People and teams you add see the canvas in **Shared**; a Whole-org share can also be listed for the org and in the org-scoped gallery. Adding a new person is **auth-delegated**: they get access on their first sign-in through your configured auth, with no app-owned passwords or magic links.
-- **Run anywhere.** Database, storage, URL mode, and auth sit behind interfaces, so the same image runs on a laptop, a small VPS, or a corporate cloud. Swapping a driver is a config change, never a code change.
-- **Sensible defaults, full control when you want it.** It runs the moment you clone it. When you want control: an admin panel (all-canvases governance, disable and restore, owner reassignment, the AI model allowlist, quota defaults, public-link governance, design skins) plus typed env config validated at boot, so a bad combination fails loud instead of silently.
-
-> Quick is files plus a tiny API behind an identity proxy. canvas-drop keeps that gesture and adds the API surface, the versioned storage model, the six primitives, and the sharing ladder, so "drop a folder" also covers the parts an org actually needs.
+- **A home beyond the original workspace.** Drop a folder or ZIP, paste HTML, or publish from an agent. Each canvas has one address you can share and keep updating.
+- **Clear access, built in.** Start Restricted, add people and teams as viewers or editors, or open access to your org. Admins govern optional public links, which serve static content only. Added people sign in through your configured authentication.
+- **Keep improving the live tool.** Edit an autosaved draft, review its file changes and audience, then publish. Every publish creates an immutable version. Make an earlier version current, or restore it to a draft for revision; each recovery action explains what will change.
+- **Agents use the same capabilities.** A Deploy API, an installable [agent skill](docs/site/agents/skill.md), and a [MCP server](docs/site/agents/mcp.md) with 47 identity-scoped tools cover publishing, editing, sharing, versions, and the rest of the dashboard's owner/editor/viewer surface.
+- **Backend features when the tool needs them.** KV, file storage, AI, identity, realtime, and admin-granted outbound Connections are available through one browser SDK. Keep a canvas static or enable capabilities individually. Provider keys and connection credentials stay on the server.
+- **Infrastructure you control.** Choose SQLite or Postgres, local storage or S3, and proxy or OIDC authentication. Admins manage access, usage, quotas, and appearance. Configured AI providers and outbound Connections can send data to the services you choose.
 
 ---
 
@@ -43,7 +38,7 @@ git clone https://github.com/markpasternak/canvas-drop.git
 cd canvas-drop
 pnpm install
 cp .env.example .env       # defaults: path mode, SQLite, local storage, dev auth
-pnpm dev                   # server + dashboard + SDK in watch mode (Ctrl-C stops all)
+pnpm dev                   # server + dashboard + SDK in watch mode
 ```
 
 | URL | What |
@@ -51,7 +46,7 @@ pnpm dev                   # server + dashboard + SDK in watch mode (Ctrl-C stop
 | **http://localhost:5173** | The **dashboard** (Vite HMR). Develop here; it proxies `/api`, `/auth`, `/v1`, and the docs paths to the server. |
 | **http://localhost:3000** | The **server**: API, deploy endpoints, hosted canvases, `/docs`, `/mcp`. |
 
-`dev` auth signs you in as a fixed local user (`dev@example.com`, an admin by default), so there is nothing to set up. `pnpm dev` seeds sample canvases into an empty database (`CANVAS_DROP_DEV_SEED=0` skips that). `curl http://localhost:3000/healthz` confirms the server is up. Port taken? `CANVAS_DROP_PORT=3001 pnpm dev`. `pnpm dev:stop` shuts everything down from another shell.
+`dev` auth signs you in as a fixed local user (`dev@example.com`, an admin by default), so there is nothing to set up. `pnpm dev` seeds sample canvases into an empty database (`CANVAS_DROP_DEV_SEED=0` skips that). `curl http://localhost:3000/healthz` confirms the server is up. Port taken? `CANVAS_DROP_PORT=3001 pnpm dev`.
 
 The `.env` file is read only by `pnpm dev`. In production, config comes from the process manager or container environment.
 
@@ -59,11 +54,11 @@ The `.env` file is read only by `pnpm dev`. In production, config comes from the
 
 ## Deploy a canvas
 
-Every deploy produces the same thing: an immutable version served at an unguessable URL. Three paths live in the dashboard; the fourth is for scripts and agents.
+Every deploy produces an immutable version at the canvas's stable URL. Slugs are generated by default; owners can choose their own. Three paths live in the dashboard; the fourth is for scripts and agents.
 
 1. **Drag a folder or ZIP** with `index.html` and its assets.
 2. **Paste HTML** for a single-file artifact (often what an AI just wrote). It publishes in one step.
-3. **Edit in the browser**: a file tree plus CodeMirror editor work against a mutable **draft** with autosave; **Publish** snapshots it into an immutable version. A single-HTML draft also gets an on-page text-editing mode.
+3. **Edit in the browser**: a file tree plus CodeMirror editor work against a mutable **draft** with autosave; **Review and publish** shows the saved file changes and who can open the result before making it live. A single-HTML draft also gets an on-page text-editing mode.
 4. **Deploy API**: `PUT` a ZIP with the canvas's secret key. `deploy = live`, no draft loop.
 
 Paste, folder, and ZIP also work as **Upload new version** on a canvas that already exists.
@@ -167,7 +162,7 @@ Going to production is a configuration change: start from [`.env.production.exam
 
 ## Security model
 
-canvas-drop runs inside a **trusted organization**: everyone reaching it has passed org sign-in, and an email-domain allowlist keeps outsiders out. That posture deletes whole problem classes (anonymous abuse, spam, public bot traffic). What remains is a short list of **hard invariants that must never break** ([`BUILD_BRIEF.md` §12.0](BUILD_BRIEF.md); operator view in [`docs/site/self-hosting/security-model.md`](docs/site/self-hosting/security-model.md)):
+The dashboard and backend capabilities require sign-in through your configured authentication. People and teams can receive named access; admins can also allow anonymous, static-only public links. Operators control the sign-in policy and public-link availability. The implementation protects these **hard invariants** ([`BUILD_BRIEF.md` §12.0](BUILD_BRIEF.md); operator view in [`docs/site/self-hosting/security-model.md`](docs/site/self-hosting/security-model.md)):
 
 1. **No impersonation.** Identity always comes from the server-side auth context, never anything the client sends. In `proxy` mode only the trusted proxy may assert identity: a verified JWT, or headers from a peer listed in `CANVAS_DROP_TRUSTED_PROXY_IPS`.
 2. **No credential or canvas theft.** Deploy keys are SHA-256-hashed at rest and shown once; session tokens are hashed at rest too; canvas passwords are argon2id.
@@ -205,7 +200,7 @@ Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usag
 
 **M10 ops/packaging is the one open milestone.**
 
-The [first-publish UX round](docs/plans/2026-09-04-001-feat-publishing-experience-plan.md) adds problem-led marketing with the original multi-view walkthrough, staged uploads and an isolated HTML preview, link-led publish results, clearer canvas and draft actions, and a refined SVG identity. **Before deploying this round, refresh the marketing walkthrough and documentation screenshots against the final UI.** The current product screenshots show the previous version.
+The [publishing and brand refresh](docs/plans/2026-09-04-001-feat-publishing-experience-plan.md) and [library-to-publish UX round](docs/plans/2026-09-05-001-feat-library-to-publish-ux-plan.md) add clearer library scanning, details for resuming work, audience summaries, publish review, version-recovery guidance, and keyboard/mobile polish. The marketing walkthrough, documentation screenshots, and animated tour above show the refreshed UI with example content.
 
 | Shipped | Still deferred |
 |---------|----------------|
@@ -226,7 +221,6 @@ Not started, and not claimed anywhere above: a CLI, DB-backed custom domains, mu
 
 ```bash
 pnpm dev              # server + dashboard + SDK in watch mode
-pnpm dev:stop         # stop a running `pnpm dev` from another shell
 pnpm test             # full suite: BOTH dialects (sqlite + pglite) in-process, then the dashboard
 pnpm test:sqlite      # sqlite leg only
 pnpm test:pg          # postgres (pglite) leg only

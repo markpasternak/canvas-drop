@@ -138,7 +138,7 @@ export function CanvasGridCard({
     <li
       data-canvas-item
       className={cn(
-        "group relative flex aspect-[3/2] w-full max-w-full cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-surface-sunken shadow-[var(--shadow-panel)]",
+        "group relative flex min-h-64 w-full max-w-full cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-surface-sunken shadow-[var(--shadow-panel)]",
         cardHoverClass,
         selected && "border-accent ring-1 ring-accent",
       )}
@@ -201,7 +201,7 @@ export function CanvasGridCard({
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             {nameLink}
             {badges && (
-              <span className="relative z-10 flex shrink-0 flex-wrap items-center gap-1">
+              <span className="relative z-10 flex max-w-full shrink-0 flex-wrap items-center gap-1">
                 {badges}
               </span>
             )}
