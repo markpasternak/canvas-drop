@@ -63,6 +63,13 @@ export default function Share() {
   const [transferTo, setTransferTo] = useState<string | null>(null);
   const [peopleRefreshKey, setPeopleRefreshKey] = useState(0);
   const activeCanvasId = useRef<string | null>(id);
+  const sharingHeading = useRef<HTMLHeadingElement>(null);
+  const [publishedFromReview, setPublishedFromReview] = useState<string | null>(null);
+  useEffect(() => {
+    if (publishedFromReview !== id || canvas?.publicationState !== "published") return;
+    sharingHeading.current?.focus();
+    setPublishedFromReview(null);
+  }, [id, canvas?.publicationState, publishedFromReview]);
   // The people-and-teams list as the list component last loaded it: drives the Restricted
   // hint ("only you" vs "you and the N above") and the legacy-guest AI section. `null` until
   // the list for THIS canvas has loaded (and after a failed load), so the copy below never
@@ -71,6 +78,7 @@ export default function Share() {
   useEffect(() => {
     activeCanvasId.current = id;
     setPeople(null);
+    setPublishedFromReview(null);
     setTransferCandidates(null);
     setTransferOpen(false);
     setTransferTo(null);
@@ -196,7 +204,14 @@ export default function Share() {
   // `publicationState` flips and this component re-renders with the full ladder in
   // place — no navigation, no manual reload.
   if (canvas.publicationState !== "published") {
-    return <ShareLocked canvasId={canvas.id} />;
+    return (
+      <ShareLocked
+        canvasId={canvas.id}
+        onPublished={() => {
+          if (activeCanvasId.current === id) setPublishedFromReview(id);
+        }}
+      />
+    );
   }
 
   // Teams the caller can share THIS canvas to (plan 003 U6): their own teams (`mine`). A
@@ -214,9 +229,13 @@ export default function Share() {
       />
       <div className="space-y-6">
         <header className="space-y-1">
-          <h1 className="font-display text-h1 leading-tight tracking-[var(--display-tracking)] text-fg">
+          <h2
+            ref={sharingHeading}
+            tabIndex={-1}
+            className="font-display text-h1 leading-tight tracking-[var(--display-tracking)] text-fg"
+          >
             Sharing and permissions
-          </h1>
+          </h2>
           <p className="text-sm text-muted">
             Control who can open this canvas and what they can do.
           </p>
@@ -592,7 +611,7 @@ export default function Share() {
  * no navigation, no manual reload. Open draft routes to the editor for those who want
  * to keep working before going live.
  */
-function ShareLocked({ canvasId }: { canvasId: string }) {
+function ShareLocked({ canvasId, onPublished }: { canvasId: string; onPublished: () => void }) {
   const [reviewOpen, setReviewOpen] = useState(false);
 
   return (
@@ -629,7 +648,11 @@ function ShareLocked({ canvasId }: { canvasId: string }) {
         </div>
       </Panel>
       {reviewOpen && (
-        <PublishReviewDialog canvasId={canvasId} onClose={() => setReviewOpen(false)} />
+        <PublishReviewDialog
+          canvasId={canvasId}
+          onClose={() => setReviewOpen(false)}
+          onPublished={onPublished}
+        />
       )}
     </TabContentFrame>
   );

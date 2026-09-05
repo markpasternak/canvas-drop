@@ -362,8 +362,8 @@ export function AppLayout() {
           and the canvases route's own right detail rail. ──────────────────── */}
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/90 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/78 lg:hidden">
-          <div className="flex h-16 items-center justify-between gap-3 px-5">
-            <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-16 items-center justify-between gap-2 px-3 sm:gap-3 sm:px-5">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               {/* Mobile menu toggle — the section nav lives in the rail, hidden
                   below `lg`, so this hamburger is the only way to reach the
                   sections on a phone. */}
@@ -384,7 +384,10 @@ export function AppLayout() {
               <Brand />
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <CreateCanvasButton compact className="px-3" />
+              <CreateCanvasButton
+                compact
+                className="max-[380px]:w-9 max-[380px]:px-0 max-[380px]:[&>span]:hidden"
+              />
               {me.data && <UserMenu me={me.data} />}
             </div>
           </div>
