@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { BRAND_TOKENS, type Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
@@ -255,8 +255,8 @@ ${redirectHead}
 <style>
   body { margin: 0; min-height: 100dvh; display: grid; place-items: center;
     font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: #0b0b0d; color: #a1a1aa; }
-  a { color: #56c9d3; text-decoration: none; }
+    background: ${BRAND_TOKENS.dark.canvas}; color: ${BRAND_TOKENS.dark.muted}; }
+  a { color: ${BRAND_TOKENS.dark.accent}; text-decoration: none; }
 </style>
 </head>
 <body>

@@ -12,6 +12,8 @@
 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { oklchToHex } from "../packages/shared/src/brand/contrast.ts";
+import { BRAND_TOKENS } from "../packages/shared/src/brand/tokens.ts";
 import { launchChromiumWithChromeFallback } from "./playwright-launch.mjs";
 
 const BASE = process.env.CANVAS_DROP_DASHBOARD_URL ?? "http://localhost:5173";
@@ -116,7 +118,7 @@ async function main() {
   const browser = await launchChromiumWithChromeFallback(chromium);
   const panels = await captureSkinPanels(browser);
 
-  // Composite: two panels side by side on a dark-navy card, each labelled.
+  // Composite: two panels side by side on the shared graphite surface, each labelled.
   const PANEL_W = 1100; // display width per panel
   const resized = await Promise.all(
     panels.map(async (p) => {
@@ -134,9 +136,9 @@ async function main() {
 
   const labelSvg = `<svg width="${totalW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
   <style> text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; } </style>
-  <text x="${PAD}" y="${PAD + H + 38}" font-size="30" font-weight="700" fill="#e8eaf0">${resized[0].label}</text>
-  <text x="${PAD + resized[0].w + GAP}" y="${PAD + H + 38}" font-size="30" font-weight="700" fill="#e8eaf0">${resized[1].label}</text>
-  <text x="${totalW - PAD}" y="${PAD + H + 38}" font-size="22" fill="#8b93a7" text-anchor="end">One platform · admin-flippable design skins</text>
+  <text x="${PAD}" y="${PAD + H + 38}" font-size="30" font-weight="700" fill="${oklchToHex(BRAND_TOKENS.dark.fg)}">${resized[0].label}</text>
+  <text x="${PAD + resized[0].w + GAP}" y="${PAD + H + 38}" font-size="30" font-weight="700" fill="${oklchToHex(BRAND_TOKENS.dark.fg)}">${resized[1].label}</text>
+  <text x="${totalW - PAD}" y="${PAD + H + 38}" font-size="22" fill="${oklchToHex(BRAND_TOKENS.dark.muted)}" text-anchor="end">One platform · admin-flippable design skins</text>
 </svg>`;
 
   await sharp({
@@ -144,7 +146,7 @@ async function main() {
       width: totalW,
       height: totalH,
       channels: 4,
-      background: { r: 11, g: 14, b: 20, alpha: 1 },
+      background: oklchToHex(BRAND_TOKENS.dark.canvas),
     },
   })
     .composite([

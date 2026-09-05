@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Config, SkinName } from "@canvas-drop/shared";
+import { BRAND_TOKENS, type Config, oklchToHex, type SkinName } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -285,8 +285,8 @@ function head(origin: string): string {
 ${ogMeta({ origin, path: "/", title, description: desc })}
 ${FAVICON_LINKS}
 <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable docs">
-<meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="${oklchToHex(BRAND_TOKENS.dark.canvas)}" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="${oklchToHex(BRAND_TOKENS.light.canvas)}" media="(prefers-color-scheme: light)">
 <script type="application/ld+json">${jsonLd}</script>
 <style>${STYLES}
 </style>

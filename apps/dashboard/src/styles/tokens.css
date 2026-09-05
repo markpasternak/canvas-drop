@@ -6,35 +6,36 @@
  * a parity test (`tokens.test.ts`) fails CI if this file drifts from it. Every
  * server-rendered surface derives from the same source, so a re-skin is one edit.
  *
- * Direction: warm-paper light (default) + deep-navy dark, a single deep-teal accent
- * (hue ~200). Authored in OKLCH (perceptually even, predictable AA contrast). Light
+ * Direction: warm-paper light (default) + graphite dark, a single deep-teal accent
+ * (hue ~190). Authored in OKLCH (perceptually even, predictable AA contrast). Light
  * and dark are both first-class — light is the default, dark follows the OS unless
  * overridden via [data-theme] on <html>. Components never hard-code a colour, font,
  * radius, or shadow — every value resolves to a semantic variable.
  *
  * Elevation is soft + tactile ("paper & objects"): warm-tinted, two-layer shadows
- * in light; deep navy in dark. Radii are generous. Motion is ≤180ms ease-out.
+ * in light; graphite in dark. Radii are generous. Motion is ≤180ms ease-out.
  */
 
 /* --- Semantic palette: LIGHT (warm paper, default) --- */
 :root {
   color-scheme: light;
+  accent-color: var(--accent);
 
-  --canvas: oklch(0.969 0.008 85);
-  --surface: oklch(0.987 0.006 85);
-  --surface-raised: oklch(0.998 0.004 85);
-  --surface-sunken: oklch(0.945 0.010 85);
-  --surface-hover: oklch(0.955 0.010 85);
-  --fg: oklch(0.255 0.012 75);
-  --muted: oklch(0.475 0.012 75);
-  --subtle: oklch(0.500 0.012 75);
-  --border: oklch(0.895 0.010 85);
-  --border-strong: oklch(0.820 0.012 75);
+  --canvas: oklch(0.972 0.004 85);
+  --surface: oklch(0.992 0.003 85);
+  --surface-raised: oklch(0.998 0.002 85);
+  --surface-sunken: oklch(0.943 0.006 85);
+  --surface-hover: oklch(0.955 0.006 85);
+  --fg: oklch(0.250 0.009 75);
+  --muted: oklch(0.460 0.009 75);
+  --subtle: oklch(0.500 0.009 75);
+  --border: oklch(0.865 0.007 85);
+  --border-strong: oklch(0.770 0.010 75);
 
-  --accent: oklch(0.49 0.105 200);
-  --accent-hover: oklch(0.43 0.10 200);
-  --accent-fg: oklch(0.99 0.02 200);
-  --accent-subtle: oklch(0.93 0.045 197);
+  --accent: oklch(0.48 0.085 190);
+  --accent-hover: oklch(0.42 0.080 190);
+  --accent-fg: oklch(0.99 0.005 190);
+  --accent-subtle: oklch(0.935 0.025 190);
 
   --danger: oklch(0.555 0.205 27);
   --danger-hover: oklch(0.49 0.2 27);
@@ -55,9 +56,9 @@
   --shared: oklch(0.55 0.15 14);
   --shared-subtle: oklch(0.95 0.035 14);
 
-  --ring: oklch(0.49 0.105 200);
-  --logo-frame: oklch(0.27 0.022 235);
-  --logo-drop: oklch(0.49 0.105 200);
+  --ring: oklch(0.48 0.085 190);
+  --logo-frame: oklch(0.270 0.009 75);
+  --logo-drop: oklch(0.48 0.085 190);
   --scrim: oklch(0.21 0.02 80 / 0.5);
 
   /* --- Expression layer (design skins). The display-type bundle + radius scale
@@ -89,17 +90,17 @@
      flattens (workshop) or deepens (canvas) the whole scale by overriding this one var;
      default 1 keeps editorial mathematically identical (calc(x * 1) = x). */
   --shadow-strength: 1;
-  --shadow-color: 40 30% 38%;
+  --shadow-color: 45 12% 38%;
   --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-strength, 1)));
   --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / calc(0.06 * var(--shadow-strength, 1))), 0 4px 10px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-strength, 1)));
   --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / calc(0.05 * var(--shadow-strength, 1))), 0 8px 22px hsl(var(--shadow-color) / calc(0.09 * var(--shadow-strength, 1)));
   --shadow-md: 0 2px 4px hsl(var(--shadow-color) / calc(0.07 * var(--shadow-strength, 1))), 0 16px 38px hsl(var(--shadow-color) / calc(0.12 * var(--shadow-strength, 1)));
   --shadow-popover: 0 14px 34px hsl(var(--shadow-color) / calc(0.14 * var(--shadow-strength, 1))), 0 3px 8px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-strength, 1)));
   --shadow-lg: 0 24px 56px hsl(var(--shadow-color) / calc(0.18 * var(--shadow-strength, 1))), 0 8px 18px hsl(var(--shadow-color) / calc(0.12 * var(--shadow-strength, 1)));
-  --shadow-focus: 0 0 0 3px oklch(0.49 0.105 200 / 0.32);
+  --shadow-focus: 0 0 0 3px oklch(0.48 0.085 190 / 0.32);
 }
 
-/* --- Semantic palette: DARK (deep navy; system, unless overridden) --- */
+/* --- Semantic palette: DARK (graphite; system, unless overridden) --- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
@@ -114,21 +115,21 @@
     --syn-num: oklch(0.78 0.12 52);
     --syn-punc: oklch(0.62 0.01 82);
 
-    --canvas: oklch(0.175 0.018 265);
-    --surface: oklch(0.212 0.020 265);
-    --surface-raised: oklch(0.245 0.022 265);
-    --surface-sunken: oklch(0.150 0.016 265);
-    --surface-hover: oklch(0.262 0.022 265);
-    --fg: oklch(0.965 0.004 265);
-    --muted: oklch(0.715 0.014 265);
-    --subtle: oklch(0.620 0.014 265);
-    --border: oklch(0.295 0.020 265);
-    --border-strong: oklch(0.390 0.022 265);
+    --canvas: oklch(0.205 0.006 80);
+    --surface: oklch(0.240 0.006 80);
+    --surface-raised: oklch(0.280 0.007 80);
+    --surface-sunken: oklch(0.175 0.005 80);
+    --surface-hover: oklch(0.290 0.008 80);
+    --fg: oklch(0.954 0.005 85);
+    --muted: oklch(0.740 0.008 85);
+    --subtle: oklch(0.670 0.008 85);
+    --border: oklch(0.350 0.008 80);
+    --border-strong: oklch(0.440 0.010 80);
 
-    --accent: oklch(0.78 0.105 195);
-    --accent-hover: oklch(0.83 0.09 195);
-    --accent-fg: oklch(0.16 0.04 210);
-    --accent-subtle: oklch(0.30 0.06 200);
+    --accent: oklch(0.76 0.075 190);
+    --accent-hover: oklch(0.81 0.070 190);
+    --accent-fg: oklch(0.18 0.015 190);
+    --accent-subtle: oklch(0.30 0.034 190);
 
     --danger: oklch(0.7 0.17 25);
     --danger-hover: oklch(0.76 0.155 25);
@@ -146,21 +147,21 @@
     --shared: oklch(0.80 0.14 16);
     --shared-subtle: oklch(0.30 0.08 18);
 
-    --ring: oklch(0.83 0.09 195);
-    --logo-frame: oklch(0.965 0.004 265);
-    --logo-drop: oklch(0.78 0.105 195);
-    --scrim: oklch(0.04 0.01 266 / 0.66);
-    --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
+    --ring: oklch(0.81 0.070 190);
+    --logo-frame: oklch(0.954 0.005 85);
+    --logo-drop: oklch(0.76 0.075 190);
+    --scrim: oklch(0.06 0.004 80 / 0.66);
+    --card-overlay-fill: oklch(0.18 0.006 80 / 0.44);
     --card-overlay-border: oklch(1 0 0 / 0.12);
 
-    --shadow-color: 265 60% 2%;
+    --shadow-color: 45 8% 2%;
     --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
     --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 4px 10px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
     --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 10px 26px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
     --shadow-md: 0 2px 6px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1))), 0 18px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1)));
     --shadow-popover: 0 16px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1))), 0 3px 10px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
     --shadow-lg: 0 28px 64px hsl(var(--shadow-color) / calc(0.7 * var(--shadow-strength, 1))), 0 8px 20px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
-    --shadow-focus: 0 0 0 3px oklch(0.83 0.09 195 / 0.38);
+    --shadow-focus: 0 0 0 3px oklch(0.81 0.070 190 / 0.38);
   }
 }
 
@@ -178,21 +179,21 @@
   --syn-num: oklch(0.78 0.12 52);
   --syn-punc: oklch(0.62 0.01 82);
 
-  --canvas: oklch(0.175 0.018 265);
-  --surface: oklch(0.212 0.020 265);
-  --surface-raised: oklch(0.245 0.022 265);
-  --surface-sunken: oklch(0.150 0.016 265);
-  --surface-hover: oklch(0.262 0.022 265);
-  --fg: oklch(0.965 0.004 265);
-  --muted: oklch(0.715 0.014 265);
-  --subtle: oklch(0.620 0.014 265);
-  --border: oklch(0.295 0.020 265);
-  --border-strong: oklch(0.390 0.022 265);
+  --canvas: oklch(0.205 0.006 80);
+  --surface: oklch(0.240 0.006 80);
+  --surface-raised: oklch(0.280 0.007 80);
+  --surface-sunken: oklch(0.175 0.005 80);
+  --surface-hover: oklch(0.290 0.008 80);
+  --fg: oklch(0.954 0.005 85);
+  --muted: oklch(0.740 0.008 85);
+  --subtle: oklch(0.670 0.008 85);
+  --border: oklch(0.350 0.008 80);
+  --border-strong: oklch(0.440 0.010 80);
 
-  --accent: oklch(0.78 0.105 195);
-  --accent-hover: oklch(0.83 0.09 195);
-  --accent-fg: oklch(0.16 0.04 210);
-  --accent-subtle: oklch(0.30 0.06 200);
+  --accent: oklch(0.76 0.075 190);
+  --accent-hover: oklch(0.81 0.070 190);
+  --accent-fg: oklch(0.18 0.015 190);
+  --accent-subtle: oklch(0.30 0.034 190);
 
   --danger: oklch(0.7 0.17 25);
   --danger-hover: oklch(0.76 0.155 25);
@@ -210,21 +211,21 @@
   --shared: oklch(0.80 0.14 16);
   --shared-subtle: oklch(0.30 0.08 18);
 
-  --ring: oklch(0.83 0.09 195);
-  --logo-frame: oklch(0.965 0.004 265);
-  --logo-drop: oklch(0.78 0.105 195);
-  --scrim: oklch(0.04 0.01 266 / 0.66);
-  --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
+  --ring: oklch(0.81 0.070 190);
+  --logo-frame: oklch(0.954 0.005 85);
+  --logo-drop: oklch(0.76 0.075 190);
+  --scrim: oklch(0.06 0.004 80 / 0.66);
+  --card-overlay-fill: oklch(0.18 0.006 80 / 0.44);
   --card-overlay-border: oklch(1 0 0 / 0.12);
 
-  --shadow-color: 265 60% 2%;
+  --shadow-color: 45 8% 2%;
   --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
   --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 4px 10px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
   --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 10px 26px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
   --shadow-md: 0 2px 6px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1))), 0 18px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1)));
   --shadow-popover: 0 16px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1))), 0 3px 10px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
   --shadow-lg: 0 28px 64px hsl(var(--shadow-color) / calc(0.7 * var(--shadow-strength, 1))), 0 8px 20px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
-  --shadow-focus: 0 0 0 3px oklch(0.83 0.09 195 / 0.38);
+  --shadow-focus: 0 0 0 3px oklch(0.81 0.070 190 / 0.38);
 }
 
 /*

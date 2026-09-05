@@ -6,6 +6,9 @@
  * and `tokens.ts` for the colors/logo. Org-agnostic by rule — no organisation-
  * specific naming lives in components.
  */
+import { oklchToHex } from "./contrast.js";
+import { BRAND_TOKENS } from "./tokens.js";
+
 export const BRAND = {
   /** Product name. Lowercase wordmark; referenced everywhere instead of a literal. */
   name: "canvas-drop",
@@ -15,10 +18,10 @@ export const BRAND = {
   githubUrl: "https://github.com/markpasternak/canvas-drop",
 
   /** Primary accent hue (OKLCH) — deep teal. The single chromatic identity. */
-  accentHue: 200,
+  accentHue: 190,
 
   /** Browser/PWA theme-color (warm paper). */
-  themeColor: "#f7f4ed",
+  themeColor: oklchToHex(BRAND_TOKENS.light.canvas),
 
   /** Type system (self-hosted via @fontsource-variable). Three voices. */
   fontSerif: '"Newsreader Variable", Georgia, "Times New Roman", serif',

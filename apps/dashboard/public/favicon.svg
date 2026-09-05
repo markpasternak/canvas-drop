@@ -1,4 +1,4 @@
-<svg viewBox="0 0 32 32" fill="none" role="img" aria-label="canvas-drop" xmlns="http://www.w3.org/2000/svg"><title>canvas-drop</title><style>:root{color-scheme:light dark;--frame:#20303c;--drop:#0c7b88}@media(prefers-color-scheme:dark){:root{--frame:#f3f3f6;--drop:#56c9d3}}</style>
+<svg viewBox="0 0 32 32" fill="none" role="img" aria-label="canvas-drop" xmlns="http://www.w3.org/2000/svg"><title>canvas-drop</title><style>:root{color-scheme:light dark;--frame:#292622;--drop:#006d68}@media(prefers-color-scheme:dark){:root{--frame:#f1f0ec;--drop:#76c1bc}}</style>
   <path d="M9 10H7a3 3 0 0 0-3 3v13a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3V13a3 3 0 0 0-3-3h-2" stroke="var(--frame)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M16 2v12m-5-5 5 5 5-5" stroke="var(--drop)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

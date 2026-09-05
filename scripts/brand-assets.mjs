@@ -4,12 +4,23 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { oklchToHex } from "../packages/shared/src/brand/contrast.ts";
 import { brandMarkSvg } from "../packages/shared/src/brand/logo.ts";
+import { BRAND_TOKENS } from "../packages/shared/src/brand/tokens.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = join(root, "apps/dashboard/public");
-const light = { frame: "#20303c", drop: "#0c7b88" };
-const dark = { frame: "#f3f3f6", drop: "#56c9d3" };
+const light = {
+  frame: oklchToHex(BRAND_TOKENS.light["logo-frame"]),
+  drop: oklchToHex(BRAND_TOKENS.light.accent),
+};
+const dark = {
+  frame: oklchToHex(BRAND_TOKENS.dark["logo-frame"]),
+  drop: oklchToHex(BRAND_TOKENS.dark.accent),
+};
+const paper = oklchToHex(BRAND_TOKENS.light.canvas);
+const border = oklchToHex(BRAND_TOKENS.light.border);
+const muted = oklchToHex(BRAND_TOKENS.light.muted);
 const colors = `<style>:root{color-scheme:light dark;--frame:${light.frame};--drop:${light.drop}}@media(prefers-color-scheme:dark){:root{--frame:${dark.frame};--drop:${dark.drop}}}</style>`;
 
 function mark({ compact = false, adaptive = false, ...options } = {}) {
@@ -44,9 +55,9 @@ export async function buildIcons() {
         bottom: padding,
         left: padding,
         right: padding,
-        background: "#f7f4ed",
+        background: paper,
       })
-      .flatten({ background: "#f7f4ed" })
+      .flatten({ background: paper })
       .png()
       .toFile(join(publicDir, file));
   }
@@ -73,7 +84,7 @@ export async function buildSocialCards() {
     ["og.png", 1200, 630],
     ["github-social.png", 1280, 640],
   ]) {
-    const base = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#f7f4ed"/><path d="M76 157H${width - 76}" stroke="#d6d9d4"/><svg x="76" y="54" width="64" height="64">${brandMarkSvg(light)}</svg></svg>`;
+    const base = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${paper}"/><path d="M76 157H${width - 76}" stroke="${border}"/><svg x="76" y="54" width="64" height="64">${brandMarkSvg(light)}</svg></svg>`;
     await sharp(Buffer.from(base))
       .composite([
         { input: await textLayer("canvas-drop", "geist", 36, light.frame), left: 160, top: 70 },
@@ -92,13 +103,13 @@ export async function buildSocialCards() {
             "A shared home. Controlled access. Room to keep building.",
             "geist",
             27,
-            "#52646b",
+            muted,
           ),
           left: 80,
           top: 448,
         },
         {
-          input: await textLayer("Open source  ·  Self-hostable  ·  MIT", "geist", 21, "#52646b"),
+          input: await textLayer("Open source  ·  Self-hostable  ·  MIT", "geist", 21, muted),
           left: 80,
           top: height - 76,
         },

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { oklchToHex } from "./contrast.js";
 import {
   ACCENT_ROLE_ORDER,
   SKIN_NAMES,
@@ -46,7 +47,7 @@ function roleValue(blockBody: string, role: string): string | undefined {
 
 // hue ~274 (indigo-violet) in any oklch form, including alpha (`274 / 0.3`) —
 // the SaaS default the rebrand rejected.
-const INDIGO = /oklch\([^)]*\b27[0-9]\b/;
+const INDIGO = /oklch\(\s*[0-9.]+%?\s+[0-9.]+%?\s+27[0-9](?:\.[0-9]+)?(?:deg)?(?=[\s/)])/;
 
 const dashboardCss = read("../../../../apps/dashboard/src/styles/tokens.css");
 
@@ -67,6 +68,31 @@ const SERVER_SURFACES = [
 ];
 
 describe("BRAND_TOKENS parity", () => {
+  it("keeps browser metadata and generated SVG colors aligned with the palette", () => {
+    const manifest = JSON.parse(read("../../../../apps/dashboard/public/site.webmanifest"));
+    const html = read("../../../../apps/dashboard/index.html");
+    expect(manifest.theme_color).toBe(oklchToHex(BRAND_TOKENS.light.canvas));
+    expect(manifest.background_color).toBe(oklchToHex(BRAND_TOKENS.light.canvas));
+    for (const theme of ["light", "dark"] as const) {
+      expect(html).toContain(
+        `content="${oklchToHex(BRAND_TOKENS[theme].canvas)}" media="(prefers-color-scheme: ${theme})"`,
+      );
+      const values = `--frame:${oklchToHex(BRAND_TOKENS[theme]["logo-frame"])};--drop:${oklchToHex(BRAND_TOKENS[theme].accent)}`;
+      const declaration =
+        theme === "light"
+          ? `:root{color-scheme:light dark;${values}}`
+          : `@media(prefers-color-scheme:dark){:root{${values}}}`;
+      for (const svg of ["favicon.svg", "brand/canvasdrop-mark.svg", "brand/canvasdrop-logo.svg"]) {
+        expect(read(`../../../../apps/dashboard/public/${svg}`)).toContain(declaration);
+      }
+    }
+  });
+  it("checks hue without mistaking a decimal lightness for indigo", () => {
+    expect("oklch(0.270 0.009 75)").not.toMatch(INDIGO);
+    expect("oklch(0.7 0.1 274 / 0.3)").toMatch(INDIGO);
+    expect("oklch(62% 0.2 274/0.42)").toMatch(INDIGO);
+    expect("oklch(0.62 20% 274.5deg)").toMatch(INDIGO);
+  });
   for (const { theme, selector, label } of DASHBOARD_BLOCKS) {
     const body = block(dashboardCss, selector);
     for (const role of RAMP_ROLE_ORDER) {

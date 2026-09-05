@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AA_TEXT, contrastRatio } from "./contrast.js";
+import { AA_LARGE, AA_TEXT, contrastRatio, oklchToHex } from "./contrast.js";
 import { SKIN_NAMES, SKINS } from "./skins.js";
 import { BRAND_TOKENS, type ThemeName } from "./tokens.js";
 
@@ -16,6 +16,33 @@ import { BRAND_TOKENS, type ThemeName } from "./tokens.js";
  *  - accent text ↔ surface → links / active nav on a panel (4.5:1)
  */
 const THEMES: ThemeName[] = ["light", "dark"];
+
+describe("opaque sRGB artwork colors", () => {
+  it("converts black, white and a neutral midtone with sRGB gamma", () => {
+    expect(oklchToHex("oklch(0 0 0)")).toBe("#000000");
+    expect(oklchToHex("oklch(1 0 0)")).toBe("#ffffff");
+    expect(oklchToHex("oklch(0.5 0 0)")).toBe("#636363");
+  });
+});
+
+describe("reading contrast on shared surfaces", () => {
+  for (const theme of THEMES) {
+    const ramp = BRAND_TOKENS[theme];
+    for (const surface of [
+      "canvas",
+      "surface",
+      "surface-raised",
+      "surface-sunken",
+      "surface-hover",
+    ] as const) {
+      for (const text of ["fg", "muted", "subtle"] as const) {
+        it(`${theme} ${text} on ${surface} clears AA`, () => {
+          expect(contrastRatio(ramp[text], ramp[surface])).toBeGreaterThanOrEqual(AA_TEXT);
+        });
+      }
+    }
+  }
+});
 
 describe("contrastRatio known answers (anchors the OKLCH→luminance formula)", () => {
   // The skin pairings below only assert "≥ AA". A luminance bug that shifted every value but
@@ -41,6 +68,13 @@ describe("skin accent contrast (WCAG AA)", () => {
 
       it(`${skin} · ${theme} · button label (accent ↔ accent-fg) clears AA`, () => {
         expect(contrastRatio(a.accent, a["accent-fg"])).toBeGreaterThanOrEqual(AA_TEXT);
+      });
+
+      it(`${skin} · ${theme} · hovered button and focus ring stay readable`, () => {
+        expect(contrastRatio(a["accent-hover"], a["accent-fg"])).toBeGreaterThanOrEqual(AA_TEXT);
+        expect(contrastRatio(a.ring, BRAND_TOKENS[theme]["surface-raised"])).toBeGreaterThanOrEqual(
+          AA_LARGE,
+        );
       });
 
       it(`${skin} · ${theme} · badge text (accent ↔ accent-subtle) clears AA`, () => {
