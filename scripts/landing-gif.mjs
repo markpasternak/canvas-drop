@@ -35,23 +35,27 @@ const FRAMES = [
 // Near-native resolution (the capture viewport is 1440x900) so text stays crisp.
 const W = 1440;
 const H = 900;
-const DELAY_MS = 2000;
-const QUALITY = 90;
+const DELAY_MS = 3000;
+const QUALITY = 86;
 
 export async function buildTourLoop() {
   const sharp = (await import("sharp")).default;
   mkdirSync(ASSETS_DIR, { recursive: true });
 
-  const paths = FRAMES.map((f) => join(ASSETS_DIR, f)).filter((p) => existsSync(p));
-  if (paths.length === 0) {
-    console.warn("! no tour frames found - run `pnpm landing:screenshots` first");
-    return;
+  const paths = FRAMES.map((f) => join(ASSETS_DIR, f));
+  const missing = paths.filter((p) => !existsSync(p));
+  if (missing.length) {
+    throw new Error(`Missing tour frames: ${missing.join(", ")}. Run pnpm landing:screenshots.`);
+  }
+  for (const path of paths) {
+    const { width, height } = await sharp(path).metadata();
+    if (width !== W || height !== H) {
+      throw new Error(`Tour frame must be ${W}x${H}: ${path} is ${width}x${height}`);
+    }
   }
 
   // Equal-sized true-colour frames; sharp joins them into one animated WebP.
-  const frames = await Promise.all(
-    paths.map((p) => sharp(p).resize(W, H, { fit: "cover", position: "top" }).png().toBuffer()),
-  );
+  const frames = await Promise.all(paths.map((p) => sharp(p).png().toBuffer()));
 
   await sharp(frames, { join: { animated: true } })
     .webp({ quality: QUALITY, effort: 6, loop: 0, delay: frames.map(() => DELAY_MS) })

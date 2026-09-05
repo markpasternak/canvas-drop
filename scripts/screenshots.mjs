@@ -46,7 +46,7 @@ const SETTLE_MS = LANDING ? 1800 : 0;
 /** Find a canvas id linked from the dashboard, for the canvas-scoped tour screens.
  *  Prefers a canvas by visible title (so the editor slide showcases a clean,
  *  code-rich demo app) and falls back to the first one. Returns null if none is
- *  seeded (those shots are then skipped). */
+ *  seeded (the tour capture then fails). */
 async function discoverCanvasId(page, preferTitle) {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
   await page.waitForTimeout(SETTLE_MS || 1200);
@@ -66,16 +66,43 @@ async function resolveShots(page) {
   if (!LANDING) {
     // Keep to screens without seeded data (org-agnostic, R11).
     return [
-      { path: "/", name: "dashboard-home.webp" },
-      { path: "/new", name: "new-canvas.webp" },
-      { path: "/gallery", name: "gallery.webp" },
+      {
+        path: "/",
+        name: "dashboard-home.webp",
+        async prepare(page) {
+          await page
+            .getByRole("heading", { name: "Ship your first canvas", exact: true })
+            .waitFor();
+        },
+      },
+      {
+        path: "/new",
+        name: "new-canvas.webp",
+        async prepare(page) {
+          await page.getByRole("textbox", { name: "Title", exact: true }).waitFor();
+        },
+      },
+      {
+        path: "/gallery",
+        name: "gallery.webp",
+        async prepare(page) {
+          await page.getByText("No canvases in the gallery yet", { exact: true }).waitFor();
+        },
+      },
     ];
   }
   const shots = [
     // Filter BOTH the dashboard and the gallery to the demo apps' unique "showcase"
     // tag (seed-demo-apps) so the hero shots are exactly the 12 real-cover demo apps —
     // no generic seed canvases (generative covers) in frame.
-    { path: "/?tag=showcase", name: "landing-dashboard.webp" },
+    {
+      path: "/?tag=showcase",
+      name: "landing-dashboard.webp",
+      async prepare(page) {
+        const filters = page.getByRole("button", { name: /^Filters/ });
+        if ((await filters.getAttribute("aria-expanded")) === "true") await filters.click();
+      },
+    },
     { path: "/shared?sort=owner", name: "tour-shared.webp" },
     { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
     { path: "/admin/settings", name: "tour-admin.webp" },
@@ -114,9 +141,7 @@ async function resolveShots(page) {
       { path: `/canvases/${id}/settings`, name: "tour-preview.webp", scrollTo: "#preview" },
     );
   } else {
-    console.warn(
-      "! no seeded canvas found — skipping canvas-scoped tour shots. Run `pnpm seed:canvases`.",
-    );
+    throw new Error("No seeded canvas found. Seed demo data before capturing the tour.");
   }
   return shots;
 }
@@ -138,45 +163,61 @@ async function main() {
 
   mkdirSync(OUT_DIR, { recursive: true });
   const browser = await launchChromiumWithChromeFallback(chromium);
-  const page = await browser.newPage({
-    viewport: { width: 1440, height: 900 },
-    colorScheme: COLOR_SCHEME,
-  });
+  try {
+    const page = await browser.newPage({
+      viewport: { width: 1440, height: 900 },
+      colorScheme: COLOR_SCHEME,
+    });
 
-  // `--only <substr>` captures just the shots whose asset name matches (e.g. `--only teams`)
-  // so a single asset can be refreshed without re-shooting — and overwriting — the others.
-  const onlyIdx = process.argv.indexOf("--only");
-  const only = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
-  const shots = (await resolveShots(page)).filter((s) => !only || s.name.includes(only));
-  for (const shot of shots) {
-    const url = BASE + shot.path;
-    try {
-      await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
-      if (SETTLE_MS) await page.waitForTimeout(SETTLE_MS);
-      // Optionally run a per-shot prep step (expand a roster, open a section) before framing.
-      if (shot.prepare) await shot.prepare(page);
-      // Optionally scroll a specific section into view (e.g. the Preview control, which
-      // sits below the fold on the settings page) before framing the shot.
-      if (shot.scrollTo) {
-        await page.evaluate((sel) => {
-          document.querySelector(sel)?.scrollIntoView({ block: "start" });
-        }, shot.scrollTo);
-        await page.waitForTimeout(500);
-      }
-      const png = await page.screenshot({ fullPage: false });
-      const out = join(OUT_DIR, shot.name);
-      await sharp(png)
-        .resize({ width: MAX_WIDTH, withoutEnlargement: true })
-        .webp({ quality: WEBP_QUALITY })
-        .toFile(out);
-      const kb = (statSync(out).size / 1024).toFixed(1);
-      console.log(`✓ ${shot.path} → docs/site/assets/${shot.name} (${kb} KB)`);
-    } catch (err) {
-      console.error(`✗ ${shot.path}: ${err.message} (is the dev server running at ${BASE}?)`);
+    // `--only <substr>` captures just the shots whose asset name matches (e.g. `--only teams`)
+    // so a single asset can be refreshed without re-shooting — and overwriting — the others.
+    const onlyIdx = process.argv.indexOf("--only");
+    const only = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
+    const shots = (await resolveShots(page)).filter((s) => !only || s.name.includes(only));
+    if (!shots.length) {
+      throw new Error("No screenshots match the requested filter.");
     }
-  }
+    const failures = [];
+    for (const shot of shots) {
+      const url = BASE + shot.path;
+      try {
+        await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
+        if (SETTLE_MS) await page.waitForTimeout(SETTLE_MS);
+        await page.locator("main h1").first().waitFor({ state: "visible" });
+        await page.evaluate(() => document.fonts.ready);
+        // Optionally run a per-shot prep step (expand a roster, open a section) before framing.
+        if (shot.prepare) await shot.prepare(page);
+        // Optionally scroll a specific section into view (e.g. the Preview control, which
+        // sits below the fold on the settings page) before framing the shot.
+        if (shot.scrollTo) {
+          await page.evaluate((sel) => {
+            document.querySelector(sel)?.scrollIntoView({ block: "start" });
+          }, shot.scrollTo);
+          await page.waitForTimeout(500);
+        }
+        const png = await page.screenshot({ fullPage: false });
+        const out = join(OUT_DIR, shot.name);
+        await sharp(png)
+          .resize({ width: MAX_WIDTH, withoutEnlargement: true })
+          .webp({ quality: WEBP_QUALITY })
+          .toFile(out);
+        const kb = (statSync(out).size / 1024).toFixed(1);
+        console.log(`✓ ${shot.path} → docs/site/assets/${shot.name} (${kb} KB)`);
+      } catch (err) {
+        failures.push(shot.name);
+        console.error(`✗ ${shot.path}: ${err.message}`);
+      }
+    }
 
-  await browser.close();
+    if (failures.length) {
+      console.error(
+        "Some files may have been refreshed; the animation was not rebuilt. Re-run the capture successfully before committing assets.",
+      );
+      throw new Error(`Screenshots failed: ${failures.join(", ")}`);
+    }
+  } finally {
+    await browser.close();
+  }
 
   // Landing mode: rebuild the animated product-tour loop from the fresh frames, so
   // the README's tour.webp refreshes whenever the preview images do.

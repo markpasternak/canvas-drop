@@ -37,6 +37,10 @@ the browser SDK build (esbuild `--watch`) in parallel. Only `pnpm dev` reads
 [Configuration](/docs/self-hosting/configuration)). In production the server
 serves the built dashboard itself on `:3000`; the Vite server is dev-only.
 
+With `CANVAS_DROP_DEV_SEED=0`, a fresh instance starts here:
+
+![The empty canvas library with options to paste HTML, upload files, or use the API](/docs/assets/dashboard-home.webp)
+
 The sample data is 100 canvases with no files across seven owners, 70 of them
 yours, so the dashboard, **Shared**, and the gallery are populated on first
 boot. The seed runs only when the database has no canvases.

@@ -154,6 +154,10 @@ Shown when a legacy guest session is on the people-and-teams list (at any Genera
 
 **Gallery & templates** on the Share tab is an opt-in listing. A canvas can be listed only when it is published, has **no password**, and is either **Public link** or **Whole org** (listing a Whole-org canvas also turns on **List for your org**). A Restricted canvas never appears there, however many people and teams are on its list. When an org boundary is configured, Whole-org entries are returned only to signed-in members of the canvas's home org; Public-link entries are visible to any signed-in gallery viewer. **Allow others to use as a template** lets colleagues clone the canvas as a starting point; your canvas is untouched.
 
+A fresh Gallery stays empty until someone lists a canvas:
+
+![The Gallery before any canvases have been listed](/docs/assets/gallery.webp)
+
 A signed-in viewer with direct access, or through a team, can also clone the canvas while it is published, active, unexpired, and password-free, at any General-access choice. General access by itself does not grant cloning, and pending invitations and retained legacy guest sessions cannot clone. The copy is durable: it remains after the source grant is revoked, because it is a new canvas owned by the viewer. It starts unpublished and Restricted, with an empty direct-access list, backend off, and a fresh slug and deploy key.
 
 The **description** is one field (max 2000 characters) used everywhere the canvas is shown: Overview, Shared, grid cards, and the gallery. There is no separate gallery summary.

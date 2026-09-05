@@ -1,6 +1,6 @@
 // Capture the dashboard in two design skins and composite them side-by-side into
-// ONE marketing image (docs/site/assets/landing-skins.webp) the landing embeds to
-// show off the admin-flippable skin layer. Drives the RUNNING dev dashboard with
+// ONE reusable marketing image (docs/site/assets/landing-skins.webp) showing
+// the admin-flippable skin layer. Drives the RUNNING dev dashboard with
 // Playwright (dev auth auto-login), exactly like screenshots.mjs: light theme,
 // the populated dashboard grid, so it matches the other product shots.
 //
@@ -10,7 +10,7 @@
 // The skin is a global admin setting, so this flips it via the admin API between
 // captures and RESTORES the original at the end. The .webp is committed.
 
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchChromiumWithChromeFallback } from "./playwright-launch.mjs";
 
@@ -26,13 +26,78 @@ const SKINS = [
 
 async function setSkin(page, value) {
   await page.evaluate(async (v) => {
-    await fetch("/api/admin/config/core.designSkin", {
+    const response = await fetch("/api/admin/config/core.designSkin", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ value: v }),
     });
+    if (!response.ok) throw new Error(`Could not set skin: ${response.status}`);
   }, value);
+}
+
+// Keep capture/cleanup separate from image composition so failure paths are testable.
+export async function captureSkinPanels(browser) {
+  const panels = [];
+  const errors = [];
+  let page;
+  let original;
+  let changed = false;
+  try {
+    page = await browser.newPage({
+      viewport: { width: 1440, height: 900 },
+      deviceScaleFactor: 2,
+      colorScheme: "light",
+    });
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
+    original = await page.evaluate(async () => {
+      const response = await fetch("/api/admin/config", { credentials: "include" });
+      if (!response.ok) throw new Error(`Could not read original skin: ${response.status}`);
+      const { fields } = await response.json();
+      const field = fields.find((f) => f.key === "core.designSkin");
+      if (
+        !field ||
+        typeof field.overridden !== "boolean" ||
+        !["editorial", "canvas", "studio", "workshop"].includes(field.value)
+      ) {
+        throw new Error("Could not read the original design-skin setting");
+      }
+      // Empty clears the temporary override when the original came from env/default.
+      return field.overridden ? field.value : "";
+    });
+    for (const skin of SKINS) {
+      changed = true; // Even a failed response may have applied the setting.
+      await setSkin(page, skin.key);
+      await page.goto(`${BASE}/?tag=showcase`, { waitUntil: "networkidle", timeout: 20000 });
+      await page.locator("main h1").first().waitFor({ state: "visible" });
+      await page.evaluate(() => document.fonts.ready);
+      const filters = page.getByRole("button", { name: /^Filters/ });
+      if ((await filters.getAttribute("aria-expanded")) === "true") await filters.click();
+      await page.waitForTimeout(900);
+      panels.push({ png: await page.screenshot({ fullPage: false }), label: skin.label });
+    }
+  } catch (error) {
+    errors.push(error);
+  } finally {
+    if (changed) {
+      try {
+        await setSkin(page, original);
+      } catch (error) {
+        errors.push(
+          new Error("Could not restore the original skin; check Admin > Settings", {
+            cause: error,
+          }),
+        );
+      }
+    }
+    try {
+      await browser.close();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length) throw new AggregateError(errors, "Skin capture or cleanup failed");
+  return panels;
 }
 
 async function main() {
@@ -49,29 +114,7 @@ async function main() {
   }
 
   const browser = await launchChromiumWithChromeFallback(chromium);
-  const page = await browser.newPage({
-    viewport: { width: 1440, height: 900 },
-    deviceScaleFactor: 2,
-  });
-  // Establish the dev-auth session, remember the original skin to restore later.
-  await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
-  const original = await page.evaluate(() =>
-    fetch("/api/me", { credentials: "include" })
-      .then((r) => r.json())
-      .then((m) => m.designSkin),
-  );
-
-  const panels = [];
-  for (const skin of SKINS) {
-    await setSkin(page, skin.key);
-    // The full, populated grid shows the skin's accent, typography, radius, and cards.
-    await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
-    await page.waitForTimeout(900); // let cards + fonts settle
-    panels.push({ png: await page.screenshot({ fullPage: false }), label: skin.label });
-  }
-
-  await setSkin(page, original); // leave the instance as we found it
-  await browser.close();
+  const panels = await captureSkinPanels(browser);
 
   // Composite: two panels side by side on a dark-navy card, each labelled.
   const PANEL_W = 1100; // display width per panel
@@ -115,4 +158,4 @@ async function main() {
   console.log(`wrote ${join(ASSETS_DIR, "landing-skins.webp")} (${totalW}×${totalH})`);
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
