@@ -1,7 +1,7 @@
 ---
 title: Library to publish UX and release refresh
 type: feat
-status: in_progress
+status: completed
 date: 2026-09-05
 ---
 
@@ -25,7 +25,7 @@ Approved by Mark: finish the first three units as three independently merged PRs
 - [x] **U4 — Publish review and version recovery.** Help editors inspect draft changes before publishing and understand recovery consequences before restoring a version. Use existing version/draft/publish/rollback APIs and MCP parity; no new publishing semantics. Verify changed/removed files, empty drafts, unsaved edits, API failures and recovery confirmation.
 - [x] **U5 — Keyboard, mobile and CSS polish.** Inspect the complete core flow, fix concrete focus/overflow/touch-target/contrast issues and align spacing with existing tokens. Verify both themes and representative skins, reduced motion, narrow viewports and keyboard navigation. Avoid unrelated layout rewrites.
 - [x] **U6 — Release assets and documentation.** Capture fresh seeded marketing and docs images of the finished UI, rebuild the README animated tour, improve the README's first read and verify commands/claims against source. Keep all eleven walkthrough views. Build generated docs, inspect the GitHub README and assets, review/test and merge.
-- [ ] **Release — Deploy and verify.** Inspect the existing production runbook, record current release and backup/rollback path, deploy merged main, then verify health, signed-out marketing/docs and authenticated core views. Record actual release SHA and observed state.
+- [x] **Release — Deploy and verify.** Inspect the existing production runbook, record current release and backup/rollback path, deploy merged main, then verify health, signed-out marketing/docs and authenticated core views. Record actual release SHA and observed state.
 
 ## Evidence and completion
 
@@ -41,4 +41,9 @@ U4 verification: draft change and home-page projections shared by HTTP/MCP; save
 
 U5 verification: canonical mobile font floor now wins over utilities, dialog opening mounts before focus, Share headings nest beneath the canvas title, fields expose help text and stable IDs, clipboard feedback ignores stale attempts, and the narrow header/editor toolbar fit. Browser checks and 2969 server / 731 dashboard tests passed with lint, typecheck and build. Independent Claude review and sequential local validation completed; actionable findings were corrected.
 
-U6 verification: all eleven tour images, three empty docs views, the two-skin comparison and eleven-frame animated WebP were recaptured. The README now explains distribution, controlled access and ongoing revision without blanket security or URL claims. Docs embed the new images. Screenshot readiness and animation completeness checks prevent stale/empty captures; card clipping and the responsive calculator example were corrected during visual inspection. Release remains pending the reviewed PR merge.
+U6 verification: all eleven tour images, three empty docs views, the two-skin comparison and eleven-frame animated WebP were recaptured. The README now explains distribution, controlled access and ongoing revision without blanket security or URL claims. Docs embed the new images. Screenshot readiness and animation completeness checks prevent stale/empty captures; card clipping and the responsive calculator example were corrected during visual inspection. U6 merged in PR #108 after independent Claude review, corrected findings, and a green CI matrix.
+
+
+Release receipt (2026-09-05): PRs #103, #104 and #105 were merged independently, followed by #106, #107 and #108. Release `1cdbb3b0e471221b5a81c6a73d054a86255a9380` was deployed after a pinned SQLite backup passed its integrity check. Application and proxy services are active, health and database checks pass, and no service warnings were logged after restart. All sixteen served image hashes match the release files; the eleven-view marketing carousel, documentation references and Google sign-in redirect passed verification. The merged GitHub README and animation were inspected in Safari.
+
+Authenticated MCP checks verified the existing canvas/version state, the new public-link policy field and the draft's clean change projection without publishing or restoring production content. Full dashboard browser sign-in required Touch ID, so that production interaction check remains limited; the UI flows were exercised locally before release. A live Safari docs check found unconstrained screenshot widths; the follow-up CSS bounds article images to their column while preserving aspect ratio. Its local Safari inspection shows the complete image fitting the article. Track the follow-up deployment receipt on issue #102.

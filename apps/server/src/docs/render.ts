@@ -178,6 +178,7 @@ ${LIGHT_TOKENS}
     padding: clamp(2rem, 4vw, 3.5rem) clamp(1.5rem, 4vw, 2.75rem);
   }
   .doc { max-width: 46rem; }
+  .doc img { display: block; max-width: 100%; height: auto; border-radius: .75rem; }
   .doc h1, .doc h2, .doc h3 { font-family: var(--font-display); font-optical-sizing: auto; font-weight: var(--display-weight, 500); letter-spacing: var(--display-tracking, -.02em); }
   .doc h1 { margin: 0 0 1rem; font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.1; letter-spacing: -.02em; }
   /* Lede treatment: the page's opening heading reads larger, and the intro
