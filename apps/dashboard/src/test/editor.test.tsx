@@ -53,7 +53,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function mockFetch(handlers: Record<string, (init?: RequestInit) => Response>) {
+function mockFetch(handlers: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
   const calls: {
     method: string;
     url: string;
@@ -403,6 +403,7 @@ describe("Editor route", () => {
     saved = draftView({
       dirty: true,
       updatedAt: 2,
+      files: [{ ...saved.files[0], hash: "changed" }],
       changes: [{ path: "index.html", kind: "modified" }],
     });
     await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
@@ -410,6 +411,73 @@ describe("Editor route", () => {
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+  });
+
+  it("publishes after a metadata-only save without asking to review identical content again", async () => {
+    let saved = draftView({ dirty: true });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(saved),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => json({ version: 2 }),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("button", { name: "Publish update" });
+    saved = draftView({
+      dirty: true,
+      updatedAt: 99,
+      files: [
+        { ...saved.files[0], updatedAt: 99, updatedBy: "other", updatedByName: "Other editor" },
+      ],
+    });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+    expect(screen.queryByText(/the draft or its access changed/i)).toBeNull();
+  });
+
+  it("requires review again when only the audience changes", async () => {
+    let access = "private";
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, access, publicLinkEnabled: true }),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => json({ version: 2 }),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Restricted to people and teams with access");
+    access = "public_link";
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    expect(await within(dialog).findByText("Anyone with the link")).toBeInTheDocument();
+    expect(within(dialog).getByText(/the draft or its access changed/i)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+  });
+
+  it("submits a pending publish once even on repeated activation", async () => {
+    let finish!: () => void;
+    const pending = new Promise<Response>((resolve) => {
+      finish = () => resolve(json({ version: 2 }));
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => pending,
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.dblClick(await within(dialog).findByRole("button", { name: "Publish update" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(dialog).toBeInTheDocument();
+    finish();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("refuses to publish from cached review details when the confirmation refresh fails", async () => {
@@ -427,7 +495,7 @@ describe("Editor route", () => {
     fail = true;
     await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
     expect(await within(dialog).findByText(/couldn't load the latest draft/i)).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Publish canvas" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Publish update" })).toBeDisabled();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     fail = false;
     await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));

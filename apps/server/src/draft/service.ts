@@ -216,9 +216,10 @@ export function draftService(deps: DraftServiceDeps) {
       const live = liveManifest ?? {};
       const changes: Array<{ path: string; kind: "added" | "modified" | "deleted" }> = [];
       for (const path of new Set([...Object.keys(manifest), ...Object.keys(live)])) {
-        if (!manifest[path]) changes.push({ path, kind: "deleted" });
-        else if (!live[path]) changes.push({ path, kind: "added" });
-        else if (manifest[path].hash !== live[path].hash) changes.push({ path, kind: "modified" });
+        if (!Object.hasOwn(manifest, path)) changes.push({ path, kind: "deleted" });
+        else if (!Object.hasOwn(live, path)) changes.push({ path, kind: "added" });
+        else if (manifest[path]?.hash !== live[path]?.hash)
+          changes.push({ path, kind: "modified" });
       }
       changes.sort((a, b) => a.path.localeCompare(b.path));
       return {

@@ -67,7 +67,8 @@ export function Dialog({
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
-    panel?.querySelector<HTMLElement>("[data-autofocus]")?.focus() ?? panel?.focus();
+    const initialFocus = panel?.querySelector<HTMLElement>("[data-autofocus]") ?? panel;
+    initialFocus?.focus();
 
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape" && dismissableRef.current) {
@@ -78,13 +79,18 @@ export function Dialog({
       const focusables = panel.querySelectorAll<HTMLElement>(
         'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
       );
-      if (focusables.length === 0) return;
+      if (focusables.length === 0) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
+      const atPanel = document.activeElement === panel || !panel.contains(document.activeElement);
+      if (e.shiftKey && (atPanel || document.activeElement === first)) {
         e.preventDefault();
         last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
+      } else if (!e.shiftKey && (atPanel || document.activeElement === last)) {
         e.preventDefault();
         first?.focus();
       }
@@ -111,7 +117,7 @@ export function Dialog({
       }}
     >
       <div
-        className="cd-anim-scrim absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
+        className="cd-anim-scrim pointer-events-none absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
         data-state={state}
         aria-hidden
       />
@@ -122,7 +128,7 @@ export function Dialog({
         aria-labelledby={titleId}
         data-state={state}
         tabIndex={-1}
-        className="cd-anim-pop relative w-full max-w-md rounded-xl border border-border bg-surface-raised p-6 shadow-[var(--shadow-popover)] outline-none"
+        className="cd-anim-pop relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface-raised p-6 shadow-[var(--shadow-popover)] outline-none"
       >
         <h2 id={titleId} className="text-base font-semibold text-fg">
           {title}

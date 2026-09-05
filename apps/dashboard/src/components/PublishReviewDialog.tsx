@@ -19,10 +19,11 @@ interface Review {
  * Publishing retains the existing server snapshot semantics; this is a review, not a lock. */
 function fingerprint({ canvas, draft }: Review) {
   return JSON.stringify([
-    draft.updatedAt,
     draft.baseVersionId,
     draft.stale,
-    draft.files,
+    draft.files
+      .map(({ path, hash, size, mime }) => [path, hash, size, mime] as const)
+      .sort(([a], [b]) => a.localeCompare(b)),
     canvas.currentVersionId,
     canvas.status,
     canvas.access,
@@ -224,7 +225,7 @@ export function PublishReviewDialog({
             disabled={!canPublish || busy}
             loading={checking || publish.isPending}
           >
-            {review?.canvas.currentVersionId ? "Publish update" : "Publish canvas"}
+            {query.data?.canvas.currentVersionId ? "Publish update" : "Publish canvas"}
           </Button>
         </div>
       </div>

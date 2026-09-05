@@ -100,6 +100,14 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     const first = await svc.describe({ ...draft, manifest: { "hello.html": file("hello") } }, null);
     expect(first.changes).toEqual([{ path: "hello.html", kind: "added" }]);
     expect(first.entry).toEqual({ path: "hello.html", reason: "single" });
+    const prototypePaths = await svc.describe(
+      { ...draft, manifest: { "index.html": file("same"), toString: file("new") } },
+      { "index.html": file("same"), constructor: file("gone") },
+    );
+    expect(prototypePaths.changes).toEqual([
+      { path: "constructor", kind: "deleted" },
+      { path: "toString", kind: "added" },
+    ]);
   });
 
   it("editing the draft creates no version and leaves the live URL on the prior version (AE2)", async () => {

@@ -63,6 +63,8 @@ export function CanvasAudience({
         : canvas.publicLinkEnabled === false
           ? "Public sharing is paused; direct access still applies."
           : "Public link selected; availability hasn't been verified.";
+  } else if (canvas.access === "whole_org" && canvas.orgId === null && orgs === undefined) {
+    audience = "Organization access selected; availability hasn't been verified.";
   } else if (canvas.access === "whole_org" && orgAccessEnabled) {
     audience = `${orgName ?? "Workspace"} members, plus people and teams with access`;
   } else {
