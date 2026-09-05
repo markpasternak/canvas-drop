@@ -8,9 +8,9 @@ describe("docs render", () => {
     expect(html).not.toBeNull();
     expect(html).toContain("canvas-drop");
     expect(html).toContain('id="docs-search"');
-    expect(html).toContain('src="/docs/search.js"');
+    expect(html).toContain('src="/docs/search.js?v=');
     // A way back to the dashboard from the public docs site.
-    expect(html).toContain('href="/" class="to-app"');
+    expect(html).toContain('class="site-action" href="/"');
   });
 
   it("renders the theme switch and loads the theme client before paint", () => {
@@ -23,7 +23,7 @@ describe("docs render", () => {
     // Loaded from <head> (before the body) so the stored theme applies pre-paint.
     const headEnd = html.indexOf("</head>");
     expect(headEnd).toBeGreaterThan(-1);
-    expect(html.slice(0, headEnd)).toContain('src="/docs/theme.js"');
+    expect(html.slice(0, headEnd)).toContain('src="/docs/theme.js?v=');
     // The manual override honors the same data-theme attribute as the app.
     expect(html).toContain('[data-theme="dark"]');
   });
@@ -40,6 +40,21 @@ describe("docs render", () => {
     expect(html).toContain('property="og:url" content="https://x.example.test/docs/sdk/kv"');
     expect(html).toContain('name="twitter:card" content="summary_large_image"');
     expect(html).toContain("og:image:width");
+  });
+
+  it("keeps documentation tables semantic inside keyboard-scrollable containers", () => {
+    const page = DOC_PAGES.find((entry) => entry.path === "agents/skill");
+    const html = renderDocPage("agents/skill") ?? "";
+    const tables = page?.html.match(/<table>/g) ?? [];
+    expect(tables.length).toBeGreaterThan(0);
+    expect(
+      html.match(
+        /class="doc-table" role="region" aria-label="Scrollable table" tabindex="0"><table>/g,
+      ),
+    ).toHaveLength(tables.length);
+    expect(html.match(/<\/table><\/div>/g)).toHaveLength(tables.length);
+    expect(html).toContain("What the agent learns");
+    expect(html).toContain("Full reference");
   });
 
   it("returns null for an unknown path", () => {

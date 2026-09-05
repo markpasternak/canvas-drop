@@ -14,6 +14,15 @@ export const SEARCH_CLIENT_JS = `(() => {
 
   let index = null;
   let loadFailed = false;
+  let generation = 0;
+  let pending = false;
+  const search = input.closest(".search");
+
+  function dismiss() {
+    generation++;
+    pending = false;
+    out.innerHTML = "";
+  }
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
@@ -64,14 +73,28 @@ export const SEARCH_CLIENT_JS = `(() => {
 
   input.addEventListener("focus", ensureIndex, { once: true });
   input.addEventListener("input", async () => {
+    const current = ++generation;
+    pending = true;
     await ensureIndex();
-    render(input.value);
+    if (current !== generation) return;
+    pending = false;
+    if (document.activeElement === input) render(input.value);
   });
-  input.addEventListener("blur", () => {
-    // Delay so a click on a result registers before the dropdown clears.
-    setTimeout(() => {
-      out.innerHTML = "";
-    }, 150);
+  search.addEventListener("focusout", (event) => {
+    // Safari can blur the input without focusing a clicked result. Keep the
+    // result mounted until its click lands; outside pointer interactions dismiss.
+    if (event.relatedTarget && !search.contains(event.relatedTarget)) dismiss();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!search.contains(event.target)) dismiss();
+  });
+  search.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && (pending || out.childElementCount)) {
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+      input.focus();
+    }
   });
 })();
 `;

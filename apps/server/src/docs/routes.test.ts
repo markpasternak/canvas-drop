@@ -85,6 +85,14 @@ describe("docs routes", () => {
     expect(js).toContain("Search unavailable.");
   });
 
+  it("serves the navigation enhancement publicly with a same-origin script policy", async () => {
+    const res = await app().request("/docs/nav.js?v=release");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("javascript");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await res.text()).toContain('document.getElementById("docs-navigation")');
+  });
+
   it("serves the theme client as application/javascript", async () => {
     const res = await app().request("/docs/theme.js");
     expect(res.status).toBe(200);

@@ -9,7 +9,7 @@ describe("shared skin-html emitter", () => {
   it("stamps data-skin on <html> for alternates but never for editorial", () => {
     expect(skinnedHtmlTag("editorial")).toBe('<html lang="en">');
     expect(skinnedHtmlTag("studio")).toBe('<html lang="en" data-skin="studio">');
-    // Extra root attrs (e.g. the legal pages' forced dark) compose before the skin attr.
+    // Extra root attrs (e.g. an explicit theme) compose before the skin attr.
     expect(skinnedHtmlTag("editorial", 'data-theme="dark"')).toBe(
       '<html lang="en" data-theme="dark">',
     );
@@ -34,9 +34,8 @@ describe("shared skin-html emitter", () => {
   });
 
   it("every server surface emits the SAME override blocks from the shared emitter (no drift)", () => {
-    // Landing is OS-only (no dark toggle); docs + legal expose/force a theme so they carry
-    // the dark-toggle variant. The base override block is identical across all three.
-    const base = skinOverridesCss();
+    // All public reading surfaces expose the same saved-theme control.
+    const base = skinOverridesCss({ darkToggle: true });
     const landing = renderLandingPage("https://x", "oidc", false, "studio");
     const docs = renderDocPage("", "", "studio") ?? "";
     const legal = renderPrivacyPage("", "studio");
@@ -45,7 +44,7 @@ describe("shared skin-html emitter", () => {
       expect(html).toContain(':root[data-skin="workshop"]');
       expect(html).toContain(':root[data-skin="canvas"]');
     }
-    // The landing ships exactly the no-dark-toggle emitter output.
+    // The landing ships the same manual-theme selectors as docs and legal.
     expect(landing).toContain(base);
   });
 });
