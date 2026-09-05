@@ -68,6 +68,40 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     expect(draft.baseVersionId).toBe(live.currentVersionId);
   });
 
+  it("describes added, changed and removed files against live, including an empty replacement", async () => {
+    const { svc, canvas } = await setup();
+    const draft = await svc.getOrCreate(canvas);
+    const file = (hash: string) => ({ hash, size: 10, mime: "text/html" });
+    const live = {
+      "index.html": file("old"),
+      "removed.html": file("gone"),
+      "same.html": file("same"),
+    };
+    const manifest = {
+      "index.html": file("new"),
+      "added.html": file("added"),
+      "same.html": { ...file("same"), updatedBy: "editor" },
+    };
+    const view = await svc.describe({ ...draft, manifest }, live);
+    expect(view.changes).toEqual([
+      { path: "added.html", kind: "added" },
+      { path: "index.html", kind: "modified" },
+      { path: "removed.html", kind: "deleted" },
+    ]);
+    expect(view.dirty).toBe(true);
+    expect(view.entry).toEqual({ path: "index.html", reason: "index" });
+    const clean = await svc.describe({ ...draft, manifest: live }, live);
+    expect(clean.changes).toEqual([]);
+    expect(clean.dirty).toBe(false);
+    const empty = await svc.describe(draft, live);
+    expect(empty.changes).toHaveLength(3);
+    expect(empty.changes.every((change) => change.kind === "deleted")).toBe(true);
+    expect(empty.entry).toEqual({ path: null, reason: "none" });
+    const first = await svc.describe({ ...draft, manifest: { "hello.html": file("hello") } }, null);
+    expect(first.changes).toEqual([{ path: "hello.html", kind: "added" }]);
+    expect(first.entry).toEqual({ path: "hello.html", reason: "single" });
+  });
+
   it("editing the draft creates no version and leaves the live URL on the prior version (AE2)", async () => {
     const { svc, engine, versions, canvas, owner, reload } = await setup();
     await engine.deploy(canvas, "folder", folder({ "index.html": "<h1>v1</h1>" }), owner.id);

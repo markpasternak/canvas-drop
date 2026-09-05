@@ -26,6 +26,7 @@ import { IconButton, IconLink } from "../components/IconButton.js";
 import { NonEditableFileView } from "../components/NonEditableFileView.js";
 import { OnPageEditor } from "../components/OnPageEditor.js";
 import { type EditorPane, type LocalDirtyState, PublishBar } from "../components/PublishBar.js";
+import { PublishReviewDialog } from "../components/PublishReviewDialog.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PaneHeader, WorkspacePane } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
@@ -44,7 +45,6 @@ import { relativeTime } from "../lib/format.js";
 import {
   useCreateDraftFile,
   useDeleteDraftFile,
-  usePublishDraft,
   useRenameDraftFile,
   useSaveDraftFile,
   useUploadDraftFile,
@@ -127,7 +127,9 @@ export default function Editor() {
   const uploadMany = useUploadDraftFiles(id);
   const del = useDeleteDraftFile(id);
   const rename = useRenameDraftFile(id);
-  const publish = usePublishDraft(id);
+  const [reviewCanvasId, setReviewCanvasId] = useState<string | null>(null);
+  const [preparingReview, setPreparingReview] = useState(false);
+  const preparingReviewRef = useRef(false);
   const toast = useToast();
   const qc = useQueryClient();
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -640,13 +642,15 @@ export default function Editor() {
   }
 
   async function onPublish() {
-    // Don't publish a version that's missing the edit we just failed to save.
-    if (!(await flush())) return;
+    if (preparingReviewRef.current) return;
+    preparingReviewRef.current = true;
+    setPreparingReview(true);
     try {
-      const result = await publish.mutateAsync();
-      toast(`Published version ${result.version}`);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't publish", "error");
+      // Review only the saved draft; a failed/conflicted save keeps the buffer here.
+      if (await flush()) setReviewCanvasId(id);
+    } finally {
+      preparingReviewRef.current = false;
+      setPreparingReview(false);
     }
   }
 
@@ -657,14 +661,14 @@ export default function Editor() {
   const canPublish =
     !!draft && draft.files.length > 0 && (draft.dirty || draft.stale || localDirty !== "clean");
 
-  // ⌘↵ / Ctrl+Enter publishes the draft — the keyboard mirror of the Publish button.
+  // ⌘↵ / Ctrl+Enter opens publish review — the keyboard mirror of the button.
   // Scoped to the editor by this route's mount lifetime (mirrors the editor-local ⌘S
   // in CodeEditor). Reads the publish gate via a ref so the listener stays mounted
   // once and never goes stale; a no-op when the draft isn't publishable or a publish
   // is already in flight.
   const publishShortcutRef = useRef<() => void>(() => {});
   publishShortcutRef.current = () => {
-    if (!draft || publish.isPending || !canPublish) return;
+    if (!draft || preparingReviewRef.current || reviewCanvasId === id || !canPublish) return;
     void onPublish();
   };
   useEffect(() => {
@@ -1049,7 +1053,7 @@ export default function Editor() {
         stale={draft.stale}
         localDirty={localDirty}
         saving={save.isPending}
-        publishing={publish.isPending}
+        publishing={preparingReview}
         canPublish={canPublish}
         hasFiles={draft.files.length > 0}
         hasPublishedVersion={!!canvas?.currentVersionId}
@@ -1067,6 +1071,9 @@ export default function Editor() {
         previewAvailable
         onPublish={onPublish}
       />
+      {reviewCanvasId === id && (
+        <PublishReviewDialog canvasId={id} onClose={() => setReviewCanvasId(null)} />
+      )}
 
       <div
         className={cn(

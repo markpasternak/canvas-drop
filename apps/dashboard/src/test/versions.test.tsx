@@ -141,7 +141,7 @@ describe("Versions route — redesigned rows + make current", () => {
 });
 
 describe("Versions route — restore to draft", () => {
-  it("restores directly (no confirm) when the draft is clean", async () => {
+  it("confirms replacing even a clean draft before restoring", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "GET /api/canvases/c1/versions": () => json({ versions: [VERSION] }),
@@ -156,15 +156,39 @@ describe("Versions route — restore to draft", () => {
     expect(await screen.findByText("v1")).toBeInTheDocument();
     expect(container.querySelector(".rounded-xl")).toBeNull();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Restore to draft" }));
 
-    // No destructive confirm dialog is shown for a clean draft.
-    expect(
-      screen.queryByRole("button", { name: /load and discard changes/i }),
-    ).not.toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/including any unpublished changes/i)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/restore"))).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Replace draft" }));
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/restore"))).toBe(true),
     );
+  });
+
+  it("requires confirmation without draft data and keeps a failed restore open for retry", async () => {
+    let fail = true;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/versions": () => json({ versions: [VERSION] }),
+      "GET /api/canvases/c1/draft": () => json({ error: "unavailable" }, 503),
+      "POST /api/canvases/c1/restore": () =>
+        fail ? json({ error: "unavailable" }, 503) : json(draftView()),
+    });
+    const { router } = renderVersions();
+    await userEvent.click(await screen.findByRole("button", { name: "Restore to draft" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/including any unpublished changes/i)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Replace draft" }));
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Replace draft" })).toBeEnabled(),
+    );
+    expect(router.state.location.pathname).toBe("/canvases/c1/versions");
+    fail = false;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Replace draft" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/editor"));
   });
 
   it("shows the destructive confirm when the draft is dirty, and restores + navigates on confirm", async () => {
@@ -177,10 +201,10 @@ describe("Versions route — restore to draft", () => {
     });
     const { router } = renderVersions();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Restore to draft" }));
 
     // Dirty draft → destructive confirm dialog, no restore call yet.
-    const confirm = await screen.findByRole("button", { name: /load and discard changes/i });
+    const confirm = await screen.findByRole("button", { name: /replace draft/i });
     expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/restore"))).toBe(false);
 
     await userEvent.click(confirm);
@@ -211,7 +235,9 @@ describe("Versions route — direct download and safe delete", () => {
       "href",
       "/api/canvases/c1/versions/2/download",
     );
-    expect(within(currentRow).getByRole("button", { name: "Restore" })).toBeInTheDocument();
+    expect(
+      within(currentRow).getByRole("button", { name: "Restore to draft" }),
+    ).toBeInTheDocument();
     expect(within(currentRow).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(within(currentRow).getByText(/current version can't be deleted/i)).toBeInTheDocument();
 
@@ -239,7 +265,7 @@ describe("Versions route — direct download and safe delete", () => {
 
     const row = (await screen.findByText("v1")).closest("li") as HTMLElement;
     expect(within(row).getByRole("link", { name: "Download ZIP" })).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Restore" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Restore to draft" })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "Make current" })).toBeNull();
   });
@@ -257,7 +283,7 @@ describe("Versions route — direct download and safe delete", () => {
 
     const row = (await screen.findByText("v1")).closest("li") as HTMLElement;
     expect(within(row).getByRole("link", { name: "Download ZIP" })).toBeInTheDocument();
-    expect(within(row).queryByRole("button", { name: "Restore" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Restore to draft" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Make current" })).toBeNull();
     expect(within(row).getByText("Read-only while disabled")).toBeInTheDocument();

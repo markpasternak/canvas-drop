@@ -36,20 +36,23 @@ export function CanvasAudience({
   canvas,
   orgs,
   isGuest,
+  afterPublish = false,
 }: {
   canvas: AudienceCanvas;
   orgs?: Array<{ id: string; name: string }>;
   isGuest?: boolean;
+  /** Explain the prospective audience in publish review; omit the navigation away. */
+  afterPublish?: boolean;
 }) {
   const expired = useExpired(canvas.sharedExpiresAt);
   const orgName = orgs?.find((org) => org.id === canvas.orgId)?.name;
   const orgAccessEnabled =
     canvas.orgId !== null || (orgs !== undefined && orgs.length === 0 && !isGuest);
-  const live = canvas.status === "active" && !!canvas.currentVersionId;
+  const live = canvas.status === "active" && (!!canvas.currentVersionId || afterPublish);
   let audience: string;
   if (canvas.status !== "active") {
     audience = `${canvas.status === "archived" ? "Archived" : canvas.status === "deleted" ? "Deleted" : "Disabled"} — this link is offline.`;
-  } else if (!canvas.currentVersionId) {
+  } else if (!canvas.currentVersionId && !afterPublish) {
     audience = "Publish this draft before sharing its link.";
   } else if (expired) {
     audience = "Viewer access has expired. Owners and editors can still open.";
@@ -82,7 +85,7 @@ export function CanvasAudience({
           </time>
         </span>
       )}
-      {live && (
+      {live && !afterPublish && (
         <Link
           to="/canvases/$id/share"
           params={{ id: canvas.id }}

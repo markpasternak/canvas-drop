@@ -139,13 +139,13 @@ export function PublishBar({
             disabled={!canPublish}
             title={
               canPublish
-                ? "Publish the draft as a new version"
+                ? "Review saved changes before publishing a new version"
                 : hasFiles
                   ? "The published version already matches this draft"
                   : "Add a file to the draft before publishing"
             }
           >
-            {hasPublishedVersion ? "Publish update" : "Publish"}
+            Review and publish
           </Button>
         </div>
       </div>

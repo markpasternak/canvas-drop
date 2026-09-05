@@ -221,8 +221,10 @@ Minimum role: editor.
 
 Minimum role: editor. These mirror the browser editor: a per-canvas draft that
 `publish_draft` snapshots into a live version. DraftView is
-`{files: [{path, size, mime, hash, updatedBy, updatedByName, updatedAt}], stale, baseVersionId, updatedAt, dirty}`,
-where `dirty` means the draft differs from live and `stale` means live moved on since
+`{files: [{path, size, mime, hash, updatedBy, updatedByName, updatedAt}], stale, baseVersionId, updatedAt, dirty, changes: [{path, kind}], entry}`,
+where `changes` compares saved files with live (`added`, `modified`, `deleted`),
+`entry` describes the home page (`path`, `reason`), `dirty` means the draft differs
+from live and `stale` means live moved on since
 the draft was based.
 
 | Tool | Input | Result |

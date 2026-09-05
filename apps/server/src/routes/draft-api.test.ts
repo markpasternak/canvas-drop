@@ -122,9 +122,16 @@ describe("draftApiRoutes", () => {
       body: enc("<h1>hello</h1>"),
     });
     expect(put.status).toBe(200);
-    const view = await jsonOf<{ files: { path: string }[]; dirty: boolean }>(put);
+    const view = await jsonOf<{
+      files: { path: string }[];
+      dirty: boolean;
+      changes: unknown[];
+      entry: unknown;
+    }>(put);
     expect(view.files.map((f) => f.path)).toEqual(["index.html"]);
     expect(view.dirty).toBe(true);
+    expect(view.changes).toEqual([{ path: "index.html", kind: "added" }]);
+    expect(view.entry).toEqual({ path: "index.html", reason: "index" });
 
     const get = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`);
     expect(get.status).toBe(200);

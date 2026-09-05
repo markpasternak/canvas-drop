@@ -13,7 +13,7 @@ import { ApiError, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useDeleteVersion, useRestoreToDraft, useRollback } from "../lib/mutations.js";
-import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
+import { useCanvas, useVersions } from "../lib/queries.js";
 
 /** Versions tab: version history (newest first), forward "Publish files", and
  * per-version "Make current" (re-point the served version in either direction).
@@ -22,7 +22,6 @@ export default function Versions() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: versions, isLoading, isError } = useVersions(id);
   const { data: canvas } = useCanvas(id);
-  const { data: draft } = useDraft(id);
   const rollback = useRollback(id);
   const restore = useRestoreToDraft(id);
   const deleteVersion = useDeleteVersion(id);
@@ -73,11 +72,9 @@ export default function Versions() {
     }
   }
 
-  // Restore replaces the draft wholesale. If the draft has unpublished changes, confirm
-  // first so those edits aren't silently discarded; otherwise restore straight away.
+  // Every restore replaces the draft. Never infer that an unknown or cached draft is clean.
   function requestRestore(version: number) {
-    if (draft?.dirty) setRestoreTarget(version);
-    else void restoreToDraft(version);
+    setRestoreTarget(version);
   }
 
   async function restoreToDraft(version: number) {
@@ -109,7 +106,7 @@ export default function Versions() {
         title="Version history"
         description={`${versions.length} ${versions.length === 1 ? "version" : "versions"} kept for this canvas.${
           isActive
-            ? " Switch the current version, or add a new version with the button above."
+            ? " Restore a version to the draft to review it, or make it current to change the live canvas immediately."
             : " Unarchive to publish or change the current version."
         }`}
       >
@@ -171,7 +168,7 @@ export default function Versions() {
                       title="Restore this version's files to the editable draft"
                     >
                       <ArrowCounterClockwise size={15} aria-hidden />
-                      Restore
+                      Restore to draft
                     </Button>
                   )}
                   {!v.current && isActive && (
@@ -211,21 +208,22 @@ export default function Versions() {
         actionLabel="Make current"
         loading={rollback.isPending}
       >
-        This makes this version the current one for all visitors immediately. You can switch to any
-        version in the history at any time.
+        Visitors will get version {target?.number} immediately at the same link. Your draft files
+        are kept. To review or edit this version first, cancel and choose Restore to draft.
       </ConfirmDialog>
 
       <ConfirmDialog
         open={restoreTarget !== null}
         onClose={() => setRestoreTarget(null)}
         onConfirm={() => restoreTarget !== null && restoreToDraft(restoreTarget)}
-        title={`Load version ${restoreTarget ?? ""} into the draft?`}
-        actionLabel="Load and discard changes"
+        title={`Restore version ${restoreTarget ?? ""} to the draft?`}
+        actionLabel="Replace draft"
         destructive
         loading={restore.isPending}
       >
-        Your draft has unpublished changes. Loading this version's files into the draft discards
-        those changes. The published version isn't affected until you publish.
+        This replaces all draft files, including any unpublished changes, with version{" "}
+        {restoreTarget}. The live canvas stays as it is. Review the restored draft in the editor,
+        then publish when ready.
       </ConfirmDialog>
 
       <ConfirmDialog

@@ -4,6 +4,7 @@ import type { Canvas, Draft, Manifest, Version } from "@canvas-drop/shared/db";
 import type { AuditLog } from "../audit/audit-log.js";
 import { looksLikeApiKey } from "../canvas/api-key.js";
 import { collectGarbage } from "../canvas/blob-gc.js";
+import { type RootEntry, rootEntry } from "../canvas/manifest.js";
 import { decodeText, isTextContentType, mimeFor } from "../canvas/mime.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
@@ -185,6 +186,8 @@ export function draftService(deps: DraftServiceDeps) {
       baseVersionId: string | null;
       updatedAt: number;
       dirty: boolean;
+      changes: Array<{ path: string; kind: "added" | "modified" | "deleted" }>;
+      entry: RootEntry;
     }> {
       const manifest = draft.manifest as Manifest;
       const writerIds = [
@@ -210,17 +213,22 @@ export function draftService(deps: DraftServiceDeps) {
           updatedAt: e.updatedAt ?? null,
         }))
         .sort((a, b) => a.path.localeCompare(b.path));
-      const live = liveManifest;
-      const dirty = live
-        ? Object.keys(manifest).length !== Object.keys(live).length ||
-          Object.keys(manifest).some((p) => manifest[p]?.hash !== live[p]?.hash)
-        : Object.keys(manifest).length > 0;
+      const live = liveManifest ?? {};
+      const changes: Array<{ path: string; kind: "added" | "modified" | "deleted" }> = [];
+      for (const path of new Set([...Object.keys(manifest), ...Object.keys(live)])) {
+        if (!manifest[path]) changes.push({ path, kind: "deleted" });
+        else if (!live[path]) changes.push({ path, kind: "added" });
+        else if (manifest[path].hash !== live[path].hash) changes.push({ path, kind: "modified" });
+      }
+      changes.sort((a, b) => a.path.localeCompare(b.path));
       return {
         files,
         stale: draft.stale,
         baseVersionId: draft.baseVersionId,
         updatedAt: draft.updatedAt,
-        dirty,
+        dirty: changes.length > 0,
+        changes,
+        entry: rootEntry(manifest),
       };
     },
 

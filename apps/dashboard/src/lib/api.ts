@@ -281,6 +281,10 @@ export interface DraftView {
   updatedAt: number;
   /** The draft differs from the live published version (unpublished changes). */
   dirty: boolean;
+  /** Saved file changes against the current live version, from the shared HTTP/MCP projection. */
+  changes?: Array<{ path: string; kind: "added" | "modified" | "deleted" }>;
+  /** The same home-page resolution used when serving the published canvas. */
+  entry?: RootEntry;
 }
 
 export interface PublishResult {
