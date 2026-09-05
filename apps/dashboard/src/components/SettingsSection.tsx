@@ -16,14 +16,17 @@ export function Section({
   title,
   description,
   tone = "default",
+  headingLevel = 2,
   children,
 }: {
   id: string;
   title: string;
   description?: string;
   tone?: "default" | "danger";
+  headingLevel?: 2 | 3;
   children: ReactNode;
 }) {
+  const Heading = headingLevel === 3 ? "h3" : "h2";
   return (
     <section
       id={id}
@@ -32,14 +35,14 @@ export function Section({
       className={cn("scroll-mt-20", flatBandClass)}
     >
       <div className="mb-5 space-y-1">
-        <h2
+        <Heading
           className={cn(
             "font-display text-h2 leading-tight tracking-[-0.01em]",
             tone === "danger" ? "text-danger" : "text-fg",
           )}
         >
           {title}
-        </h2>
+        </Heading>
         {description && <p className="text-sm text-muted">{description}</p>}
       </div>
       <div className="space-y-4">{children}</div>

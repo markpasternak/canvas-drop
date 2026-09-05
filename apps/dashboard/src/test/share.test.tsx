@@ -249,6 +249,9 @@ describe("share route", () => {
     // re-renders with the access ladder revealed in place (no navigation).
     expect(await screen.findByRole("radio", { name: /whole org/i })).toBeEnabled();
     expect(screen.queryByText(/sharing unlocks after you publish/i)).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Sharing and permissions", level: 2 }),
+    ).toHaveFocus();
   });
 
   it("General access offers Restricted / Whole org / Public link; a legacy team rung reads as Restricted", async () => {
@@ -382,7 +385,7 @@ describe("share route", () => {
     renderShare();
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Sharing and permissions" }),
+      await screen.findByRole("heading", { level: 2, name: "Sharing and permissions" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Control who can open this canvas and what they can do."),
@@ -392,8 +395,9 @@ describe("share route", () => {
     expect(screen.getByRole("button", { name: "Copy link" })).toBeEnabled();
     expect(document.getElementById("locks")).toHaveTextContent("Protection");
 
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
     const sectionNames = screen
-      .getAllByRole("heading", { level: 2 })
+      .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent);
     expect(sectionNames).toEqual([
       "People and teams with direct access",

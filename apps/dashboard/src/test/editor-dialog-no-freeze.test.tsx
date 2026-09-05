@@ -97,9 +97,7 @@ describe("editor: dialogs over a live CodeMirror editor don't freeze", () => {
     renderEditor();
     await screen.findByText("index.html"); // real CodeMirror mounts for index.html
     await userEvent.click(await screen.findByRole("button", { name: "Add file" }));
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText("e.g. styles/main.css")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByPlaceholderText("e.g. styles/main.css")).toHaveFocus());
   });
 
   it("opens the Rename dialog without locking up", async () => {

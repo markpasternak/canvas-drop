@@ -55,5 +55,6 @@ export function useExitTransition(open: boolean): {
     };
   }, [open, mounted]);
 
-  return { mounted, state: open ? "open" : "closed" };
+  // Opening must mount in this render so caller focus effects can see the panel.
+  return { mounted: open || mounted, state: open ? "open" : "closed" };
 }

@@ -41,9 +41,11 @@ const changeLabels = { added: "Added", modified: "Changed", deleted: "Removed" }
 export function PublishReviewDialog({
   canvasId,
   onClose,
+  onPublished,
 }: {
   canvasId: string;
   onClose: () => void;
+  onPublished?: () => void;
 }) {
   const query = useQuery({
     queryKey: ["publish-review", canvasId],
@@ -82,6 +84,7 @@ export function PublishReviewDialog({
       }
       const result = await publish.mutateAsync();
       toast(`Published version ${result.version}`);
+      onPublished?.();
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.hint : "The server response did not arrive.");

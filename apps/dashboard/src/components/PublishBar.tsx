@@ -93,7 +93,7 @@ export function PublishBar({
   const StatusIcon = status.icon;
 
   return (
-    <div className="sticky top-14 z-20 -mx-2 rounded-xl border border-border bg-surface/95 px-3 py-2 shadow-[var(--shadow-panel)] backdrop-blur supports-[backdrop-filter]:bg-surface/85 md:mx-0">
+    <div className="sticky top-18 z-20 -mx-2 rounded-xl border border-border bg-surface/95 px-3 py-2 shadow-[var(--shadow-panel)] backdrop-blur supports-[backdrop-filter]:bg-surface/85 md:mx-0 lg:top-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           {stale && (

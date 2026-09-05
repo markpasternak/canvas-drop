@@ -1,5 +1,5 @@
 import type { Ref } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn.js";
 import { useToast } from "./Toast.js";
 
@@ -19,22 +19,38 @@ export function CopyButton({
   ariaLabel?: string;
   className?: string;
   toastMessage?: string;
+  /** Runs for the latest attempt while this value is still mounted. */
   onCopyFinished?: () => void;
   ref?: Ref<HTMLButtonElement>;
 }) {
   const toast = useToast();
   const [done, setDone] = useState(false);
+  const sequence = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new value invalidates pending clipboard feedback and confirmation
+  useEffect(() => {
+    setDone(false);
+    return () => {
+      sequence.current += 1;
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [value]);
 
   async function copy() {
+    const request = ++sequence.current;
+    if (timer.current) clearTimeout(timer.current);
+    setDone(false);
     try {
       await navigator.clipboard.writeText(value);
+      if (request !== sequence.current) return;
       setDone(true);
       toast(toastMessage);
-      setTimeout(() => setDone(false), 1500);
+      timer.current = setTimeout(() => setDone(false), 1500);
     } catch {
+      if (request !== sequence.current) return;
       toast("Couldn't copy. Copy it manually.", "error");
     } finally {
-      onCopyFinished?.();
+      if (request === sequence.current) onCopyFinished?.();
     }
   }
 
