@@ -395,11 +395,11 @@ describe("share route", () => {
     expect(screen.getByRole("button", { name: "Copy link" })).toBeEnabled();
     expect(document.getElementById("locks")).toHaveTextContent("Protection");
 
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
     const sectionNames = screen
-      .getAllByRole("heading", { level: 2 })
+      .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent);
     expect(sectionNames).toEqual([
-      "Sharing and permissions",
       "People and teams with direct access",
       "General access",
       "Protection",

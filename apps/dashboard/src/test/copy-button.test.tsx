@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CopyButton } from "../components/CopyButton.js";
 
@@ -6,6 +6,7 @@ const { toast } = vi.hoisted(() => ({ toast: vi.fn() }));
 vi.mock("../components/Toast.js", () => ({ useToast: () => toast }));
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   vi.clearAllMocks();
@@ -62,6 +63,28 @@ describe("CopyButton feedback", () => {
     await act(async () => vi.advanceTimersByTime(600));
     expect(screen.getByRole("button")).toHaveTextContent("Copied");
     rerender(<CopyButton value="another-link" />);
+    expect(screen.getByRole("button")).toHaveTextContent("Copy");
+  });
+  it("reports current clipboard failures but ignores an invalidated failure", async () => {
+    let reject!: (reason: Error) => void;
+    const writeText = vi.fn(
+      () =>
+        new Promise<void>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const onCopyFinished = vi.fn();
+    const { rerender } = render(<CopyButton value="old" onCopyFinished={onCopyFinished} />);
+    fireEvent.click(screen.getByRole("button"));
+    rerender(<CopyButton value="new" onCopyFinished={onCopyFinished} />);
+    await act(async () => reject(new Error("denied")));
+    expect(toast).not.toHaveBeenCalled();
+    expect(onCopyFinished).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button"));
+    await act(async () => reject(new Error("denied")));
+    expect(toast).toHaveBeenCalledWith("Couldn't copy. Copy it manually.", "error");
+    expect(onCopyFinished).toHaveBeenCalledOnce();
     expect(screen.getByRole("button")).toHaveTextContent("Copy");
   });
 });

@@ -242,6 +242,7 @@ export default function Share() {
         </header>
 
         <Section
+          headingLevel={3}
           id="people"
           title="People and teams with direct access"
           description="Add a person or team, then choose whether they can view or edit."
@@ -264,6 +265,7 @@ export default function Share() {
         </Section>
 
         <Section
+          headingLevel={3}
           id="access"
           title="General access"
           description="Who else can open the canvas, beyond the people and teams above."
@@ -327,6 +329,7 @@ export default function Share() {
         </Section>
 
         <Section
+          headingLevel={3}
           id="locks"
           title="Protection"
           description="Require a password or stop access after a set time."
@@ -428,6 +431,7 @@ export default function Share() {
 
         {hasLegacyGuest && (
           <Section
+            headingLevel={3}
             id="added-people-ai"
             title="AI for added people"
             description="Controls metered AI for people added to this canvas. This does not change your own AI budget."
@@ -465,6 +469,7 @@ export default function Share() {
         )}
 
         <Section
+          headingLevel={3}
           id="gallery"
           title="Gallery & templates"
           description="Opt this canvas into discovery by colleagues."
@@ -514,6 +519,7 @@ export default function Share() {
 
         {isOwner && (
           <Section
+            headingLevel={3}
             id="advanced"
             title="Advanced"
             description="Owner-only actions that change who controls this canvas."

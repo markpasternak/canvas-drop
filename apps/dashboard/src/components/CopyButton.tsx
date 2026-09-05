@@ -19,6 +19,7 @@ export function CopyButton({
   ariaLabel?: string;
   className?: string;
   toastMessage?: string;
+  /** Runs for the latest attempt while this value is still mounted. */
   onCopyFinished?: () => void;
   ref?: Ref<HTMLButtonElement>;
 }) {

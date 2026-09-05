@@ -98,7 +98,9 @@ function CreateCanvasButton({
     >
       <Plus size={16} weight="bold" aria-hidden />
       {!collapsed && (
-        <span>Create{compact ? <span className="hidden sm:inline"> canvas</span> : " canvas"}</span>
+        <span className={compact ? "max-[380px]:hidden" : undefined}>
+          Create{compact ? <span className="hidden sm:inline"> canvas</span> : " canvas"}
+        </span>
       )}
     </Link>
   );
@@ -384,10 +386,7 @@ export function AppLayout() {
               <Brand />
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <CreateCanvasButton
-                compact
-                className="max-[380px]:w-9 max-[380px]:px-0 max-[380px]:[&>span]:hidden"
-              />
+              <CreateCanvasButton compact className="max-[380px]:w-9 max-[380px]:px-0" />
               {me.data && <UserMenu me={me.data} />}
             </div>
           </div>
