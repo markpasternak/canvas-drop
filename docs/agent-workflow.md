@@ -13,7 +13,7 @@ usage stats, server-side list filters, the documentation system, clone-as-templa
 primitives showcase, owner-chosen custom slugs, the MCP server, the staged/optimized
 upload path, the signed-out landing page, the per-canvas preview control, the org
 boundary + teams, version ZIP export/deletion, and editor roles + ownership transfer). The
-README Status section is the authoritative status ledger; defer to it. `BUILD_BRIEF.md` §16 is
+[project status ledger](project-status.md) is the authoritative status ledger; defer to it. `BUILD_BRIEF.md` §16 is
 the spec's roadmap, not a ledger: it still marks M10 `[next]` with no sub-item markers and lists
 already-shipped work (agent skill, clone, search, scoped Shared discovery) under "Post-v1".
 
@@ -40,7 +40,7 @@ MCP server now ships a **46-tool surface** (every tool declared once in
 the access tools (`grant_access`/`invite_to_canvas`/`revoke_access`/`list_access`/`set_access_role`, every
 entry a `viewer` or `editor`), the owner-only `transfer_canvas`, the team tools, and the draft-editor loop (`get_draft`, `read_draft_file`,
 `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft`).
-For overall status defer to the README Status section (see the note on `BUILD_BRIEF.md` §16 above).
+For overall status defer to the [project status ledger](project-status.md) (see the note on `BUILD_BRIEF.md` §16 above).
 
 Before starting work: `git pull`, read the relevant `docs/solutions/` learnings (see AGENTS.md
 "Read first"), and pick up a unit from a plan in `docs/plans/`.

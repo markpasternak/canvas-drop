@@ -39,6 +39,19 @@ function relativeLuminance(oklch: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+/** Opaque sRGB hex for raster artwork and browser metadata without OKLCH support. */
+export function oklchToHex(oklch: string): string {
+  const { L, C, H } = parseOklch(oklch);
+  return `#${oklchToLinearRgb(L, C, H)
+    .map((linear) => {
+      const srgb = linear <= 0.0031308 ? 12.92 * linear : 1.055 * linear ** (1 / 2.4) - 0.055;
+      return Math.round(srgb * 255)
+        .toString(16)
+        .padStart(2, "0");
+    })
+    .join("")}`;
+}
+
 /** WCAG 2.1 contrast ratio between two OKLCH colours (1 … 21). */
 export function contrastRatio(a: string, b: string): number {
   const la = relativeLuminance(a);

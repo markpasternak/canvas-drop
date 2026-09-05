@@ -7,7 +7,7 @@ canvas-drop is built by humans and AI coding agents working together. The same r
 You don't need to be plugged into the plan loop to help. For a bug, a docs fix, or a small improvement:
 
 1. **Open an issue first** — a [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or a [feature request](.github/ISSUE_TEMPLATE/feature_request.yml). For anything beyond a trivial fix, a quick discussion saves a wasted PR.
-2. **Get it running locally** — see the [README quickstart](README.md#quickstart-local-dev): `pnpm install && cp .env.example .env && pnpm dev`.
+2. **Get it running locally** — see the [README quickstart](README.md#try-it-locally): `pnpm install && cp .env.example .env && pnpm dev`.
 3. **Open a PR against `main`** with a clear title and a link to the issue. A small external PR **does not** need a plan or a `U<N>` id — that convention (below) is for the internal plan-driven loop, not for drive-by fixes.
 4. Be kind — see the [Code of Conduct](CODE_OF_CONDUCT.md).
 

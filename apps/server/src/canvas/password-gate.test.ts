@@ -1,4 +1,4 @@
-import { type Config, LOGO_VIEWBOX, loadConfig } from "@canvas-drop/shared";
+import { BRAND_TOKENS, type Config, LOGO_VIEWBOX, loadConfig } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { pino } from "pino";
@@ -150,7 +150,7 @@ describe("passwordGate", () => {
     // must not regress to a one-off look (§14.5).
     expect(html).toContain("canvas-drop");
     expect(html).toContain(`viewBox="${LOGO_VIEWBOX}"`);
-    expect(html).toContain("--accent: oklch(0.49 0.105 200)"); // canonical teal, from BRAND_TOKENS
+    expect(html).toContain(`--accent: ${BRAND_TOKENS.light.accent}`);
     expect(html).toContain("My Canvas is password-protected");
     expect(html).not.toContain("#2563eb"); // the old blue accent is gone
     expect(html).not.toMatch(/oklch\([^)]*\b27[0-9]\)/); // no indigo-violet

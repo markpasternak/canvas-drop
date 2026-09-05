@@ -69,7 +69,7 @@ function socialMeta(path: string, title: string, description: string, origin: st
 }
 
 /** Shared minimal flat page chrome (logo + wordmark, serif title, body), warm-paper
- *  light with a deep-navy dark alternate — matching the brand token ramp. */
+ *  light with a graphite dark alternate — matching the brand token ramp. */
 function renderLegalPage(opts: {
   title: string;
   intro: string;

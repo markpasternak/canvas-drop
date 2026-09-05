@@ -17,6 +17,8 @@ What happened, the root cause, and how to avoid it next time.
 
 ## How to add one
 
+- [Palette assets and an adoption-focused README](2026-09-05-palette-assets-and-adoption-readme.md) — share the icon generator, check theme-specific artwork declarations, verify capture data, and keep internal status out of the adoption path.
+
 - Run `/ce-compound` after solving something non-obvious — it writes the file for you.
 - Or add a markdown file by hand following the shape above.
 

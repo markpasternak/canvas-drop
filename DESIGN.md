@@ -50,27 +50,27 @@ Authored in **OKLCH** for a perceptually even ramp and predictable contrast. All
 pairings target **WCAG 2.1 AA** (body ≥4.5:1, large/UI ≥3:1). Hex values are derived
 approximations; OKLCH is canonical.
 
-### Neutral ramp — warm paper (light, default) / deep navy (dark)
-Light is warm paper (hue ~85, low chroma) — never stark white. Dark is deep navy
-(hue ~265, real chroma) — never pure black.
+### Neutral ramp — warm paper (light, default) / graphite (dark)
+Light is warm paper (hue ~85, low chroma) — never stark white. Dark is graphite
+(hue ~80, very low chroma) — never pure black.
 
 | role | light OKLCH (~hex) | dark OKLCH (~hex) |
 |---|---|---|
-| `--canvas` | `0.969 0.008 85` (`#f7f4ed`) | `0.175 0.018 265` (`#14161f`) |
-| `--surface` | `0.987 0.006 85` (`#fbf9f3`) | `0.212 0.020 265` (`#1b1e29`) |
-| `--surface-raised` | `0.998 0.004 85` (`#fffef9`) | `0.245 0.022 265` (`#222533`) |
-| `--surface-sunken` | `0.945 0.010 85` | `0.150 0.016 265` |
-| `--fg` | `0.255 0.012 75` (`#2f2a23`) | `0.965 0.004 265` (`#f3f3f6`) |
-| `--muted` | `0.475 0.012 75` | `0.715 0.014 265` |
-| `--subtle` | `0.500 0.012 75` (AA-tuned) | `0.620 0.014 265` (AA-tuned) |
-| `--border` | `0.895 0.010 85` | `0.295 0.020 265` |
-| `--border-strong` | `0.820 0.012 75` | `0.390 0.022 265` |
+| `--canvas` | `0.972 0.004 85` (`#f7f6f3`) | `0.205 0.006 80` (`#191714`) |
+| `--surface` | `0.992 0.003 85` (`#fdfcfa`) | `0.240 0.006 80` (`#211f1c`) |
+| `--surface-raised` | `0.998 0.002 85` (`#fffefd`) | `0.280 0.007 80` (`#2b2925`) |
+| `--surface-sunken` | `0.943 0.006 85` | `0.175 0.005 80` |
+| `--fg` | `0.250 0.009 75` (`#24211d`) | `0.954 0.005 85` (`#f1f0ec`) |
+| `--muted` | `0.460 0.009 75` | `0.740 0.008 85` |
+| `--subtle` | `0.500 0.009 75` (AA-tuned) | `0.670 0.008 85` (AA-tuned) |
+| `--border` | `0.865 0.007 85` | `0.350 0.008 80` |
+| `--border-strong` | `0.770 0.010 75` | `0.440 0.010 80` |
 
-### Accent — deep teal (hue ~200), the primary chromatic identity
+### Accent — deep teal (hue ~190), the primary chromatic identity
 Deliberately **not** indigo-violet (the SaaS default). Distinctive, premium, and it
-pops on both warm paper and deep navy.
+pops on both warm paper and graphite.
 
-- `--accent` — light `0.49 0.105 200` (`#0c7b88`) · dark `0.78 0.105 195` (`#56c9d3`).
+- `--accent` — light `0.48 0.085 190` (`#006d68`) · dark `0.76 0.075 190` (`#76c1bc`).
   Primary buttons, current selection, active nav, links, focus ring.
 - `--accent-hover`, `--accent-fg` (≥4.5:1 on the fill), `--accent-subtle` (selected /
   badge / info backgrounds; `text-accent` on it clears 4.5:1).
@@ -123,7 +123,7 @@ scale: hero serif `~2.4rem/400`, page-title serif `~1.9rem/400`, section serif
 
 Retires the old crisp-flat look. Elevation is a **scale** registered as `--shadow-*`
 utilities: two layers (close ambient + far diffuse), **warm-tinted in light** (hue ~40),
-deep navy in dark. Softer and slightly larger than crisp — but never a muddy 60px blur.
+graphite in dark. Softer and slightly larger than crisp — but never a muddy 60px blur.
 
 - Radii (generous): `sm 0.5rem` (chips), `md 0.75rem` (controls/inputs), `lg 1rem`
   (menus/wells), `xl 1.25rem` (cards), `2xl 1.5rem` (panels/panes/tiles).

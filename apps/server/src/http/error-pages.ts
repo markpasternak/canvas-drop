@@ -149,11 +149,11 @@ export function errorResponse(
 // Derived from the canonical BRAND_TOKENS (single source — no drift, no parallel
 // ramp). Shadows are the only system-page-specific addition.
 export const LIGHT_TOKENS = `${rampCssVars("light", "    ")}
-    --shadow-color: 40 30% 38%;
+    --shadow-color: 45 12% 38%;
     --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.09);`;
 
 export const DARK_TOKENS = `${rampCssVars("dark", "    ")}
-    --shadow-color: 265 60% 2%;
+    --shadow-color: 45 8% 2%;
     --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.5);`;
 
 /**

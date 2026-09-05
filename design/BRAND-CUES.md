@@ -16,53 +16,50 @@ below are derived approximations for tools that need them — the OKLCH is canon
 ### Light — warm paper (DEFAULT)
 | Role | OKLCH | ~Hex | Use |
 |---|---|---|---|
-| canvas | `0.969 0.008 85` | `#f7f4ed` | app/page background — warm paper floor |
-| surface | `0.987 0.006 85` | `#fbf9f3` | default card / panel |
-| surface-raised | `0.998 0.004 85` | `#fffef9` | headers, raised controls (near-white, faintly warm) |
-| surface-sunken | `0.945 0.010 85` | `#efe9dd` | wells: segmented controls, code gutters |
-| fg | `0.255 0.012 75` | `#2f2a23` | primary text — warm near-black, never pure `#000` |
-| muted | `0.475 0.012 75` | `#6b655b` | secondary text (AA) |
-| subtle | `0.500 0.012 75` | `#726c61` | tertiary/meta (AA-tuned — don't go lighter) |
-| border | `0.895 0.010 85` | `#e3ddd0` | hairline divider |
-| border-strong | `0.820 0.012 75` | `#cabfac` | input borders, secondary-button outline |
+| canvas | `0.972 0.004 85` | `#f7f6f3` | app/page background — warm paper floor |
+| surface | `0.992 0.003 85` | `#fdfcfa` | default card / panel |
+| surface-raised | `0.998 0.002 85` | `#fffefd` | headers, raised controls (near-white, faintly warm) |
+| surface-sunken | `0.943 0.006 85` | `#eeece8` | wells: segmented controls, code gutters |
+| fg | `0.250 0.009 75` | `#24211d` | primary text — warm near-black, never pure `#000` |
+| muted | `0.460 0.009 75` | `#5b5753` | secondary text (AA) |
+| subtle | `0.500 0.009 75` | `#66635e` | tertiary/meta (AA-tuned — don't go lighter) |
+| border | `0.865 0.007 85` | `#d5d2cd` | hairline divider |
+| border-strong | `0.770 0.010 75` | `#b8b3ad` | input borders, secondary-button outline |
 
-### Dark — deep navy (system alternate)
+### Dark — graphite (system alternate)
 | Role | OKLCH | ~Hex | Use |
 |---|---|---|---|
-| canvas | `0.175 0.018 265` | `#14161f` | deep navy floor — never pure black |
-| surface | `0.212 0.020 265` | `#1b1e29` | default card / panel |
-| surface-raised | `0.245 0.022 265` | `#222533` | headers, raised controls |
-| fg | `0.965 0.004 265` | `#f3f3f6` | primary text |
-| muted | `0.715 0.014 265` | `#a6a8b5` | secondary text |
-| subtle | `0.620 0.014 265` | `#8a8c9c` | tertiary/meta (AA-tuned) |
-| border | `0.295 0.020 265` | `#30343f` | hairline divider |
+| canvas | `0.205 0.006 80` | `#191714` | graphite floor — never pure black |
+| surface | `0.240 0.006 80` | `#211f1c` | default card / panel |
+| surface-raised | `0.280 0.007 80` | `#2b2925` | headers, raised controls |
+| fg | `0.954 0.005 85` | `#f1f0ec` | primary text |
+| muted | `0.740 0.008 85` | `#adaaa5` | secondary text |
+| subtle | `0.670 0.008 85` | `#979590` | tertiary/meta (AA-tuned) |
+| border | `0.350 0.008 80` | `#3d3a36` | hairline divider |
 
-### Accent — deep teal (hue ~200), the primary chromatic identity
-Deliberately **not** the default SaaS indigo-violet — that hue is now visual
-wallpaper (Slack, Twitch, Linear, Heroku, Datadog all share it; it was meant to
-escape blue and became the new default). Teal is distinctive, premium, a forecast
-2025–26 lead colour, and pops on both warm paper and deep navy.
+### Accent — deep teal (hue ~190), the primary chromatic identity
+Deep teal connects the light and dark themes. Keep it restrained so controls are
+recognizable and canvas content carries the visual variety.
 
 | Role | Light OKLCH (~hex) | Dark OKLCH (~hex) |
 |---|---|---|
-| accent | `0.49 0.105 200` (`#0c7b88`) | `0.78 0.105 195` (`#56c9d3`) |
-| accent-hover | `0.43 0.10 200` (`#0a6b76`) | `0.83 0.09 195` (`#7fd8df`) |
-| accent-fg (text on accent) | `0.99 0.02 200` (`#f3feff`) | `0.16 0.04 210` (`#0a1418`) |
-| accent-subtle (badge/selected bg) | `0.93 0.045 197` (`#d6eef0`) | `0.30 0.06 200` (`#1d3940`) |
+| accent | `0.48 0.085 190` (`#006d68`) | `0.76 0.075 190` (`#76c1bc`) |
+| accent-hover | `0.42 0.080 190` (`#005b57`) | `0.81 0.070 190` (`#8bd0cb`) |
+| accent-fg (text on accent) | `0.99 0.005 190` (`#f8fdfc`) | `0.18 0.015 190` (`#0a1413`) |
+| accent-subtle (badge/selected bg) | `0.935 0.025 190` (`#d8efed`) | `0.30 0.034 190` (`#183332`) |
 
 Used for: primary CTA, current selection, active nav, links, focus ring.
 **Keep accent under ~10% of any screen.** Everything else is warm neutral.
 
-### Second accent — warm amber (hue ~72), MARKETING ONLY
-The editorial warm-cool counterpoint to teal. Used on **marketing surfaces only**
-(drenched hero/CTA, italic emphasis, eyebrows). The **app stays single-accent teal**
-so the canvases carry the colour ("quiet chrome, expressive content").
-- amber `0.78 0.15 72` (`#e0a23a`) · amber-ink (AA text on paper) `0.52 0.13 60` (`#a8731f`)
+### Legacy marketing accent
+The warm amber tokens remain available for older artwork. The current homepage
+uses the active skin's accent on the same neutral surfaces as the app; there is
+no separate hero palette.
 
 ### Semantic (state) — always paired with a dot/icon/label, never colour alone
-- success `0.52 0.13 152` (`#2c8f5c`) · subtle `0.95 0.04 152`
-- warning `0.53 0.14 58` (`#9a6a17`) · subtle `0.95 0.05 80`
-- danger  `0.555 0.205 27` (`#cc3a36`) · subtle `0.96 0.022 27`
+- success `0.52 0.13 152` (`#137d41`) · subtle `0.95 0.04 152`
+- warning `0.53 0.14 58` (`#a55200`) · subtle `0.95 0.05 80`
+- danger  `0.555 0.205 27` (`#d02526`) · subtle `0.96 0.022 27`
 
 ### Canvas covers
 Derive cover gradients from the **accent hue ±offset** (warm violet→blue→amber
@@ -119,7 +116,7 @@ the mark SVG, favicon, PWA icons, and the brand tile.)*
 
 - **Radii — generous, "objects":** controls `0.75rem`, cards `1.25rem`, panels `1.5rem`.
 - **Shadows — soft, never crisp:** two layers (close ambient + far diffuse).
-  Warm-tinted in light (shadow hue ~40), deep navy in dark. This is the
+  Warm-tinted in light (shadow hue ~40), graphite in dark. This is the
   "paper & objects" feel — explicitly *not* the old flat-crisp SaaS look.
 - **Motion — ≤180ms, ease-out `cubic-bezier(.16,1,.3,1)`:** fade+scale for
   overlays/menus, slide-up for toasts, 2–3px hover-lift on cards, subtle press on

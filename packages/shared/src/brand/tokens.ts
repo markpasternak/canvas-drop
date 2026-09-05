@@ -10,8 +10,8 @@
  * name / logo). Authored in OKLCH for a perceptually even ramp and predictable
  * contrast; all pairings target WCAG 2.1 AA.
  *
- * Direction: "Editorial Creator OS" — warm-paper light (default) + deep-navy dark,
- * a single deep-teal accent (hue ~200). Amber (hue ~72) is a marketing-only second
+ * Direction: "Editorial Creator OS" — warm-paper light (default) + graphite dark,
+ * a single deep-teal accent (hue ~190). Amber (hue ~72) is a marketing-only second
  * accent and is NOT part of the app ramp.
  */
 
@@ -53,21 +53,21 @@ export interface BrandTokens {
 export const BRAND_TOKENS: BrandTokens = {
   // --- LIGHT: warm paper (default) ---
   light: {
-    canvas: "oklch(0.969 0.008 85)",
-    surface: "oklch(0.987 0.006 85)",
-    "surface-raised": "oklch(0.998 0.004 85)",
-    "surface-sunken": "oklch(0.945 0.010 85)",
-    "surface-hover": "oklch(0.955 0.010 85)",
-    fg: "oklch(0.255 0.012 75)",
-    muted: "oklch(0.475 0.012 75)",
-    subtle: "oklch(0.500 0.012 75)",
-    border: "oklch(0.895 0.010 85)",
-    "border-strong": "oklch(0.820 0.012 75)",
+    canvas: "oklch(0.972 0.004 85)",
+    surface: "oklch(0.992 0.003 85)",
+    "surface-raised": "oklch(0.998 0.002 85)",
+    "surface-sunken": "oklch(0.943 0.006 85)",
+    "surface-hover": "oklch(0.955 0.006 85)",
+    fg: "oklch(0.250 0.009 75)",
+    muted: "oklch(0.460 0.009 75)",
+    subtle: "oklch(0.500 0.009 75)",
+    border: "oklch(0.865 0.007 85)",
+    "border-strong": "oklch(0.770 0.010 75)",
 
-    accent: "oklch(0.49 0.105 200)",
-    "accent-hover": "oklch(0.43 0.10 200)",
-    "accent-fg": "oklch(0.99 0.02 200)",
-    "accent-subtle": "oklch(0.93 0.045 197)",
+    accent: "oklch(0.48 0.085 190)",
+    "accent-hover": "oklch(0.42 0.080 190)",
+    "accent-fg": "oklch(0.99 0.005 190)",
+    "accent-subtle": "oklch(0.935 0.025 190)",
 
     danger: "oklch(0.555 0.205 27)",
     "danger-hover": "oklch(0.49 0.2 27)",
@@ -79,29 +79,29 @@ export const BRAND_TOKENS: BrandTokens = {
     warning: "oklch(0.53 0.14 58)",
     "warning-subtle": "oklch(0.95 0.05 80)",
 
-    ring: "oklch(0.49 0.105 200)",
-    "logo-frame": "oklch(0.27 0.022 235)",
-    "logo-drop": "oklch(0.49 0.105 200)",
+    ring: "oklch(0.48 0.085 190)",
+    "logo-frame": "oklch(0.270 0.009 75)",
+    "logo-drop": "oklch(0.48 0.085 190)",
     scrim: "oklch(0.21 0.02 80 / 0.5)",
   },
 
-  // --- DARK: deep navy ---
+  // --- DARK: graphite ---
   dark: {
-    canvas: "oklch(0.175 0.018 265)",
-    surface: "oklch(0.212 0.020 265)",
-    "surface-raised": "oklch(0.245 0.022 265)",
-    "surface-sunken": "oklch(0.150 0.016 265)",
-    "surface-hover": "oklch(0.262 0.022 265)",
-    fg: "oklch(0.965 0.004 265)",
-    muted: "oklch(0.715 0.014 265)",
-    subtle: "oklch(0.620 0.014 265)",
-    border: "oklch(0.295 0.020 265)",
-    "border-strong": "oklch(0.390 0.022 265)",
+    canvas: "oklch(0.205 0.006 80)",
+    surface: "oklch(0.240 0.006 80)",
+    "surface-raised": "oklch(0.280 0.007 80)",
+    "surface-sunken": "oklch(0.175 0.005 80)",
+    "surface-hover": "oklch(0.290 0.008 80)",
+    fg: "oklch(0.954 0.005 85)",
+    muted: "oklch(0.740 0.008 85)",
+    subtle: "oklch(0.670 0.008 85)",
+    border: "oklch(0.350 0.008 80)",
+    "border-strong": "oklch(0.440 0.010 80)",
 
-    accent: "oklch(0.78 0.105 195)",
-    "accent-hover": "oklch(0.83 0.09 195)",
-    "accent-fg": "oklch(0.16 0.04 210)",
-    "accent-subtle": "oklch(0.30 0.06 200)",
+    accent: "oklch(0.76 0.075 190)",
+    "accent-hover": "oklch(0.81 0.070 190)",
+    "accent-fg": "oklch(0.18 0.015 190)",
+    "accent-subtle": "oklch(0.30 0.034 190)",
 
     danger: "oklch(0.7 0.17 25)",
     "danger-hover": "oklch(0.76 0.155 25)",
@@ -113,10 +113,10 @@ export const BRAND_TOKENS: BrandTokens = {
     warning: "oklch(0.82 0.15 80)",
     "warning-subtle": "oklch(0.27 0.06 70)",
 
-    ring: "oklch(0.83 0.09 195)",
-    "logo-frame": "oklch(0.965 0.004 265)",
-    "logo-drop": "oklch(0.78 0.105 195)",
-    scrim: "oklch(0.04 0.01 266 / 0.66)",
+    ring: "oklch(0.81 0.070 190)",
+    "logo-frame": "oklch(0.954 0.005 85)",
+    "logo-drop": "oklch(0.76 0.075 190)",
+    scrim: "oklch(0.06 0.004 80 / 0.66)",
   },
 };
 
