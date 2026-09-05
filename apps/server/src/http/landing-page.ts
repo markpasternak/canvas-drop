@@ -2,16 +2,16 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Config, rampCssVars, type SkinName } from "@canvas-drop/shared";
+import type { Config, SkinName } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
 import { resolveRequest } from "../routing/resolve-request.js";
-import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
 import { LANDING_LAYOUT } from "./landing-design.js";
 import { baseSecurityHeaders } from "./security-headers.js";
-import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
+import { SITE_STYLES, SITE_THEME_SCRIPT, siteFooter, siteHeader } from "./site-chrome.js";
+import { skinnedHtmlTag } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
@@ -289,7 +289,8 @@ ${FAVICON_LINKS}
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
 <script type="application/ld+json">${jsonLd}</script>
 <style>${STYLES}
-${skinStyleCss()}</style>`;
+</style>
+${SITE_THEME_SCRIPT}`;
 }
 
 /**
@@ -299,57 +300,7 @@ ${skinStyleCss()}</style>`;
  * ramp is gone). Landing-only chrome vars (--ink/--on-ink hero band, shadows,
  * easing, max width) are layered on top.
  */
-const STYLES = `
-/* Self-hosted Newsreader (the editorial serif). Served same-origin by
-   brandAssetRoutes() so this pre-gateway page needs no CDN. canvas-drop never
-   phones home. Variable weight (200-800), Latin subset; normal + italic (the
-   hero's italic-accent clause). Matches the @fontsource definitions. */
-@font-face {
-  font-family: "Newsreader Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 200 800;
-  src: url(/fonts/newsreader-latin-wght-normal.woff2) format("woff2-variations");
-}
-@font-face {
-  font-family: "Newsreader Variable";
-  font-style: italic;
-  font-display: swap;
-  font-weight: 200 800;
-  src: url(/fonts/newsreader-latin-standard-italic.woff2) format("woff2-variations");
-}
-/* Geist (sans, the body + the canvas skin's display) and Geist Mono (the workshop
-   skin's display) is self-hosted too, so every skin renders faithfully with no CDN. */
-@font-face {
-  font-family: "Geist Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
-}
-@font-face {
-  font-family: "Geist Mono Variable";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url(/fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations");
-}
-:root {
-${rampCssVars("light", "  ")}
-  --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
-  /* Display face defaults to the editorial serif; a [data-skin] re-voices it. */
-  --font-display: var(--font-serif);
-  --radius-scale: 1;
-
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-${rampCssVars("dark", "    ")}
-
-  }
-}
-${LANDING_LAYOUT}
-`;
+const STYLES = `${SITE_STYLES}\n${LANDING_LAYOUT}`;
 
 const ghIcon = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.1.63-1.35-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>`;
 const arrow = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -443,13 +394,8 @@ ${skinnedHtmlTag(skin)}
 ${head(origin)}
 </head>
 <body>
-<header>
-  <div class="wrap nav">
-    <a class="brand" href="/">${BRAND_MARK}<span>${escapeHtml(SITE.name)}</span></a><span class="spacer"></span>
-    <nav class="nav-links" aria-label="Primary"><a class="link" href="/docs">Docs</a><a class="link hide-sm" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a><a class="btn btn-ghost" href="${cta.href}">${cta.short}</a></nav>
-  </div>
-</header>
-<main>
+${siteHeader({ action: { href: cta.href, label: cta.short } })}
+<main id="main-content" tabindex="-1">
   <section class="hero" aria-label="Introducing canvas-drop">
     <div class="wrap hero-inner">
       <div class="hero-copy">
@@ -493,7 +439,7 @@ ${head(origin)}
     </div>
   </section>
 </main>
-<footer><div class="wrap"><div class="foot"><a class="brand" href="/">${BRAND_MARK}<span>${escapeHtml(SITE.name)}</span></a><span class="spacer"></span><nav class="foot-links" aria-label="Footer"><a href="/docs">Docs</a><a href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></nav></div><div class="colophon">Small web tools, built by your team. Open source under the MIT license. Inspired by Shopify's Quick; not affiliated with Shopify.</div></div></footer>
+${siteFooter()}
 <script src="/docs/assets/landing-carousel.js" defer></script>
 </body>
 </html>`;

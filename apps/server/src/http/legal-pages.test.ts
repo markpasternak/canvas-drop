@@ -37,33 +37,32 @@ describe("legal pages — rendered content", () => {
     expect(html).toContain("mark.pasternak@gmail.com");
   });
 
-  it("both documents cross-link and are pinned to dark (light styles kept for later)", () => {
+  it("both documents cross-link and share the public theme controls", () => {
     for (const html of [renderPrivacyPage(), renderTermsPage()]) {
       expect(html).toContain('href="/privacy"');
       expect(html).toContain('href="/terms"');
-      // Forced dark for now via the html attribute, but the light/dark token styles
-      // stay in the page so a future toggle is just an attribute change.
-      expect(html).toContain('<html lang="en" data-theme="dark">');
-      // The light styles are retained for a future toggle (the media query stays).
+      // The shared theme client applies the saved choice before paint.
+      expect(html).toContain('<html lang="en">');
+      expect(html).toContain("data-theme-switch");
       expect(html).toContain("prefers-color-scheme: dark");
     }
   });
 });
 
 describe("legal pages — design skin", () => {
-  it("omits data-skin on <html> for the default editorial skin (stays dark-pinned)", () => {
+  it("omits data-skin on <html> for the default editorial skin", () => {
     for (const html of [renderPrivacyPage("", "editorial"), renderTermsPage("", "editorial")]) {
-      // editorial is the attribute-free base; the dark pin stays, no skin attribute.
-      expect(html).toContain('<html lang="en" data-theme="dark">');
+      // Editorial is the attribute-free base.
+      expect(html).toContain('<html lang="en">');
       expect(html).not.toContain('data-skin="editorial"');
     }
   });
 
-  it("stamps the chosen skin on <html> alongside the dark pin and ships the override CSS", () => {
+  it("stamps the chosen skin on <html> and ships the override CSS", () => {
     const html = renderPrivacyPage("", "canvas");
-    expect(html).toContain('<html lang="en" data-theme="dark" data-skin="canvas">');
+    expect(html).toContain('<html lang="en" data-skin="canvas">');
     // The override blocks come from the canonical shared emitter (same source as the
-    // dashboard tokens.css), incl. the dark-toggle selectors the dark-pinned page needs.
+    // dashboard tokens.css), including manual theme selectors.
     expect(html).toContain(':root[data-skin="canvas"]');
     expect(html).toContain(':root[data-skin="workshop"]');
     expect(html).toContain(':root[data-skin="canvas"][data-theme="dark"]');

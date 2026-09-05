@@ -9,6 +9,7 @@ import { errorResponse } from "../http/error-pages.js";
 import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 import { LLMS_TXT, SEARCH_INDEX } from "./generated-content.js";
+import { NAV_CLIENT_JS } from "./nav.client.js";
 import { renderDocPage } from "./render.js";
 import { SEARCH_CLIENT_JS } from "./search.client.js";
 import { THEME_CLIENT_JS } from "./theme.client.js";
@@ -136,6 +137,14 @@ export function docsRoutes(
     h.set("Content-Type", "application/javascript; charset=utf-8");
     h.set("Cache-Control", "public, max-age=3600");
     return new Response(THEME_CLIENT_JS, { status: 200, headers: h });
+  });
+
+  app.get("/docs/nav.js", () => {
+    const h = new Headers();
+    baseSecurityHeaders(h);
+    h.set("Content-Type", "application/javascript; charset=utf-8");
+    h.set("Cache-Control", "public, max-age=3600");
+    return new Response(NAV_CLIENT_JS, { status: 200, headers: h });
   });
 
   app.get("/docs/search-index.json", () => {

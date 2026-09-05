@@ -1,9 +1,9 @@
-import { type Config, rampCssVars, type SkinName } from "@canvas-drop/shared";
+import type { Config, SkinName } from "@canvas-drop/shared";
 import { Hono } from "hono";
-import { BRAND_MARK } from "./brand.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
-import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
+import { SITE_STYLES, SITE_THEME_SCRIPT, siteFooter, siteHeader } from "./site-chrome.js";
+import { skinnedHtmlTag } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
@@ -17,8 +17,8 @@ import type { AppEnv } from "./types.js";
  * `app.ts` (next to `/healthz` and `/auth`); everything below the gateway needs
  * an org session and would bounce Google's crawler to a login redirect.
  *
- * The pages are deliberately minimal, light-mode-only static HTML with light
- * canvas-drop branding — no SPA bundle, no client JS. Content is hardcoded for
+ * The documents use the shared public-page chrome and optional theme client,
+ * with no SPA bundle. Content is hardcoded for
  * the canvas-drop.com instance (operator, contact, jurisdiction) and describes
  * only the data this codebase actually handles.
  */
@@ -63,7 +63,7 @@ function htmlResponse(html: string): Response {
 
 /** SEO + Open Graph + Twitter tags via the shared {@link ogMeta} builder, so the
  *  legal pages unfurl identically to the landing + docs. The title is suffixed
- *  with the brand; the page stays light-only (no `theme-color` is added here). */
+ *  with the brand; the page shares the public-site theme controls. */
 function socialMeta(path: string, title: string, description: string, origin: string): string {
   return ogMeta({ origin, path, title: `${title} · canvas-drop`, description });
 }
@@ -78,148 +78,48 @@ function renderLegalPage(opts: {
   origin: string;
   skin: SkinName;
 }): string {
-  // Legal pages are intentionally pinned to dark for now (data-theme="dark"). The
-  // light + system styles below are kept intact so flipping to a togglable theme later
-  // is just removing this attribute (or wiring SYSTEM_THEME_INIT back in). The skin is
-  // stamped on <html> via the shared helper exactly like the landing + docs surfaces.
   return `<!doctype html>
-${skinnedHtmlTag(opts.skin, 'data-theme="dark"')}
+${skinnedHtmlTag(opts.skin)}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(opts.title)} · canvas-drop</title>
 ${socialMeta(opts.path, opts.title, opts.intro, opts.origin)}
 ${FAVICON_LINKS}
+${SITE_THEME_SCRIPT}
 <style>
-  @font-face {
-    font-family: "Newsreader Variable";
-    font-style: normal;
-    font-display: swap;
-    font-weight: 200 800;
-    src: url(/fonts/newsreader-latin-wght-normal.woff2) format("woff2-variations");
-  }
-  /* Geist + Geist Mono — the display faces the workshop/canvas skins switch to, so a
-     skinned legal page renders faithfully same-origin (no CDN). */
-  @font-face {
-    font-family: "Geist Variable";
-    font-style: normal;
-    font-display: swap;
-    font-weight: 100 900;
-    src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
-  }
-  @font-face {
-    font-family: "Geist Mono Variable";
-    font-style: normal;
-    font-display: swap;
-    font-weight: 100 900;
-    src: url(/fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations");
-  }
-  :root {
-${rampCssVars("light", "    ")}
-    --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
-    /* Display-face defaults (editorial serif); a [data-skin] block re-voices them. */
-    --font-display: var(--font-serif);
-    --display-weight: 500;
-    --display-tracking: -0.02em;
-    --radius-scale: 1;
-    --shadow-strength: 1;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-${rampCssVars("dark", "      ")}
-    }
-  }
-  /* Theme overrides kept for a future toggle. The page hardcodes data-theme="dark"
-     on <html> (forced dark for now); these selectors outrank the media query so light
-     is reachable later just by changing/removing that attribute. */
-  :root[data-theme="dark"] {
-${rampCssVars("dark", "    ")}
-  }
-  :root[data-theme="light"] {
-${rampCssVars("light", "    ")}
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0;
-    min-height: 100dvh;
-    padding: clamp(1.25rem, 4vw, 3rem);
-    background: var(--canvas);
-    color: var(--fg);
-    font: 15px/1.6 "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
-  }
-  main {
-    width: min(100%, 44rem);
-    margin: 0 auto;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: .6rem;
-    margin: 0 0 2rem;
-    font-weight: 650;
-    letter-spacing: -.011em;
-    color: var(--fg);
-    text-decoration: none;
-  }
-  .mark { width: 1.85rem; height: 1.85rem; flex: 0 0 auto; }
-  h1 {
-    margin: 0 0 .35rem;
-    font-family: var(--font-display);
-    font-optical-sizing: auto;
-    font-weight: var(--display-weight, 500);
-    font-size: clamp(1.9rem, 5vw, 2.6rem);
-    line-height: 1.1;
-    letter-spacing: var(--display-tracking, -.02em);
-  }
-  .updated {
-    margin: 0 0 1.75rem;
-    color: var(--subtle);
-    font-size: .8125rem;
-  }
-  .intro { margin: 0 0 1.75rem; color: var(--muted); font-size: 1.0625rem; }
-  h2 {
-    margin: 2.25rem 0 .5rem;
-    font-family: var(--font-display);
-    font-optical-sizing: auto;
-    font-weight: var(--display-weight, 500);
-    font-size: 1.3rem;
-    letter-spacing: -.01em;
-  }
-  p { margin: .6rem 0; color: var(--muted); }
-  ul { margin: .6rem 0; padding-left: 1.25rem; color: var(--muted); }
-  li { margin: .3rem 0; }
-  strong { color: var(--fg); font-weight: 600; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .footer {
-    margin-top: 2.5rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--border);
-    color: var(--subtle);
-    font-size: .8125rem;
-  }
-  .footer a { color: var(--muted); }
-${skinStyleCss({ darkToggle: true })}
+${SITE_STYLES}
+.legal-content { width: min(100%, 49rem); margin: 0 auto; padding: clamp(2rem, 5vw, 4rem) clamp(1.25rem, 5vw, 2.5rem) 4rem; }
+.legal-nav { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 2.5rem; }
+.legal-nav a { display: inline-flex; align-items: center; min-height: 44px; padding-block: .5rem; color: var(--muted); text-decoration: none; font-size: .875rem; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.legal-nav a[aria-current="page"] { border-color: var(--accent); color: var(--fg); font-weight: 600; }
+.legal-content h1, .legal-content h2 { font-family: var(--font-display); font-optical-sizing: auto; font-weight: var(--display-weight); letter-spacing: var(--display-tracking); text-wrap: balance; }
+.legal-content h1 { font-size: clamp(2.5rem, 6vw, 3.5rem); line-height: 1.08; margin: 0 0 .75rem; }
+.legal-content h2 { font-size: 1.5rem; line-height: 1.25; margin: 2.5rem 0 .7rem; }
+.legal-content .updated { color: var(--muted); font-size: .8125rem; margin: 0 0 1.75rem; }
+.legal-content .intro { font-size: 1.125rem; color: var(--muted); margin: 0 0 2.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
+.legal-content p, .legal-content li { color: var(--muted); overflow-wrap: anywhere; }
+.legal-content p { margin: .75rem 0; }
+.legal-content ul { margin: .75rem 0; padding-left: 1.25rem; }
+.legal-content li { margin-block: .65rem; padding-left: .25rem; }
+.legal-content strong { color: var(--fg); font-weight: 600; }
+.legal-content p a { color: var(--accent); text-underline-offset: .2em; }
+.legal-content a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-  <main>
-    <a class="brand" href="/">
-      ${BRAND_MARK}
-      <span>canvas-drop</span>
-    </a>
+  ${siteHeader()}
+  <main class="legal-content" id="main-content" tabindex="-1">
+    <nav class="legal-nav" aria-label="Legal">
+      <a href="/privacy"${opts.path === "/privacy" ? ' aria-current="page"' : ""}>Privacy Policy</a>
+      <a href="/terms"${opts.path === "/terms" ? ' aria-current="page"' : ""}>Terms of Service</a>
+    </nav>
     <h1>${escapeHtml(opts.title)}</h1>
     <p class="updated">Last updated ${escapeHtml(OPERATOR.lastUpdated)}</p>
     <p class="intro">${opts.intro}</p>
     ${opts.body}
-    <div class="footer">
-      <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a><br>
-      ${escapeHtml(OPERATOR.name)}
-    </div>
   </main>
+  ${siteFooter(opts.path === "/privacy" ? "/privacy" : "/terms")}
 </body>
 </html>`;
 }

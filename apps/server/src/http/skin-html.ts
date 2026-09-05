@@ -17,8 +17,8 @@ import { type SkinName, skinOverridesCss } from "@canvas-drop/shared";
 
 /**
  * Render the opening `<html>` tag with the skin stamped on, for a non-default
- * skin only. `attrs` lets a surface add its own root attributes (e.g. the legal
- * pages' forced `data-theme="dark"`). Editorial → no `data-skin`.
+ * skin only. `attrs` lets a surface add its own root attributes (e.g. an explicit
+ * `data-theme="dark"`). Editorial → no `data-skin`.
  *
  *   skinnedHtmlTag("studio")                     → `<html lang="en" data-skin="studio">`
  *   skinnedHtmlTag("editorial")                  → `<html lang="en">`
@@ -36,8 +36,8 @@ export function skinnedHtmlTag(skin: SkinName, attrs = ""): string {
  * emits the SAME accent-family + display-bundle overrides from one source.
  *
  * `darkToggle` adds the manual `[data-theme="dark"]` skin selectors — pass it for
- * surfaces that expose a theme toggle (the docs) so a stored dark choice keeps the
- * skin accents; leave it off for OS-only surfaces (the landing).
+ * surfaces that expose a theme toggle so a stored dark choice keeps the
+ * skin accents; leave it off for OS-only surfaces.
  */
 export function skinStyleCss(opts: { darkToggle?: boolean } = {}): string {
   return `/* Design-skin overrides (expression layer): selected by <html data-skin>. */
