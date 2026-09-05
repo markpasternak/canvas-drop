@@ -221,6 +221,7 @@ Not started, and not claimed anywhere above: a CLI, DB-backed custom domains, mu
 
 ```bash
 pnpm dev              # server + dashboard + SDK in watch mode
+pnpm dev:stop         # send SIGTERM to this worktree's recorded dev launcher
 pnpm test             # full suite: BOTH dialects (sqlite + pglite) in-process, then the dashboard
 pnpm test:sqlite      # sqlite leg only
 pnpm test:pg          # postgres (pglite) leg only

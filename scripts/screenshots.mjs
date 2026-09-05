@@ -46,7 +46,7 @@ const SETTLE_MS = LANDING ? 1800 : 0;
 /** Find a canvas id linked from the dashboard, for the canvas-scoped tour screens.
  *  Prefers a canvas by visible title (so the editor slide showcases a clean,
  *  code-rich demo app) and falls back to the first one. Returns null if none is
- *  seeded (those shots are then skipped). */
+ *  seeded (the tour capture then fails). */
 async function discoverCanvasId(page, preferTitle) {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
   await page.waitForTimeout(SETTLE_MS || 1200);
@@ -66,9 +66,29 @@ async function resolveShots(page) {
   if (!LANDING) {
     // Keep to screens without seeded data (org-agnostic, R11).
     return [
-      { path: "/", name: "dashboard-home.webp" },
-      { path: "/new", name: "new-canvas.webp" },
-      { path: "/gallery", name: "gallery.webp" },
+      {
+        path: "/",
+        name: "dashboard-home.webp",
+        async prepare(page) {
+          await page
+            .getByRole("heading", { name: "Ship your first canvas", exact: true })
+            .waitFor();
+        },
+      },
+      {
+        path: "/new",
+        name: "new-canvas.webp",
+        async prepare(page) {
+          await page.getByRole("textbox", { name: "Title", exact: true }).waitFor();
+        },
+      },
+      {
+        path: "/gallery",
+        name: "gallery.webp",
+        async prepare(page) {
+          await page.getByText("No canvases in the gallery yet", { exact: true }).waitFor();
+        },
+      },
     ];
   }
   const shots = [
@@ -185,11 +205,16 @@ async function main() {
         console.log(`✓ ${shot.path} → docs/site/assets/${shot.name} (${kb} KB)`);
       } catch (err) {
         failures.push(shot.name);
-        console.error(`✗ ${shot.path}: ${err.message} (is the dev server running at ${BASE}?)`);
+        console.error(`✗ ${shot.path}: ${err.message}`);
       }
     }
 
-    if (failures.length) throw new Error(`Screenshots failed: ${failures.join(", ")}`);
+    if (failures.length) {
+      console.error(
+        "Some files may have been refreshed; the animation was not rebuilt. Re-run the capture successfully before committing assets.",
+      );
+      throw new Error(`Screenshots failed: ${failures.join(", ")}`);
+    }
   } finally {
     await browser.close();
   }
