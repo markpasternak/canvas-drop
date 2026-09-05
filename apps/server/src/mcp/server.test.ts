@@ -831,6 +831,8 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     });
     const draft = payload(await mcp.callTool({ name: "get_draft", arguments: { id: cv.id } }));
     expect(draft.dirty).toBe(true);
+    expect(draft.changes).toEqual([{ path: "index.html", kind: "added" }]);
+    expect(draft.entry).toEqual({ path: "index.html", reason: "index" });
     expect(draft.files.map((f: { path: string }) => f.path)).toContain("index.html");
 
     // Read the draft file back.

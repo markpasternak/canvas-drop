@@ -35,7 +35,7 @@ export function ConfirmDialog({
   holdToConfirm?: boolean;
 }) {
   return (
-    <Dialog open={open} onClose={onClose} title={title}>
+    <Dialog open={open} onClose={onClose} title={title} dismissable={!loading}>
       <div className="space-y-4">
         {children && <div className="text-sm text-muted">{children}</div>}
         <div className="flex justify-end gap-2">

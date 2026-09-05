@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspacePane } from "../components/Surface.js";
@@ -53,7 +53,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function mockFetch(handlers: Record<string, (init?: RequestInit) => Response>) {
+function mockFetch(handlers: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
   const calls: {
     method: string;
     url: string;
@@ -135,7 +135,7 @@ describe("Editor route", () => {
     // The Editor tab shows two distinct publish affordances: the editor bar's
     // "Publish" (publishes the draft) and the global header "New version" (uploads
     // fresh files as a new version), shown on every tab.
-    expect(screen.getByRole("button", { name: "Publish update" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review and publish" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload new version" })).toBeInTheDocument();
   });
 
@@ -158,7 +158,7 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByText(/all changes published/i)).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Publish update" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Review and publish" })).toBeDisabled();
   });
 
   it("typing shows Unsaved changes immediately (local buffer truth beats the server dirty flag)", async () => {
@@ -178,7 +178,7 @@ describe("Editor route", () => {
     // Before any autosave lands, the bar must already say unsaved — and Publish
     // must be enabled (publishing flushes the buffer first).
     expect(await screen.findByText(/unsaved changes/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish update" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Review and publish" })).toBeEnabled();
   });
 
   it("a failed autosave surfaces 'Save failed' in the status bar instead of claiming published", async () => {
@@ -290,8 +290,11 @@ describe("Editor route", () => {
         json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
     });
     renderEditor();
-    const publishBtn = await screen.findByRole("button", { name: "Publish update" });
+    const publishBtn = await screen.findByRole("button", { name: "Review and publish" });
     await userEvent.click(publishBtn);
+    const dialog = await screen.findByRole("dialog", { name: "Review before publishing" });
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/publish"))).toBe(false);
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Publish update" }));
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
         true,
@@ -299,7 +302,7 @@ describe("Editor route", () => {
     );
   });
 
-  it("⌘↵ publishes when the draft is dirty and publishable", async () => {
+  it("⌘↵ opens review before publishing when the draft is dirty and publishable", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
@@ -310,9 +313,12 @@ describe("Editor route", () => {
     renderEditor();
     // Wait for the editor to be live (Publish enabled) before firing the shortcut.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Publish update" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Review and publish" })).toBeEnabled(),
     );
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    const dialog = await screen.findByRole("dialog", { name: "Review before publishing" });
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/publish"))).toBe(false);
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Publish update" }));
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
         true,
@@ -320,7 +326,7 @@ describe("Editor route", () => {
     );
   });
 
-  it("Ctrl+↵ also publishes", async () => {
+  it("Ctrl+↵ also opens review", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
@@ -330,14 +336,237 @@ describe("Editor route", () => {
     });
     renderEditor();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Publish update" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Review and publish" })).toBeEnabled(),
     );
     await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    const dialog = await screen.findByRole("dialog", { name: "Review before publishing" });
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Publish update" }));
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
         true,
       ),
     );
+  });
+
+  it("reviews added/changed/removed paths and the audience without publishing on open", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          access: "private",
+          orgId: null,
+          currentVersionId: null,
+          publicationState: "draft",
+        }),
+      "GET /api/canvases/c1/draft": () =>
+        json(
+          draftView({
+            dirty: true,
+            stale: true,
+            changes: [
+              { path: "new.css", kind: "added" },
+              { path: "index.html", kind: "modified" },
+              { path: "old.js", kind: "deleted" },
+            ],
+            entry: { path: "index.html", reason: "index" },
+          }),
+        ),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("new.css")).toBeInTheDocument();
+    expect(within(dialog).getByText("Removed")).toBeInTheDocument();
+    expect(within(dialog).getByText(/publishing replaces that version/i)).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Restricted to people and teams with access"),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/publish this draft before sharing/i)).toBeNull();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Back to draft" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("refreshes review and requires another confirmation after a concurrent draft change", async () => {
+    let saved = draftView({ dirty: true });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(saved),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => json({ version: 2 }),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("button", { name: "Publish update" });
+    saved = draftView({
+      dirty: true,
+      updatedAt: 2,
+      files: [{ ...saved.files[0], hash: "changed" }],
+      changes: [{ path: "index.html", kind: "modified" }],
+    });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    expect(await within(dialog).findByText(/the draft or its access changed/i)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+  });
+
+  it("publishes after a metadata-only save without asking to review identical content again", async () => {
+    let saved = draftView({ dirty: true });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(saved),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => json({ version: 2 }),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("button", { name: "Publish update" });
+    saved = draftView({
+      dirty: true,
+      updatedAt: 99,
+      files: [
+        { ...saved.files[0], updatedAt: 99, updatedBy: "other", updatedByName: "Other editor" },
+      ],
+    });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+    expect(screen.queryByText(/the draft or its access changed/i)).toBeNull();
+  });
+
+  it("requires review again when only the audience changes", async () => {
+    let access = "private";
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, access, publicLinkEnabled: true }),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => json({ version: 2 }),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Restricted to people and teams with access");
+    access = "public_link";
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    expect(await within(dialog).findByText("Anyone with the link")).toBeInTheDocument();
+    expect(within(dialog).getByText(/the draft or its access changed/i)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+  });
+
+  it("submits a pending publish once even on repeated activation", async () => {
+    let finish!: () => void;
+    const pending = new Promise<Response>((resolve) => {
+      finish = () => resolve(json({ version: 2 }));
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => pending,
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.dblClick(await within(dialog).findByRole("button", { name: "Publish update" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(dialog).toBeInTheDocument();
+    finish();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("refuses to publish from cached review details when the confirmation refresh fails", async () => {
+    let fail = false;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        fail ? json({ error: "unavailable" }, 503) : json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("button", { name: "Publish update" });
+    fail = true;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish update" }));
+    expect(await within(dialog).findByText(/couldn't load the latest draft/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Publish update" })).toBeDisabled();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fail = false;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+    expect(await within(dialog).findByRole("button", { name: "Publish update" })).toBeEnabled();
+  });
+
+  it("blocks an empty draft found during review", async () => {
+    let reads = 0;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(draftView({ dirty: true, ...(++reads > 1 ? { files: [] } : {}) })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/this draft is empty/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Publish update" })).toBeDisabled();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("keeps a failed publish review open with a route to verify version history", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "POST /api/canvases/c1/publish": () => json({ error: "unavailable" }, 503),
+    });
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Publish update" }));
+    expect(await within(dialog).findByText(/publishing wasn't confirmed/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: /check versions/i })).toHaveAttribute(
+      "href",
+      "/canvases/c1/versions",
+    );
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("flushes local edits before review and keeps a failed save out of publishing", async () => {
+    let fail = true;
+    let saved = draftView();
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(saved),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "PUT /api/canvases/c1/draft/file": () => {
+        if (fail) return json({ error: "unavailable" }, 503);
+        saved = draftView({
+          dirty: true,
+          updatedAt: 10,
+          changes: [{ path: "index.html", kind: "modified" }],
+        });
+        return json(saved);
+      },
+    });
+    renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("x"));
+    fireEvent.change(editor, { target: { value: "my unsaved edit" } });
+    await userEvent.click(screen.getByRole("button", { name: "Review and publish" }));
+    expect(await screen.findByText(/save failed — changes not saved/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Review and publish" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Changed")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "PUT").at(-1)?.body).toBe("my unsaved edit");
   });
 
   it("⌘↵ is a no-op when the draft isn't publishable (clean)", async () => {
@@ -351,7 +580,7 @@ describe("Editor route", () => {
     renderEditor();
     // Publish is disabled for a clean draft; the shortcut must respect the same gate.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Publish update" })).toBeDisabled(),
+      expect(screen.getByRole("button", { name: "Review and publish" })).toBeDisabled(),
     );
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
     // Give any (incorrect) publish a chance to fire, then assert none did.

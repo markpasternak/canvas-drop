@@ -209,7 +209,7 @@ describe("share route", () => {
 
     // The CTA offers both ways forward (scoped to the locked panel, not the header).
     const panel = screen.getByRole("region", { name: /sharing unlocks after you publish/i });
-    expect(within(panel).getByRole("button", { name: /^publish$/i })).toBeEnabled();
+    expect(within(panel).getByRole("button", { name: /review and publish/i })).toBeEnabled();
     expect(within(panel).getByRole("link", { name: /open draft/i })).toBeInTheDocument();
   });
 
@@ -220,6 +220,15 @@ describe("share route", () => {
         published
           ? json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" })
           : json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json({
+          files: [{ path: "index.html", size: 10, mime: "text/html" }],
+          changes: [{ path: "index.html", kind: "added" }],
+          stale: false,
+          dirty: true,
+          updatedAt: 0,
+          baseVersionId: null,
+        }),
       "POST /api/canvases/c1/publish": () => {
         published = true;
         return json({ version: 1 });
@@ -231,7 +240,10 @@ describe("share route", () => {
     const panel = await screen.findByRole("region", {
       name: /sharing unlocks after you publish/i,
     });
-    await user.click(within(panel).getByRole("button", { name: /^publish$/i }));
+    await user.click(within(panel).getByRole("button", { name: /review and publish/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Review before publishing" });
+    await user.click(await within(dialog).findByRole("button", { name: "Publish canvas" }));
 
     // After publishing, the canvas-detail query is invalidated/refetched; the tab
     // re-renders with the access ladder revealed in place (no navigation).

@@ -7,6 +7,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { Field } from "../components/Field.js";
 import { PasswordField } from "../components/PasswordField.js";
 import { PeopleAccessList } from "../components/PeopleAccessList.js";
+import { PublishReviewDialog } from "../components/PublishReviewDialog.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
@@ -21,7 +22,7 @@ import {
   type TransferCandidate,
 } from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
-import { usePublishDraft, useTransferCanvas, useUpdateSettings } from "../lib/mutations.js";
+import { useTransferCanvas, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
 import { useCanvas, useMe, useTeams } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
@@ -585,24 +586,14 @@ export default function Share() {
  * U13 — the single locked panel shown while a canvas isn't published yet. It states
  * the dependency ONCE (sharing unlocks after the canvas is live) instead of repeating
  * a "publish first" notice beneath every disabled access rung, protection control, and gallery
- * control. The Publish CTA fires `usePublishDraft`, which invalidates the canvas-detail
+ * control. The CTA opens publish review; its publish mutation invalidates the canvas-detail
  * query on success; `publicationState` flips to "published" and the parent re-renders
  * with the full access ladder / people / protection / gallery sections revealed in place —
  * no navigation, no manual reload. Open draft routes to the editor for those who want
  * to keep working before going live.
  */
 function ShareLocked({ canvasId }: { canvasId: string }) {
-  const toast = useToast();
-  const publish = usePublishDraft(canvasId);
-
-  async function onPublish() {
-    try {
-      await publish.mutateAsync();
-      toast("Published — sharing is unlocked");
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't publish this canvas", "error");
-    }
-  }
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   return (
     <TabContentFrame>
@@ -619,15 +610,14 @@ function ShareLocked({ canvasId }: { canvasId: string }) {
               Sharing unlocks after you publish
             </h2>
             <p className="text-sm leading-relaxed text-muted">
-              This canvas is still a draft, so it has no live URL yet. Access levels, people,
-              passwords, and the gallery all describe a canvas people can open — publish it to put
-              it live, then the full set of sharing controls appears here.
+              Publish a first version to give this canvas a live link. Then choose who can open it,
+              add people and teams, and set any protection here.
             </p>
           </div>
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-2">
-          <Button variant="primary" size="sm" loading={publish.isPending} onClick={onPublish}>
-            Publish
+          <Button variant="primary" size="sm" onClick={() => setReviewOpen(true)}>
+            Review and publish
           </Button>
           <Link
             to="/canvases/$id/editor"
@@ -638,6 +628,9 @@ function ShareLocked({ canvasId }: { canvasId: string }) {
           </Link>
         </div>
       </Panel>
+      {reviewOpen && (
+        <PublishReviewDialog canvasId={canvasId} onClose={() => setReviewOpen(false)} />
+      )}
     </TabContentFrame>
   );
 }

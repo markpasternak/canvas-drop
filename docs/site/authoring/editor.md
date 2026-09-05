@@ -11,9 +11,10 @@ The loop:
 2. Edit files in the tree. Changes autosave to the draft 700 ms after you stop
    typing; `⌘S` / `Ctrl+S` saves at once.
 3. Check the **Preview** pane, or **Open full preview** in a new tab.
-4. Press **Publish** (or `⌘↵` / `Ctrl+Enter`). The draft becomes a new immutable
-   version and the canvas URL serves it immediately. The toast names the version:
-   `Published version 7`.
+4. Choose **Review and publish** (or `⌘↵` / `Ctrl+Enter`). Any unsaved edit is saved
+   first. Review added, changed and removed files, the home page and who can open it.
+5. Choose **Publish canvas** or **Publish update** in the review. The draft becomes
+   a new immutable version at the same link. The toast names it: `Published version 7`.
 
 Editors get the same tab and the same controls as the owner (see
 [Roles: viewers and editors](/docs/authoring/sharing#roles-viewers-and-editors)).
@@ -45,11 +46,17 @@ precedence:
 Whenever the draft is behind, a separate **A newer version was published** notice sits
 next to the status line, whatever else the status says.
 
-**Publish** is enabled when the draft has at least one file and something to ship:
+**Review and publish** is enabled when the draft has at least one file and something to ship:
 unpublished changes, an unsaved edit, or a draft that is behind. When it is disabled,
 its tooltip says why: **The published version already matches this draft**, or **Add
 a file to the draft before publishing**. The `⌘↵` shortcut uses the same gate and is
 ignored while a dialog (Add file, Rename, Delete) is open.
+
+The review checks the saved draft and access again when you confirm. If either changed,
+it shows the updated details and asks you to review again. A failed refresh blocks
+publishing; a save conflict keeps your text in the editor. If publishing is not
+confirmed, check **Versions** before retrying. Review does not lock other editors
+out: the existing publish endpoint snapshots the saved draft when it executes.
 
 Publishing snapshots the draft's file list into a new immutable version, points the
 canvas at it, and prunes history beyond the last **10** versions. Files are already
@@ -60,8 +67,8 @@ erased. When the canvas's preview mode is **auto** and the instance has
 publish.
 
 The **Upload and publish** / **Upload new version** button in the canvas header is a different thing: it
-uploads files (paste, folder, or ZIP) as a direct deploy. Only the Editor tab's
-**Publish** ships the draft.
+uploads files (paste, folder, or ZIP) as a direct deploy. The editor and the unpublished Share view use
+**Review and publish** to publish the saved draft.
 
 ### When a direct deploy lands
 
@@ -198,9 +205,9 @@ count, and total size. Per version:
 
 - **Download ZIP**: every file in that version as one archive, named
   `{slug}-v{version}.zip`.
-- **Restore**: load that version's files into the draft. If the draft has unpublished
-  changes, canvas-drop asks first (**Load and discard changes**). The published
-  version is untouched until you publish.
+- **Restore to draft**: load that version's files into the draft. Every restore asks
+  you to **Replace draft**, because this discards any unpublished draft changes.
+  The live canvas stays as it is. The editor opens so you can review before publishing.
 - **Make current**: point the canvas URL at that version, older or newer, for all
   visitors immediately, after a confirmation. This is the roll back (and roll
   forward) control.
@@ -223,7 +230,7 @@ needs the owner or editor role; a canvas you hold no role on reads 404.
 
 | Route | What it does |
 |---|---|
-| `GET /api/canvases/{id}/draft` | Draft view: `files[]` (path, size, mime, hash, last writer), `dirty`, `stale`, `baseVersionId`. Creates the draft on first call. |
+| `GET /api/canvases/{id}/draft` | Draft view: `files[]` (path, size, mime, hash, last writer), `dirty`, `stale`, `baseVersionId`, `changes[]` (path and added/modified/deleted kind), and home-page `entry`. Creates the draft on first call. |
 | `GET /api/canvases/{id}/draft/file?path=` | Raw bytes of one draft file. |
 | `PUT /api/canvases/{id}/draft/file?path=` | Write or replace a file (raw body). `?mode=create` refuses an existing path. Send `If-Draft-File-Hash` with the hash you loaded (`none` for a new path) to get `409 DRAFT_CONFLICT` instead of overwriting. |
 | `DELETE /api/canvases/{id}/draft/file?path=` | Remove a file. Same precondition header. |

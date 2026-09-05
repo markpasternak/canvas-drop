@@ -21,7 +21,7 @@ const base: AudienceCanvas = {
 };
 async function show(
   overrides: Partial<AudienceCanvas> = {},
-  orgs: Array<{ id: string; name: string }> = [],
+  orgs?: Array<{ id: string; name: string }>,
 ) {
   const root = createRootRoute({ component: Outlet });
   const index = createRoute({
@@ -67,6 +67,19 @@ describe("canvas link audience", () => {
   it("does not imply org-wide access on an invalid Personal canvas under active tenancy", async () => {
     await show({ access: "whole_org" }, [{ id: "o1", name: "Acme" }]);
     expect(screen.getByText("Restricted to people and teams with access")).toBeInTheDocument();
+  });
+  it("does not claim Restricted while organization metadata is unavailable", async () => {
+    await show({ access: "whole_org" });
+    expect(
+      screen.getByText("Organization access selected; availability hasn't been verified."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/restricted to people/i)).toBeNull();
+  });
+  it("describes workspace membership when tenancy is known to be inactive", async () => {
+    await show({ access: "whole_org" }, []);
+    expect(
+      screen.getByText("Workspace members, plus people and teams with access"),
+    ).toBeInTheDocument();
   });
   it.each([
     [true, "Anyone with the link"],
