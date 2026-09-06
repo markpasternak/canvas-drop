@@ -86,4 +86,47 @@ describe.each(DIALECTS)("auditRepository [%s]", (dialect) => {
     const rows = await repo.recent();
     expect(rows.map((r) => r.action)).toEqual(["new.event"]);
   });
+
+  it("filters administrative history before stable pagination and counts", async () => {
+    client = await makeTestDb(dialect);
+    const repo = auditRepository(client);
+    for (let i = 0; i < 4; i++)
+      await repo.append({
+        actorId: "admin-1",
+        action: "canvas_disable",
+        targetType: "canvas",
+        targetId: "canvas-1",
+        meta: { reason: `reason ${i}` },
+      });
+    await repo.append({
+      actorId: "admin-2",
+      action: "canvas_disable",
+      targetType: "canvas",
+      targetId: "canvas-2",
+    });
+    await repo.append({
+      actorId: "admin-1",
+      action: "auth_denied",
+      targetType: "canvas",
+      targetId: "canvas-1",
+    });
+    const filter = {
+      actions: ["canvas_disable"],
+      actor: "admin-1",
+      canvasId: "canvas-1",
+      limit: 2,
+      since: 0,
+      until: Date.now() + 1_000,
+    };
+    const first = await repo.listFiltered({ ...filter, offset: 0 });
+    const second = await repo.listFiltered({ ...filter, offset: 2 });
+    expect(first.total).toBe(4);
+    expect(second.total).toBe(4);
+    expect(new Set([...first.items, ...second.items].map((r) => r.id)).size).toBe(4);
+    expect(first.items.every((r) => r.action === "canvas_disable" && r.actorId === "admin-1")).toBe(
+      true,
+    );
+    expect((await repo.listFiltered({ ...filter, offset: 0, until: 1 })).total).toBe(0);
+    expect((await repo.listFiltered({ ...filter, offset: 0, actions: [] })).total).toBe(0);
+  });
 });

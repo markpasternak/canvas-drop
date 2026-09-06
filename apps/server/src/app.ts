@@ -38,6 +38,7 @@ import {
   type AllowedEmailsRepository,
   allowedEmailsRepository,
 } from "./db/repositories/allowed-emails.js";
+import { auditRepository } from "./db/repositories/audit.js";
 import { authoringUsageRepository } from "./db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import { connectionsRepository } from "./db/repositories/connections.js";
@@ -735,6 +736,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     adminRoutes({
       config: deps.config,
       admin: adminRepository(deps.db),
+      auditReader: auditRepository(deps.db),
+      teams,
       canvases: deps.canvases,
       versions: deps.versions,
       users: deps.users,

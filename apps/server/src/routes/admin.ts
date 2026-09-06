@@ -3,7 +3,13 @@ import type { Canvas, CanvasStatus } from "@canvas-drop/shared/db";
 import { publicationState } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { z } from "zod";
+import {
+  ADMIN_ACTIVITY_ACTIONS,
+  activityQuerySchema,
+  listAdminActivity,
+} from "../admin/activity.js";
 import { requireAdmin } from "../admin/authz.js";
+import { adminInvestigation } from "../admin/investigation.js";
 import {
   type AdminSettingsService,
   PUBLIC_LINKS_ENABLED_KEY,
@@ -28,10 +34,12 @@ import type {
 } from "../db/repositories/admin.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
+import type { AuditRepository } from "../db/repositories/audit.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { EmailTemplatesRepository } from "../db/repositories/email-templates.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -54,7 +62,9 @@ export interface AdminRoutesDeps {
   /** Admin-editable email templates (plan 003 phase 3). */
   emailTemplates: EmailTemplatesRepository;
   /** Pending delegated grants surfaced in the People directory. */
-  invitations: Pick<InvitationsRepository, "cancelPending">;
+  invitations: InvitationsRepository;
+  teams: TeamsRepository;
+  auditReader: AuditRepository;
   /** The invite primitive (plan 003 U5) — Add-users permits + invites through it (so the new
    *  email gets a courtesy email and, on a matching domain, org membership on first login). */
   invites: InviteService;
@@ -196,6 +206,28 @@ export function adminRoutes(deps: AdminRoutesDeps) {
   }
 
   app.use("*", requireAdmin());
+
+  const investigation = adminInvestigation(deps);
+  app.get("/activity", async (c) => {
+    const query = activityQuerySchema.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: "invalid_query" }, 400);
+    return c.json({
+      ...(await listAdminActivity(deps.auditReader, query.data)),
+      actions: ADMIN_ACTIVITY_ACTIONS,
+    });
+  });
+  app.get("/canvases/:id/inspect", async (c) => {
+    const result = await investigation.inspect(c.req.param("id"));
+    return result ? c.json(result) : c.json({ error: "not_found" }, 404);
+  });
+  app.get("/canvases/:id/access-explanation", async (c) => {
+    const query = z
+      .object({ email: z.string().trim().toLowerCase().email().max(254).optional() })
+      .safeParse(c.req.query());
+    if (!query.success) return c.json({ error: "invalid_query" }, 400);
+    const result = await investigation.explainAccess(c.req.param("id"), query.data.email);
+    return result ? c.json(result) : c.json({ error: "not_found" }, 404);
+  });
 
   // --- All-canvases list (§6.10.1): owner / status / size / usage / last-activity.
   //     Member-parity filter/search/sort + offset paging (plan 006). ---

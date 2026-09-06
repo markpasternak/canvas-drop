@@ -31,6 +31,7 @@ const AdminRoute = lazy(() => import("./routes/admin.js"));
 // under import.meta.env.DEV, so it never ships in a production build.
 const CardDemoRoute = lazy(() => import("./routes/card-demo.js"));
 const AdminCanvasesRoute = lazy(() => import("./routes/admin.canvases.js"));
+const AdminActivityRoute = lazy(() => import("./routes/admin.activity.js"));
 const AdminUsersRoute = lazy(() => import("./routes/admin.users.js"));
 const AdminConnectionsRoute = lazy(() => import("./routes/admin.connections.js"));
 const AdminSettingsRoute = lazy(() => import("./routes/admin.settings.js"));
@@ -190,6 +191,7 @@ const onboardingRoute = createRoute({
  *  route) and coerced in the view, mirroring the Your-canvases list. Lives here with
  *  the other route search types so views don't import it across sibling route files. */
 export interface AdminCanvasesSearch {
+  inspect?: string;
   status?: AdminCanvasStatus;
   /** Access-rung governance filter (e.g. find every `public_link`). */
   access?: AccessFilter;
@@ -229,6 +231,11 @@ const adminUsersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/users",
   component: AdminUsersRoute,
+});
+const adminActivityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/activity",
+  component: AdminActivityRoute,
 });
 const adminSettingsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -305,6 +312,7 @@ export const routeTree = rootRoute.addChildren([
   adminRoute,
   adminCanvasesRoute,
   adminUsersRoute,
+  adminActivityRoute,
   adminConnectionsRoute,
   adminSettingsRoute,
   canvasRoute.addChildren([

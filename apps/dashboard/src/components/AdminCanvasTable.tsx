@@ -7,7 +7,6 @@ import {
   Star,
   UserSwitch,
 } from "@phosphor-icons/react";
-import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AdminCanvasRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
@@ -358,15 +357,15 @@ export function AdminCanvasTable({
   viewerId,
   hiddenColumns = [],
   compact = true,
+  onInspect,
 }: {
   canvases: AdminCanvasRow[];
   onOwnerClick?: (owner: NonNullable<AdminCanvasRow["owner"]>) => void;
   viewerId?: string;
   hiddenColumns?: Array<"owner" | "size" | "usage" | "activity">;
   compact?: boolean;
+  onInspect: (id: string) => void;
 }) {
-  const navigate = useNavigate();
-  const openCanvas = (id: string) => navigate({ to: "/canvases/$id", params: { id } });
   return (
     <div className={compact ? "" : "[&_td]:py-4"}>
       <DataTable
@@ -389,9 +388,9 @@ export function AdminCanvasTable({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => openCanvas(c.id)}
+                  onClick={() => onInspect(c.id)}
                   className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
-                  aria-label={`Open ${c.title || c.slug}`}
+                  aria-label={`Inspect ${c.title || c.slug}`}
                 >
                   {c.title || c.slug}
                 </button>

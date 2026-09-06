@@ -886,6 +886,97 @@ export interface AdminCanvasesPage {
   offset: number;
 }
 
+export interface AdminActivityEvent {
+  id: string;
+  actorId: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  canvasTitle: string | null;
+  canvasSlug: string | null;
+  createdAt: number;
+  details: Record<string, string | number | boolean | string[]>;
+}
+export interface AdminActivityQuery {
+  q?: string;
+  actor?: string;
+  canvasId?: string;
+  action?: string;
+  since?: number;
+  until?: number;
+  limit?: number;
+  offset?: number;
+}
+export interface AdminActivityPage {
+  events: AdminActivityEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+  actions?: string[];
+}
+export interface AdminInspection {
+  canvas: {
+    id: string;
+    title: string;
+    slug: string;
+    ownerId: string;
+    orgId: string | null;
+    status: AdminCanvasStatus;
+    publicationState: PublicationState;
+    access: AccessRung;
+    hasPassword: boolean;
+    sharedExpiresAt: number | null;
+    disabledReason: string | null;
+    deletedAt: number | null;
+    createdAt: number;
+    updatedAt: number;
+    backendEnabled: boolean;
+    publicLinkEffective: boolean;
+  };
+  owner: {
+    id: string;
+    name: string;
+    email: string;
+    blocked: boolean;
+    canPublishPublic: boolean;
+  } | null;
+  people: Array<{
+    userId: string | null;
+    email: string | null;
+    role: "viewer" | "editor";
+    createdAt: number;
+  }>;
+  teams: Array<{ id: string; name: string; role: "viewer" | "editor" }>;
+  pending: Array<{
+    id: string;
+    email: string;
+    role: string | null;
+    createdAt: number;
+    via: string;
+  }>;
+  usage: {
+    operations: number;
+    uploadedFileBytes: number;
+    versionCount: number;
+    deployedBytes: number;
+  };
+  connections: CanvasConnection[];
+  activity: AdminActivityPage;
+}
+export interface AdminAccessExplanation {
+  email: string | null;
+  userId: string | null;
+  subject: "account" | "anonymous";
+  managementRole: "owner" | "editor" | "none";
+  result: "allowed" | "password_required" | "denied";
+  reasons: string[];
+  checkedAt: number;
+  staticOnly: boolean;
+  pendingInvitations: number;
+}
+
 /** Admin users sort axes (plan 006). `active` (default) = most-recently-seen. */
 export type AdminUserSort = "active" | "created" | "name" | "canvases";
 
@@ -1438,6 +1529,18 @@ export const api = {
 
   // --- Admin (§6.10, M7; user-mgmt + member-parity filters plan 006) ---
   admin: {
+    activity: (query: AdminActivityQuery = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query))
+        if (value !== undefined && value !== "") params.set(key, String(value));
+      return request<AdminActivityPage>(`/api/admin/activity?${params}`);
+    },
+    inspect: (id: string) =>
+      request<AdminInspection>(`/api/admin/canvases/${encodeURIComponent(id)}/inspect`),
+    explainAccess: (id: string, email?: string) =>
+      request<AdminAccessExplanation>(
+        `/api/admin/canvases/${encodeURIComponent(id)}/access-explanation${email ? `?email=${encodeURIComponent(email)}` : ""}`,
+      ),
     /** All-canvases list with filter/search/sort + offset paging (plan 006).
      *  Empty/default params are omitted so a clean view has a bare URL. */
     listCanvases: (query: AdminCanvasesQuery = {}) => {

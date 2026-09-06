@@ -1,6 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AdminBooleanFilter } from "../components/AdminBooleanFilter.js";
+import { AdminCanvasInspector } from "../components/AdminCanvasInspector.js";
 import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { AdminSavedViews } from "../components/AdminSavedViews.js";
@@ -62,7 +63,10 @@ const EXPIRY_OPTIONS = [
 /** Admin all-canvases governance table (§6.10.1). Split from the overview so
  *  owner drill-downs land directly on the table with their filter context visible. */
 export default function AdminCanvases() {
-  const search = normalizeAdminCanvasSearch(useSearch({ strict: false }));
+  const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
+  const search = normalizeAdminCanvasSearch(routeSearch);
+  const inspectId =
+    typeof routeSearch.inspect === "string" ? routeSearch.inspect.slice(0, 100) : undefined;
   const navigate = useNavigate();
   const { data: me } = useMe();
   const [tableSettings, setTableSettings] = useAdminTablePreferences(me?.id);
@@ -375,6 +379,13 @@ export default function AdminCanvases() {
             viewerId={me?.id}
             hiddenColumns={tableSettings.hidden}
             compact={tableSettings.compact}
+            onInspect={(id) =>
+              navigate({
+                to: "/admin/canvases",
+                resetScroll: false,
+                search: (prev) => ({ ...prev, inspect: id }),
+              })
+            }
             onOwnerClick={(ownerRow) => setOwner(ownerRow.id)}
           />
           <div className="flex items-center justify-between gap-3 pt-1">
@@ -401,6 +412,19 @@ export default function AdminCanvases() {
             </div>
           </div>
         </div>
+      )}
+      {inspectId && (
+        <AdminCanvasInspector
+          key={inspectId}
+          canvasId={inspectId}
+          onClose={() =>
+            navigate({
+              to: "/admin/canvases",
+              resetScroll: false,
+              search: (prev) => ({ ...prev, inspect: undefined }),
+            })
+          }
+        />
       )}
     </div>
   );

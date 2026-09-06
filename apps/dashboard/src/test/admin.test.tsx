@@ -42,7 +42,7 @@ function renderAt(path: string) {
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  return render(
+  const view = render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
         <ToastProvider>
@@ -52,6 +52,7 @@ function renderAt(path: string) {
       </QueryClientProvider>
     </ThemeProvider>,
   );
+  return { ...view, router };
 }
 
 const ROW = {
@@ -227,6 +228,133 @@ afterEach(() => {
 });
 
 describe("admin dashboard", () => {
+  const inspection = {
+    canvas: { ...ROW, ownerId: "u1", orgId: null, backendEnabled: true },
+    owner: { ...ROW.owner, blocked: false },
+    people: [],
+    teams: [],
+    pending: [],
+    usage: { operations: 12, versionCount: 2, deployedBytes: 100, uploadedFileBytes: 0 },
+    connections: [],
+    activity: { events: [], total: 0 },
+  };
+
+  it("opens the inspector in place, checks access, and restores filters, page and focus", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW], 150),
+      "GET /api/admin/canvases/c1/inspect": () => json(inspection),
+      "GET /api/admin/canvases/c1/access-explanation": () =>
+        json({
+          email: "guest@example.com",
+          subject: "account",
+          result: "password_required",
+          managementRole: "none",
+          staticOnly: false,
+          reasons: ["Direct viewer grant; the password must also be entered."],
+          checkedAt: Date.now(),
+        }),
+    });
+    const { router } = renderAt("/admin/canvases?public=true&password=false&page=2");
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole("button", { name: /Inspect Happy Otter/i });
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "Happy Otter" });
+    expect(router.state.location.search).toMatchObject({
+      public: true,
+      password: false,
+      page: 2,
+      inspect: "c1",
+    });
+    expect(within(dialog).getByText("alice@example.com")).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Person's email"), "guest@example.com");
+    await user.click(within(dialog).getByRole("button", { name: "Check access" }));
+    expect(await within(dialog).findByText("Password required")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.includes("access-explanation?email=guest%40example.com"))).toBe(
+      true,
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(router.state.location.search).toMatchObject({ public: true, password: false, page: 2 });
+    expect(router.state.location.search).not.toHaveProperty("inspect");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("keeps the inspector closeable when its canvas is unavailable and allows retry", async () => {
+    let available = false;
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+      "GET /api/admin/canvases/c1/inspect": () =>
+        available ? json(inspection) : json({ error: "not_found" }, 404),
+    });
+    renderAt("/admin/canvases?inspect=c1");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Could not load this canvas",
+    );
+    available = true;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Refresh" }));
+    expect(await within(dialog).findByText("alice@example.com")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close inspector" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("searches and pages activity using URL filters and opens the target inspector", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+      "GET /api/admin/canvases/c1/inspect": () => json(inspection),
+      "GET /api/admin/activity": () =>
+        json({
+          events: [
+            {
+              id: "a1",
+              action: "canvas_disable",
+              actorEmail: "admin@example.com",
+              targetId: "c1",
+              targetType: "canvas",
+              canvasTitle: "Happy Otter",
+              createdAt: Date.now(),
+              details: { reason: "Outdated content" },
+            },
+          ],
+          total: 30,
+          actions: ["canvas_disable"],
+        }),
+    });
+    const { router } = renderAt(
+      "/admin/activity?actor=admin%40example.com&canvasId=c1&from=2026-09-01&to=2026-09-06",
+    );
+    const user = userEvent.setup();
+    expect(await screen.findByText("Outdated content")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.path.includes("/activity?") &&
+            c.path.includes("offset=25") &&
+            c.path.includes("since=") &&
+            c.path.includes("until="),
+        ),
+      ).toBe(true),
+    );
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search administrative activity" }),
+      "outdated",
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        q: "outdated",
+        page: 1,
+        canvasId: "c1",
+      }),
+    );
+    await user.click(screen.getByRole("link", { name: "Happy Otter" }));
+    expect(await screen.findByRole("dialog", { name: "Happy Otter" })).toBeInTheDocument();
+  });
+
   it("shows the Admin nav link only when me.isAdmin", async () => {
     mockFetch({
       "GET /api/me": () =>
@@ -688,7 +816,7 @@ describe("admin dashboard", () => {
     await waitFor(() => expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument());
   });
 
-  it("surfaces an audit-log placeholder (recorded, browser not yet built)", async () => {
+  it("links the overview audit section to searchable activity", async () => {
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
@@ -699,7 +827,9 @@ describe("admin dashboard", () => {
     renderAt("/admin");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /Audit log/i }));
-    expect(await screen.findByText("Audit log — coming soon")).toBeVisible();
+    expect(
+      await screen.findByRole("link", { name: "Browse administrative activity" }),
+    ).toHaveAttribute("href", "/admin/activity");
   });
 
   it("Configuration finder searches labels, keys, env vars, groups, help, source, and values", async () => {

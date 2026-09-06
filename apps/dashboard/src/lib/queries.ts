@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
+  type AdminActivityQuery,
   type AdminCanvasesQuery,
   type AdminPeopleQuery,
   type AdminUsersQuery,
@@ -123,6 +124,29 @@ export function useAdminCanvases(query: AdminCanvasesQuery = {}) {
     queryKey: keys.adminCanvases(query),
     queryFn: () => api.admin.listCanvases(query),
     placeholderData: keepPreviousData,
+  });
+}
+
+export function useAdminActivity(query: AdminActivityQuery = {}) {
+  return useQuery({
+    queryKey: ["admin", "activity", query],
+    queryFn: () => api.admin.activity(query),
+    placeholderData: keepPreviousData,
+  });
+}
+export function useAdminInspection(id: string) {
+  return useQuery({
+    queryKey: ["admin", "inspection", id],
+    queryFn: () => api.admin.inspect(id),
+    enabled: !!id,
+  });
+}
+export function useAdminAccessExplanation(id: string, email: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["admin", "access-explanation", id, email],
+    queryFn: () => api.admin.explainAccess(id, email),
+    enabled: !!id && enabled,
+    staleTime: 0,
   });
 }
 

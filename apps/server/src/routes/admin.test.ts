@@ -4,6 +4,7 @@ import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { adminSettingsService } from "../admin/settings-service.js";
 import { createAuditLog } from "../audit/audit-log.js";
+import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { createSecretCipher } from "../connections/secret-cipher.js";
 import { connectionService } from "../connections/service.js";
 import type { DbClient } from "../db/factory.js";
@@ -28,7 +29,7 @@ import { teamsRepository } from "../db/repositories/teams.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { seedDefaultTemplates } from "../email/templates.js";
 import type { AppEnv } from "../http/types.js";
 import { makeInviteService } from "../invites/testing.js";
@@ -37,7 +38,11 @@ import { adminRoutes } from "./admin.js";
 const silent = pino({ level: "silent" });
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
-function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }) {
+function buildAdminApp(
+  client: DbClient,
+  actor: { id: string; isAdmin: boolean },
+  appConfig: Config = config,
+) {
   const canvases = canvasesRepository(client);
   const invitations = invitationsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
@@ -56,18 +61,24 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
   app.route(
     "/api/admin",
     adminRoutes({
-      config,
+      config: appConfig,
       admin: adminRepository(client),
+      auditReader: auditRepository(client),
+      teams: teamsRepository(client),
+      orgMembership: makeOrgMembershipResolver(
+        orgsRepository(client),
+        orgMembersRepository(client),
+      ),
       canvases,
       versions: versionsRepository(client),
       users: usersRepository(client),
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
-      settings: adminSettingsService({ settings: settingsRepository(client), config }),
+      settings: adminSettingsService({ settings: settingsRepository(client), config: appConfig }),
       allowedEmails: allowedEmailsRepository(client),
       emailTemplates: emailTemplatesRepository(client),
       invitations,
-      invites: makeInviteService(client, config),
+      invites: makeInviteService(client, appConfig),
       audit,
       connections,
       usage: usageEventsRepository(client),
@@ -100,6 +111,250 @@ describe("admin routes", () => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
+  });
+
+  describe.each(DIALECTS)("investigation [%s]", (dialect) => {
+    it("keeps the inspector and activity admin-only and exposes metadata without content or credentials", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "private-owner");
+      const id = await seedPublishedCanvas(client, owner.id);
+      const cv = canvasesRepository(client);
+      await cv.setPassword(id, "NEVER_EXPOSE_PASSWORD_HASH");
+      const denied = buildAdminApp(client, { id: owner.id, isAdmin: false }).app;
+      for (const path of [
+        "/activity",
+        `/canvases/${id}/inspect`,
+        `/canvases/${id}/access-explanation`,
+      ])
+        expect((await denied.request(`/api/admin${path}`)).status).toBe(404);
+      const app = buildAdminApp(client, { id: "admin", isAdmin: true }).app;
+      const result = await app.request(`/api/admin/canvases/${id}/inspect`);
+      expect(result.status).toBe(200);
+      const body = await result.json();
+      expect(body).toMatchObject({
+        canvas: { id, hasPassword: true },
+        owner: { email: owner.email },
+        usage: { versionCount: 1 },
+      });
+      const encoded = JSON.stringify(body);
+      for (const forbidden of [
+        "NEVER_EXPOSE_PASSWORD_HASH",
+        "apiKeyHash",
+        "manifest",
+        "protectedHeaders",
+        "providerSub",
+      ])
+        expect(encoded).not.toContain(forbidden);
+      expect((await app.request("/api/admin/canvases/missing/inspect")).status).toBe(404);
+    });
+
+    it("includes historical canvas events and strips secret fields and non-governance activity", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "audit-owner");
+      const id = await seedPublishedCanvas(client, owner.id);
+      const audit = auditRepository(client);
+      await audit.append({
+        actorId: owner.id,
+        action: "canvas_disable",
+        targetId: id,
+        meta: { reason: "Review requested", token: "NEVER_RETURN", password: "NEVER_RETURN" },
+        ip: "192.0.2.1",
+      });
+      await audit.append({
+        actorId: owner.id,
+        action: "auth_denied",
+        targetId: id,
+        meta: { email: "private@example.com" },
+      });
+      const app = buildAdminApp(client, { id: "admin", isAdmin: true }).app;
+      const response = await app.request(
+        `/api/admin/activity?canvasId=${id}&actor=${owner.email}&limit=1`,
+      );
+      const body = (await response.json()) as {
+        total: number;
+        events: Array<{ targetType: string; details: unknown; actorEmail: string }>;
+      };
+      expect(body.total).toBe(1);
+      expect(body.events[0]).toMatchObject({
+        targetType: "canvas",
+        details: { reason: "Review requested" },
+        actorEmail: owner.email,
+      });
+      expect(JSON.stringify(body)).not.toContain("NEVER_RETURN");
+      expect(JSON.stringify(body)).not.toContain("192.0.2.1");
+      expect((await app.request("/api/admin/activity?action=auth_denied")).status).toBe(400);
+      expect((await app.request("/api/admin/activity?since=200&until=100")).status).toBe(400);
+    });
+
+    it("explains direct/team roles, password, expiry and blocking through the live access rules", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "explain-owner");
+      const viewer = await seedUser(client, "explain-viewer");
+      const id = await seedPublishedCanvas(client, owner.id);
+      const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+      const explain = async (email: string) =>
+        (await (
+          await app.request(
+            `/api/admin/canvases/${id}/access-explanation?email=${encodeURIComponent(email)}`,
+          )
+        ).json()) as { result: string; managementRole: string; reasons: string[] };
+      await canvases.setAccess(id, "private");
+      expect((await explain(viewer.email)).result).toBe("denied");
+      await canvases.addAllowlistEntry({
+        canvasId: id,
+        principalKind: "member",
+        userId: viewer.id,
+      });
+      await canvases.setPassword(id, "hash");
+      expect((await explain(viewer.email)).result).toBe("password_required");
+      expect(await explain(owner.email)).toMatchObject({
+        result: "allowed",
+        managementRole: "owner",
+      });
+      await canvases.updateSettings(id, { sharedExpiresAt: Date.now() - 100 });
+      expect((await explain(viewer.email)).result).toBe("denied");
+      const teams = teamsRepository(client);
+      const team = await teams.create({ orgId: null, name: "Design", createdBy: owner.id });
+      await teams.addMember(team.id, viewer.id);
+      await teams.setCanvasTeamRole(id, team.id, "editor");
+      const editor = await explain(viewer.email);
+      expect(editor).toMatchObject({ result: "allowed", managementRole: "editor" });
+      expect(editor.reasons).toContain("Access through team Design.");
+      await usersRepository(client).setBlocked(viewer.id, true);
+      expect(await explain(viewer.email)).toMatchObject({
+        result: "denied",
+        managementRole: "none",
+      });
+      await canvases.setStatus(id, "deleted");
+      expect(await explain(owner.email)).toMatchObject({
+        result: "denied",
+        managementRole: "none",
+      });
+    });
+
+    it("uses live organization membership for whole-org and team editor explanations", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "org-owner");
+      const member = await seedUser(client, "org-member");
+      const outside = await usersRepository(client).upsert({
+        providerSub: "outside",
+        email: "outside@other.test",
+        name: "Outside",
+        isAdmin: true,
+      });
+      const org = await orgsRepository(client).ensureOrg({
+        name: "Example",
+        slug: "example",
+        domains: ["example.com"],
+      });
+      const { app, canvases } = buildAdminApp(
+        client,
+        { id: "admin", isAdmin: true },
+        loadConfig({
+          CANVAS_DROP_AUTH_MODE: "dev",
+          CANVAS_DROP_ORG_NAME: "Example",
+          CANVAS_DROP_ORG_DOMAINS: "example.com",
+        }),
+      );
+      const canvas = await canvases.create({
+        ownerId: owner.id,
+        orgId: org.id,
+        slug: "org-explanation",
+        apiKeyHash: "org",
+      });
+      const published = await seedPublishedCanvas(client, owner.id);
+      const versions = versionsRepository(client);
+      const version = await versions.createPending({
+        canvasId: canvas.id,
+        number: 1,
+        createdBy: owner.id,
+        source: "folder",
+      });
+      await versions.markReady(version.id, {
+        fileCount: 1,
+        totalBytes: 10,
+        manifest: { "index.html": { size: 10, hash: "abc", mime: "text/html" } },
+      });
+      await canvases.setCurrentVersion(canvas.id, version.id);
+      await canvases.setAccess(canvas.id, "whole_org");
+      await canvases.updateSettings(published, { access: "whole_org" });
+      const teams = teamsRepository(client);
+      const team = await teams.create({ orgId: org.id, name: "Org team", createdBy: owner.id });
+      await teams.addMember(team.id, outside.id);
+      await orgMembersRepository(client).upsertDomainMember(org.id, outside.id);
+      await teams.setCanvasTeamRole(published, team.id, "editor");
+      // Active tenancy with no canvas home-org excludes broad access even for org members.
+      const check = async (id: string, email: string) =>
+        (await (
+          await app.request(`/api/admin/canvases/${id}/access-explanation?email=${email}`)
+        ).json()) as { result: string; managementRole: string };
+      expect(await check(published, outside.email)).toMatchObject({
+        result: "denied",
+        managementRole: "none",
+      });
+      expect(await check(published, member.email)).toMatchObject({
+        result: "denied",
+        managementRole: "none",
+      });
+      await canvases.addAllowlistEntry({
+        canvasId: published,
+        principalKind: "member",
+        userId: member.id,
+        role: "editor",
+      });
+      expect(await check(published, member.email)).toMatchObject({
+        result: "allowed",
+        managementRole: "editor",
+      });
+      expect(await check(canvas.id, member.email)).toMatchObject({
+        result: "allowed",
+        managementRole: "none",
+      });
+      expect(await check(canvas.id, outside.email)).toMatchObject({
+        result: "denied",
+        managementRole: "none",
+      });
+      await teams.setCanvasTeamRole(canvas.id, team.id, "editor");
+      expect(await check(canvas.id, outside.email)).toMatchObject({
+        result: "denied",
+        managementRole: "none",
+      });
+    });
+
+    it("pending invitations confer no access and anonymous public access stays static-only", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "pending-owner");
+      const id = await seedPublishedCanvas(client, owner.id);
+      const { app, canvases, invitations } = buildAdminApp(client, { id: "admin", isAdmin: true });
+      await canvases.setAccess(id, "private");
+      await invitations.record({
+        email: "waiting@outside.test",
+        target: { type: "canvas", id },
+        invitedBy: owner.id,
+      });
+      const pending = await (
+        await app.request(
+          `/api/admin/canvases/${id}/access-explanation?email=waiting%40outside.test`,
+        )
+      ).json();
+      expect(pending).toMatchObject({
+        result: "denied",
+        pendingInvitations: 1,
+        subject: "anonymous",
+      });
+      await canvases.setAccess(id, "public_link");
+      const publicResult = await (
+        await app.request(`/api/admin/canvases/${id}/access-explanation`)
+      ).json();
+      expect(publicResult).toMatchObject({
+        result: "allowed",
+        staticOnly: true,
+        managementRole: "none",
+      });
+      expect(
+        (await app.request(`/api/admin/canvases/${id}/access-explanation?email=invalid`)).status,
+      ).toBe(400);
+    });
   });
 
   it("404s EVERY admin route for a non-admin (no existence leak)", async () => {

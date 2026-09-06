@@ -36,6 +36,7 @@ export function Dialog({
   children,
   dismissable = true,
   labelledBy,
+  placement = "center",
 }: {
   open: boolean;
   onClose: () => void;
@@ -44,6 +45,7 @@ export function Dialog({
   children?: ReactNode;
   dismissable?: boolean;
   labelledBy?: string;
+  placement?: "center" | "side";
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -110,7 +112,11 @@ export function Dialog({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-dismiss; keyboard users dismiss via Escape (handled in the keydown effect)
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className={
+        placement === "side"
+          ? "fixed inset-0 z-50 flex justify-end"
+          : "fixed inset-0 z-50 flex items-center justify-center p-4"
+      }
       role="presentation"
       onMouseDown={(e) => {
         if (dismissable && e.target === e.currentTarget) onClose();
@@ -128,7 +134,11 @@ export function Dialog({
         aria-labelledby={titleId}
         data-state={state}
         tabIndex={-1}
-        className="cd-anim-pop relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface-raised p-6 shadow-[var(--shadow-popover)] outline-none"
+        className={
+          placement === "side"
+            ? "cd-anim-pop relative h-dvh w-full max-w-2xl overflow-y-auto overscroll-contain border-l border-border bg-surface-raised p-5 shadow-[var(--shadow-popover)] outline-none sm:p-7"
+            : "cd-anim-pop relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface-raised p-6 shadow-[var(--shadow-popover)] outline-none"
+        }
       >
         <h2 id={titleId} className="text-base font-semibold text-fg">
           {title}

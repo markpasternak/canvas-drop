@@ -38,7 +38,27 @@ This is an implementation evidence ledger, not a completed-release claim.
   Desktop and mobile screenshots captured locally; final integrated screenshots
   will be captured after the remaining units.
 
+## U2 — activity and investigation
+
+- Metadata-only inspector consolidates owner, access, direct/team grants, pending
+  direct/team invitations, usage, Connections, and safe recent administrative events.
+  Opening/closing preserves URL filters, page, scroll position and keyboard focus.
+- Access explanations use the existing live role/access predicates, including domain
+  membership rather than stale roster rows. Covered direct/team editors and viewers,
+  password, expiry, unpublished/deleted lifecycle, blocked accounts, pending-only email,
+  static-only public access, and organization boundaries on both database engines.
+- Activity queries filter/count/page in the database. Legacy canvas events without
+  target type are recognized only for known event names. Display metadata is explicitly
+  allowlisted per action; raw payloads, hashes, credentials and client IPs are omitted.
+- Required gates passed: lint, typecheck, full suite (172 server files / 3,046 tests;
+  2 files / 4 external-infrastructure tests skipped; 84 dashboard files / 743 tests).
+  Focused inspector tests prove context/focus restoration, access checks, error retry,
+  activity date filters, pagination and navigation into the inspector.
+- Browser: local sample canvas inspector opened from the bottom of the table; signed-out
+  access check returned denial for whole-org access. Desktop and mobile screenshots
+  captured in task-local output/playwright; private canvas content was never fetched.
+
 ## Remaining delivery evidence
 
-U2–U6, review, final integrated verification, merge, deployment, and cleanup are still
+U3–U6, review, final integrated verification, merge, deployment, and cleanup are still
 required. Production has not been changed by this round.

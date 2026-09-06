@@ -477,14 +477,16 @@ function AdminOverview() {
         </CollapsibleSection>
       )}
 
-      {/* Audit log (placeholder, plan 006) — recorded today, browser unbuilt. When
-          built it will show governance MUTATIONS (deploy/disable/block/settings),
-          never consumption — accountability without surveillance. */}
       <CollapsibleSection title="Audit log" storageKey="admin:section:audit" defaultOpen={false}>
-        <EmptyState
-          title="Audit log — coming soon"
-          description="Governance actions (takedowns, restores, blocks, settings changes) are already recorded. A browsable trail will land here; it will show who changed what, never who viewed what."
-        />
+        <p className="text-sm text-muted">
+          Search who changed a canvas or account, when it changed, and the recorded reason.
+        </p>
+        <Link
+          to="/admin/activity"
+          className="mt-3 inline-block text-sm text-accent hover:underline"
+        >
+          Browse administrative activity
+        </Link>
       </CollapsibleSection>
     </div>
   );
