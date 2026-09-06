@@ -8,7 +8,11 @@ import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { canvasBlobPrefix, canvasFilesPrefix, screenshotPrefix } from "./storage-keys.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = 86_400_000;
+export const ADMIN_PURGE_RETENTION_DAYS = 30;
+// Deploy and screenshot workers are bounded well below this window. Old pending
+// rows represent abandoned work and can be reclaimed after the retention period.
+const IN_FLIGHT_WINDOW_MS = 3_600_000;
 
 export interface PurgeDeps {
   canvases: CanvasesRepository;
@@ -16,130 +20,125 @@ export interface PurgeDeps {
   drafts: DraftsRepository;
   storage: StorageDriver;
   log: Logger;
-  /** Screenshot jobs (plan 004 / U10) — the canvas's preview prefix + job row are
-   *  reclaimed alongside its blobs. Optional (absent when the pipeline isn't wired). */
   screenshots?: Pick<ScreenshotsRepository, "deleteByCanvas">;
-  /** Files-primitive metadata (§6.5): its `files/{id}/` storage prefix holds up to
-   *  1 GB of viewer uploads per canvas — without these the purge leaks them forever. */
   files?: Pick<FilesRepository, "deleteByCanvas">;
-  /** KV-primitive rows (§6.4) — reclaimed with the canvas. */
   kv?: Pick<KvRepository, "deleteByCanvas">;
 }
-
 export interface PurgeOptions {
-  /**
-   * Retention window in days. `0` (the default) purges *every* soft-deleted
-   * canvas; a positive number purges only those soft-deleted at least that many
-   * days ago.
-   */
+  /** CLI maintenance may choose a shorter window; the online admin always uses 30 days. */
   olderThanDays?: number;
-  /** Report what would be purged without deleting anything. */
   dryRun?: boolean;
-  /** Injectable clock — the cutoff is `now - olderThanDays`. Defaults to wall time. */
   now?: number;
+  expectedUpdatedAt?: number;
 }
-
 export interface PurgeSummary {
-  /** Soft-deleted canvases whose files + versions were (or would be) reclaimed. */
   canvasesPurged: number;
-  /** Version rows hard-deleted across all reclaimed canvases. */
   versionsPurged: number;
-  /** Storage objects deleted across all reclaimed canvases. */
   objectsDeleted: number;
-  /** Canvases skipped because a step threw — left fully intact for the next run. */
+  /** Cleanup can be partial. The tombstone remains unavailable and can be retried. */
   failed: number;
 }
+export type PurgeStatus =
+  | "purged"
+  | "already_purged"
+  | "not_found"
+  | "not_deleted"
+  | "retained"
+  | "changed"
+  | "busy"
+  | "failed";
+export interface PurgeResult {
+  status: PurgeStatus;
+  versionsPurged: number;
+  objectsDeleted: number;
+}
 
-/**
- * Reclaim the heavy data of soft-deleted canvases (BUILD_BRIEF §6.1 #14).
- *
- * Deleting a canvas only flips `status = "deleted"` + stamps `deletedAt`. This
- * sweep hard-deletes the reclaimable parts — every version's **storage objects**
- * (the deployed files; the whole point) and its **version rows** (file
- * metadata) — but intentionally **keeps the canvas row** as a soft-deleted
- * tombstone (its identity/audit record). The canvas's `currentVersionId` is
- * cleared so it no longer dangles at a removed version.
- *
- * Order per canvas is load-bearing: storage objects, then version rows —
- * `versions.canvas_id` references `canvases.id` with no cascade, and we remove
- * the version rows before clearing the pointer. Each canvas is processed
- * independently and storage-first: if any step throws, it is logged and skipped
- * with its rows untouched, so a transient storage failure is safe to retry
- * rather than orphaning objects whose owning rows are already gone.
- *
- * Canvases with no version rows are skipped (never deployed, or already swept on
- * a prior run), so re-running is idempotent — a second pass reports zero.
- */
+/** Reclaim precisely one canvas. Content-addressed storage is namespaced per
+ * canvas, so deleting these prefixes cannot remove another canvas's shared hash.
+ * Claim before any destructive step: restore uses the complementary atomic guard.
+ * Storage-first avoids orphaned data; any partial failure keeps a terminal marker
+ * and the remaining data is safely retried. No private values leave this service. */
+export async function purgeCanvas(
+  deps: PurgeDeps,
+  id: string,
+  options: PurgeOptions = {},
+): Promise<PurgeResult> {
+  const now = options.now ?? Date.now();
+  const cutoff = now - (options.olderThanDays ?? 0) * DAY_MS;
+  const result = (status: PurgeStatus): PurgeResult => ({
+    status,
+    versionsPurged: 0,
+    objectsDeleted: 0,
+  });
+  try {
+    const canvas = await deps.canvases.findById(id);
+    if (!canvas) return result("not_found");
+    if (canvas.status !== "deleted") return result("not_deleted");
+    if (canvas.purgedAt !== null) return result("already_purged");
+    if (canvas.deletedAt === null || canvas.deletedAt > cutoff) return result("retained");
+    if (options.expectedUpdatedAt !== undefined && options.expectedUpdatedAt !== canvas.updatedAt)
+      return result("changed");
+    const versions = await deps.versions.listByCanvas(id);
+    if (versions.some((v) => v.status === "pending" && v.createdAt > now - IN_FLIGHT_WINDOW_MS))
+      return result("busy");
+    if (!options.dryRun && !(await deps.canvases.claimPurge(id, canvas.updatedAt, cutoff, now)))
+      return result("changed");
+    const [keys, shotKeys, fileKeys] = await Promise.all([
+      deps.storage.list(canvasBlobPrefix(id)),
+      deps.storage.list(screenshotPrefix(id)),
+      deps.storage.list(canvasFilesPrefix(id)),
+    ]);
+    if (!options.dryRun) {
+      await deps.storage.deleteMany([...keys, ...shotKeys, ...fileKeys]);
+      await deps.versions.deleteByCanvas(id);
+      await deps.drafts.deleteByCanvas(id);
+      await deps.screenshots?.deleteByCanvas(id);
+      await deps.files?.deleteByCanvas(id);
+      await deps.kv?.deleteByCanvas(id);
+      await deps.canvases.finishPurge(id, now);
+    }
+    return {
+      status: "purged",
+      versionsPurged: versions.length,
+      objectsDeleted: keys.length + shotKeys.length + fileKeys.length,
+    };
+  } catch (err) {
+    deps.log.error(
+      { err, canvasId: id },
+      "canvas cleanup incomplete; retry required; restoration remains unavailable once cleanup starts",
+    );
+    return result("failed");
+  }
+}
+
+/** CLI sweep shares the same per-canvas cleanup and permanent state as the UI. */
 export async function purgeDeletedCanvases(
   deps: PurgeDeps,
-  { olderThanDays = 0, dryRun = false, now = Date.now() }: PurgeOptions = {},
+  options: PurgeOptions = {},
 ): Promise<PurgeSummary> {
-  const cutoffMs = olderThanDays > 0 ? now - olderThanDays * DAY_MS : null;
-  const doomed = await deps.canvases.listDeletedBefore(cutoffMs);
-
+  const now = options.now ?? Date.now();
+  const doomed = await deps.canvases.listDeletedBefore(now - (options.olderThanDays ?? 0) * DAY_MS);
   const summary: PurgeSummary = {
     canvasesPurged: 0,
     versionsPurged: 0,
     objectsDeleted: 0,
     failed: 0,
   };
-
   for (const canvas of doomed) {
-    try {
-      // These four reads are independent; run them concurrently (on S3 each
-      // storage.list is a network round-trip, so the sequential pattern multiplied
-      // per-canvas latency by 4x). Under content-addressing every blob for the
-      // canvas lives under one per-canvas prefix, so a single list+deleteMany
-      // reclaims them all (the canvas dies whole — no refcounting, KTD-1; includes
-      // draft-only blobs). The canvas's one preview set (plan 004 / U10) lives
-      // under its own prefix and is reclaimed in the same pass.
-      const [versions, draft, keys, shotKeys, fileKeys] = await Promise.all([
-        deps.versions.listByCanvas(canvas.id),
-        deps.drafts.getByCanvas(canvas.id),
-        deps.storage.list(canvasBlobPrefix(canvas.id)),
-        deps.storage.list(screenshotPrefix(canvas.id)),
-        // Files-primitive uploads live under their own prefix (up to 1 GB/canvas)
-        // and are invisible to the blob GC — purge is the only sweep for them.
-        deps.storage.list(canvasFilesPrefix(canvas.id)),
-      ]);
-
-      // Nothing reclaimable — leave the tombstone untouched and don't count it
-      // (keeps re-runs idempotent: a second pass reports zero).
-      if (
-        versions.length === 0 &&
-        draft === null &&
-        keys.length === 0 &&
-        shotKeys.length === 0 &&
-        fileKeys.length === 0
-      ) {
-        continue;
-      }
-
-      if (!dryRun) {
-        await deps.storage.deleteMany([...keys, ...shotKeys, ...fileKeys]);
-        await deps.versions.deleteByCanvas(canvas.id);
-        await deps.drafts.deleteByCanvas(canvas.id);
-        await deps.screenshots?.deleteByCanvas(canvas.id);
-        await deps.files?.deleteByCanvas(canvas.id);
-        await deps.kv?.deleteByCanvas(canvas.id);
-        await deps.canvases.clearCurrentVersion(canvas.id);
-      }
-      const objects = keys.length + shotKeys.length + fileKeys.length;
+    const outcome = await purgeCanvas(deps, canvas.id, {
+      ...options,
+      now,
+      expectedUpdatedAt: canvas.updatedAt,
+    });
+    if (outcome.status === "purged") {
       summary.canvasesPurged++;
-      summary.versionsPurged += versions.length;
-      summary.objectsDeleted += objects;
+      summary.versionsPurged += outcome.versionsPurged;
+      summary.objectsDeleted += outcome.objectsDeleted;
       deps.log.info(
-        { canvasId: canvas.id, slug: canvas.slug, versions: versions.length, objects, dryRun },
-        dryRun ? "would reclaim soft-deleted canvas" : "reclaimed soft-deleted canvas",
+        { canvasId: canvas.id, ...outcome, dryRun: options.dryRun ?? false },
+        "canvas purge",
       );
-    } catch (err) {
-      summary.failed++;
-      deps.log.error(
-        { err, canvasId: canvas.id, slug: canvas.slug },
-        "purge failed for canvas; left intact for retry",
-      );
-    }
+    } else if (outcome.status === "failed" || outcome.status === "busy") summary.failed++;
   }
-
   return summary;
 }

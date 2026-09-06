@@ -734,6 +734,18 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   app.route(
     "/api/admin",
     adminRoutes({
+      operations: {
+        canvases: deps.canvases,
+        versions: deps.versions,
+        drafts: deps.drafts,
+        storage: deps.storage,
+        log: deps.rootLogger,
+        screenshots,
+        files,
+        kv: kvRepository(deps.db),
+        audit: deps.audit,
+        hub: deps.hub,
+      },
       config: deps.config,
       admin: adminRepository(deps.db),
       auditReader: auditRepository(deps.db),

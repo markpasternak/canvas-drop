@@ -792,6 +792,8 @@ export interface AdminCanvasExposure {
 }
 
 export interface AdminCanvasRow {
+  purgeStartedAt?: number | null;
+  purgedAt?: number | null;
   id: string;
   slug: string;
   url: string;
@@ -916,6 +918,40 @@ export interface AdminActivityPage {
   offset: number;
   actions?: string[];
 }
+export type AdminCanvasOperation =
+  | "disable"
+  | "enable"
+  | "archive"
+  | "unarchive"
+  | "delete"
+  | "restore"
+  | "purge";
+export interface AdminCanvasOperationPreview {
+  action: AdminCanvasOperation;
+  retentionDays: number;
+  items: Array<{
+    id: string;
+    title: string;
+    updatedAt: number | null;
+    eligible: boolean;
+    explanation: string | null;
+    resources: null | {
+      versions: number;
+      storageObjects: number;
+      versionBytes: number;
+      hasDraft: boolean;
+      fileCount: number;
+      fileBytes: number;
+      kvRows: number;
+      eligibleAt: number | null;
+      cleanupStarted: boolean;
+    };
+  }>;
+}
+export interface AdminCanvasOperationResults {
+  outcomes: Array<{ id: string; status: string; message: string }>;
+}
+
 export interface AdminInspection {
   canvas: {
     id: string;
@@ -1529,6 +1565,21 @@ export const api = {
 
   // --- Admin (§6.10, M7; user-mgmt + member-parity filters plan 006) ---
   admin: {
+    previewCanvasOperation: (action: AdminCanvasOperation, ids: string[]) =>
+      request<AdminCanvasOperationPreview>("/api/admin/canvases/operations/preview", {
+        method: "POST",
+        body: JSON.stringify({ action, ids }),
+      }),
+    executeCanvasOperation: (input: {
+      action: AdminCanvasOperation;
+      items: Array<{ id: string; updatedAt: number }>;
+      reason: string;
+      confirmation: string;
+    }) =>
+      request<AdminCanvasOperationResults>("/api/admin/canvases/operations/execute", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
     activity: (query: AdminActivityQuery = {}) => {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(query))

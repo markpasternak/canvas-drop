@@ -60,5 +60,40 @@ This is an implementation evidence ledger, not a completed-release claim.
 
 ## Remaining delivery evidence
 
-U3–U6, review, final integrated verification, merge, deployment, and cleanup are still
+U4–U6, review, final integrated verification, merge, deployment, and cleanup are still
 required. Production has not been changed by this round.
+
+## U3 — selected lifecycle operations and permanent purge
+
+- Added bounded (50 selected IDs) preview/execute routes behind admin and same-origin
+  gates. Confirmation includes operation and eligible count; a reason is mandatory.
+  Lifecycle writes compare the preview timestamp atomically. Stale or ineligible items
+  are skipped individually; selection never silently includes other matching pages.
+- Additive migration 0039 on both dialects records purge start/completion. An atomic
+  claim excludes concurrent restore, and partial cleanup never returns to service.
+  New version creation, readiness, and publication reject a permanently claimed canvas.
+  Online purge enforces 30-day retention and skips recent pending deployments; CLI
+  maintenance shares cleanup and permanent state while retaining its operator-selected
+  retention window. Pending work older than one hour is treated as abandoned.
+- Cleanup removes all three storage namespaces (canvas blobs, uploads, previews),
+  versions, drafts, screenshot jobs, uploaded-file records, KV, upload sessions, grants,
+  legacy guest sessions/invitations, and canvas invitations. The canvas identity and
+  audit history remain. Separate backups are outside the purge scope.
+- Six initial new assertions failed before implementation. Focused tests now prove
+  KV-only cleanup, partial storage failure/retry, retention, stale preview, restore race,
+  real local-disk file removal, per-canvas hash isolation, and publication refusal.
+- Required gates passed: lint, typecheck, full dual-dialect suite (173 server files /
+  3,058 tests passed; 2 files / 4 external-infrastructure tests skipped); dashboard
+  84 files / 745 tests passed. Generated migrations included and formatted.
+- Browser: created only `Admin purge verification` on the isolated local instance,
+  deleted it through the UI, aged only its fixture deletion timestamp, added three
+  task-owned physical files, and confirmed purge in the UI. The preview counted three
+  actual files. Direct filesystem verification confirmed all three were absent; the
+  audit event recorded `objectsDeleted: 3` and the canvas remained a purged tombstone.
+  Screenshot: task-local `output/playwright/admin-purge-preview.png`.
+
+## User steering before release
+
+After every feature is finished and verified, update the admin docs and marketing site
+in this same branch/PR before deployment. Use finished-product behavior and real
+screenshots, and explain deletion versus purge, retention, and backup boundaries.

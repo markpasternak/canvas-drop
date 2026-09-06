@@ -12,7 +12,7 @@ import { DIALECTS, makeTestDb } from "../db/testing.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
-import { purgeDeletedCanvases } from "./purge.js";
+import { purgeCanvas, purgeDeletedCanvases } from "./purge.js";
 import {
   blobKey,
   canvasBlobPrefix,
@@ -74,6 +74,91 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     });
     return u.id;
   }
+
+  it("purges KV-only canvases and permanently prevents restore, including after partial failure", async () => {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const ownerId = await seedOwner(client);
+    const d = deps(storage);
+    const cv = await d.canvases.create({ ownerId, slug: "only-kv", apiKeyHash: "only-kv" });
+    await d.kv.set(cv.id, "shared", "secret", "private data", ownerId);
+    await d.canvases.setStatus(cv.id, "deleted");
+    const now = Date.now() + 31 * DAY_MS;
+    expect(await purgeCanvas(d, cv.id, { olderThanDays: 30, now })).toMatchObject({
+      status: "purged",
+    });
+    expect(await d.kv.find(cv.id, "shared", "secret")).toBeNull();
+    expect(await d.canvases.restore(cv.id)).toBe(false);
+    expect(await purgeCanvas(d, cv.id, { olderThanDays: 30, now })).toMatchObject({
+      status: "already_purged",
+    });
+
+    const partial = await seedCanvas(client, storage, ownerId, "partial");
+    await d.canvases.setStatus(partial, "deleted");
+    const fail = {
+      ...d,
+      storage: {
+        ...storage,
+        deleteMany: async (keys: string[]) => {
+          await storage.deleteMany(keys.slice(0, 1));
+          throw new Error("partial storage failure");
+        },
+      },
+    };
+    expect(await purgeCanvas(fail, partial, { olderThanDays: 30, now })).toMatchObject({
+      status: "failed",
+    });
+    expect(await d.canvases.restore(partial)).toBe(false);
+    expect(await purgeCanvas(d, partial, { olderThanDays: 30, now })).toMatchObject({
+      status: "purged",
+    });
+  });
+
+  it("refuses active, retained, changed and in-flight canvases before removing data", async () => {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const ownerId = await seedOwner(client);
+    const d = deps(storage);
+    const id = await seedCanvas(client, storage, ownerId, "guarded");
+    expect(await purgeCanvas(d, id, { olderThanDays: 30 })).toMatchObject({
+      status: "not_deleted",
+    });
+    await d.canvases.setStatus(id, "deleted");
+    expect(await purgeCanvas(d, id, { olderThanDays: 30 })).toMatchObject({ status: "retained" });
+    const now = Date.now() + 31 * DAY_MS;
+    expect(
+      await purgeCanvas(d, id, { olderThanDays: 30, now, expectedUpdatedAt: 1 }),
+    ).toMatchObject({ status: "changed" });
+    await d.versions.createPending({ canvasId: id, number: 2, createdBy: ownerId, source: "api" });
+    expect(await purgeCanvas(d, id, { now: Date.now(), olderThanDays: 0 })).toMatchObject({
+      status: "busy",
+    });
+    expect(await storage.list(canvasBlobPrefix(id))).toHaveLength(1);
+    expect(await d.canvases.restore(id)).toBe(true);
+  });
+
+  it("restore winning before the purge claim prevents removal", async () => {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const ownerId = await seedOwner(client);
+    const d = deps(storage);
+    const id = await seedCanvas(client, storage, ownerId, "restore-race");
+    await d.canvases.setStatus(id, "deleted");
+    const guarded = {
+      ...d,
+      canvases: {
+        ...d.canvases,
+        claimPurge: async (...args: Parameters<typeof d.canvases.claimPurge>) => {
+          await d.canvases.restore(id);
+          return d.canvases.claimPurge(...args);
+        },
+      },
+    };
+    expect(
+      await purgeCanvas(guarded, id, { now: Date.now() + 31 * DAY_MS, olderThanDays: 30 }),
+    ).toMatchObject({ status: "changed" });
+    expect(await storage.list(canvasBlobPrefix(id))).toHaveLength(1);
+  });
 
   it("reclaims blobs + versions of soft-deleted canvases, keeps the row, leaves active ones untouched", async () => {
     client = await makeTestDb(dialect);
@@ -157,7 +242,7 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     expect(await kv.find(id, "shared", "k")).toBeNull();
   });
 
-  it("is idempotent: a never-deployed canvas is skipped and a second sweep reclaims nothing", async () => {
+  it("is idempotent: empty canvases are permanently purged and a second sweep reclaims nothing", async () => {
     client = await makeTestDb(dialect);
     const storage = memStorage();
     const ownerId = await seedOwner(client);
@@ -169,7 +254,7 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     await canvases.setStatus(deployed, "deleted");
 
     const first = await purgeDeletedCanvases(deps(storage));
-    expect(first.canvasesPurged).toBe(1); // only the one with blobs/versions
+    expect(first.canvasesPurged).toBe(2); // both tombstones are terminal, even without blobs
     const second = await purgeDeletedCanvases(deps(storage));
     expect(second).toMatchObject({ canvasesPurged: 0, versionsPurged: 0, objectsDeleted: 0 });
     expect(await canvases.findById(neverDeployed.id)).not.toBeNull();

@@ -228,6 +228,100 @@ afterEach(() => {
 });
 
 describe("admin dashboard", () => {
+  it("previews only selected canvases and requires explicit confirmation before a bulk action", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () =>
+        canvasPage([ROW, { ...ROW, id: "c2", title: "Other canvas" }], 150),
+      "POST /api/admin/canvases/operations/preview": () =>
+        json({
+          action: "delete",
+          retentionDays: 30,
+          items: [
+            {
+              id: "c1",
+              title: ROW.title,
+              updatedAt: 123,
+              eligible: true,
+              explanation: null,
+              resources: null,
+            },
+          ],
+        }),
+      "POST /api/admin/canvases/operations/execute": () =>
+        json({
+          outcomes: [
+            { id: "c1", status: "changed", message: "Changed since preview. Review it again." },
+          ],
+        }),
+    });
+    renderAt("/admin/canvases");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("checkbox", { name: "Select Happy Otter" }));
+    await user.click(screen.getByRole("button", { name: "Delete selected" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete canvases" });
+    await within(dialog).findByText("Ready");
+    expect(
+      JSON.parse(calls.find((c) => c.path.endsWith("operations/preview"))?.body ?? "{}"),
+    ).toEqual({ action: "delete", ids: ["c1"] });
+    const execute = within(dialog).getByRole("button", { name: "Delete 1 selected" });
+    expect(execute).toBeDisabled();
+    await user.type(within(dialog).getByLabelText("Reason for this operation"), "Retired");
+    await user.type(within(dialog).getByLabelText("Type DELETE 1 to confirm"), "DELETE 1");
+    expect(calls.filter((c) => c.path.endsWith("operations/execute"))).toHaveLength(0);
+    await user.click(execute);
+    expect(await within(dialog).findByText(/Changed since preview/)).toBeInTheDocument();
+    expect(
+      JSON.parse(calls.find((c) => c.path.endsWith("operations/execute"))?.body ?? "{}"),
+    ).toEqual({
+      action: "delete",
+      items: [{ id: "c1", updatedAt: 123 }],
+      reason: "Retired",
+      confirmation: "DELETE 1",
+    });
+  });
+
+  it("shows purge in deleted row actions and explains real-file removal and retention", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () =>
+        canvasPage([{ ...ROW, status: "deleted", deletedAt: Date.now() }]),
+      "POST /api/admin/canvases/operations/preview": () =>
+        json({
+          action: "purge",
+          retentionDays: 30,
+          items: [
+            {
+              id: "c1",
+              title: ROW.title,
+              updatedAt: 123,
+              eligible: false,
+              explanation: "Retained for 30 days after deletion",
+              resources: {
+                versions: 2,
+                storageObjects: 8,
+                versionBytes: 20,
+                hasDraft: true,
+                fileCount: 1,
+                fileBytes: 10,
+                kvRows: 3,
+                eligibleAt: Date.now() + 30 * 86_400_000,
+                cleanupStarted: false,
+              },
+            },
+          ],
+        }),
+    });
+    renderAt("/admin/canvases?status=deleted");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+    await user.click(screen.getByRole("menuitem", { name: "Permanently purge" }));
+    const dialog = await screen.findByRole("dialog", { name: "Permanently purge canvases" });
+    expect(await within(dialog).findByText(/8 actual storage files/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Skipped: Retained for 30 days/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("textbox", { name: /to confirm/ })).not.toBeInTheDocument();
+    expect(calls.some((c) => c.path.endsWith("operations/execute"))).toBe(false);
+  });
   const inspection = {
     canvas: { ...ROW, ownerId: "u1", orgId: null, backendEnabled: true },
     owner: { ...ROW.owner, blocked: false },

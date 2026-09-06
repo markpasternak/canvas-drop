@@ -1,7 +1,11 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AdminBooleanFilter } from "../components/AdminBooleanFilter.js";
 import { AdminCanvasInspector } from "../components/AdminCanvasInspector.js";
+import {
+  ADMIN_OPERATION_LABELS,
+  AdminCanvasOperationDialog,
+} from "../components/AdminCanvasOperationDialog.js";
 import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { AdminSavedViews } from "../components/AdminSavedViews.js";
@@ -24,6 +28,7 @@ import {
   ADMIN_PAGE_SIZE,
   type AdminCanvasContextFilter,
   type AdminCanvasExpiryFilter,
+  type AdminCanvasOperation,
   type AdminCanvasSort,
   type AdminCanvasStatus,
 } from "../lib/api.js";
@@ -70,6 +75,17 @@ export default function AdminCanvases() {
   const navigate = useNavigate();
   const { data: me } = useMe();
   const [tableSettings, setTableSettings] = useAdminTablePreferences(me?.id);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [operation, setOperation] = useState<{
+    action: AdminCanvasOperation;
+    ids: string[];
+  } | null>(null);
+  const scope = JSON.stringify(search);
+  const [selectionScope, setSelectionScope] = useState(scope);
+  if (selectionScope !== scope) {
+    setSelectionScope(scope);
+    setSelected([]);
+  }
 
   const status = search.status;
   const access = search.access;
@@ -374,11 +390,40 @@ export default function AdminCanvases() {
       {rows.length > 0 && (
         <div className="space-y-3">
           <AdminTablePreferences value={tableSettings} onChange={setTableSettings} />
+          {selected.length > 0 && (
+            <section
+              aria-label="Selected canvas actions"
+              className="space-y-2 rounded-lg border border-border p-3"
+            >
+              <p className="text-sm font-medium">
+                {selected.length} selected on this page. Other matches are excluded.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {(Object.keys(ADMIN_OPERATION_LABELS) as AdminCanvasOperation[]).map((action) => (
+                  <Button
+                    key={action}
+                    size="sm"
+                    variant="secondary"
+                    disabled={isPlaceholderData}
+                    onClick={() => setOperation({ action, ids: [...selected] })}
+                  >
+                    {ADMIN_OPERATION_LABELS[action]} selected
+                  </Button>
+                ))}
+                <Button size="sm" variant="ghost" onClick={() => setSelected([])}>
+                  Clear selection
+                </Button>
+              </div>
+            </section>
+          )}
           <AdminCanvasTable
             canvases={rows}
             viewerId={me?.id}
             hiddenColumns={tableSettings.hidden}
             compact={tableSettings.compact}
+            selected={selected}
+            onSelect={setSelected}
+            onOperation={(action, id) => setOperation({ action, ids: [id] })}
             onInspect={(id) =>
               navigate({
                 to: "/admin/canvases",
@@ -424,6 +469,17 @@ export default function AdminCanvases() {
               search: (prev) => ({ ...prev, inspect: undefined }),
             })
           }
+        />
+      )}
+      {operation && (
+        <AdminCanvasOperationDialog
+          key={`${operation.action}:${operation.ids.join(",")}`}
+          action={operation.action}
+          ids={operation.ids}
+          onClose={() => {
+            setOperation(null);
+            setSelected([]);
+          }}
         />
       )}
     </div>

@@ -39,6 +39,12 @@ const reason = z.string().max(500).optional();
 const identifier = z.string().max(200).optional();
 const strings = z.array(z.string().max(200)).max(50).optional();
 const safeSchemas: Record<string, z.ZodType> = {
+  canvas_enable: z.object({ reason }),
+  canvas_restore: z.object({ reason }),
+  canvas_archive: z.object({ reason }),
+  canvas_unarchive: z.object({ reason }),
+  canvas_delete: z.object({ reason }),
+  canvas_purge_failed: z.object({ reason }),
   canvas_disable: z.object({ reason }),
   canvas_reassign_owner: z.object({
     from: identifier,

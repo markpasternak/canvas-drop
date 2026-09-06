@@ -35,6 +35,13 @@ export function kvRepository(client: DbClient) {
   const t = isSqlite ? sqliteSchema.kvEntries : pgSchema.kvEntries;
 
   return {
+    async countByCanvas(canvasId: string): Promise<number> {
+      const rows = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(t)
+        .where(eq(t.canvasId, canvasId));
+      return Number(rows[0]?.count ?? 0);
+    },
     /**
      * Row-aware lookup: `null` means the key is absent; `{ value }` means it exists
      * (the value itself may be JSON `null`). Use this wherever existence matters —

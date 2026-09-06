@@ -6,7 +6,19 @@ import {
   sqliteSchema,
   type Version,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, inArray, isNotNull, lt, max, notInArray } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  max,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -41,19 +53,26 @@ export function versionsRepository(client: DbClient) {
     async createPending(input: CreatePendingVersionInput): Promise<Version> {
       const rows = await db
         .insert(t)
-        .values({
-          id: uuidv7(),
-          canvasId: input.canvasId,
-          number: input.number,
-          createdBy: input.createdBy,
-          source: input.source,
-          status: "pending",
-          fileCount: 0,
-          totalBytes: 0,
-          manifest: null,
-          createdAt: Date.now(),
-        })
+        .select(
+          db
+            .select({
+              id: sql`${uuidv7()}`,
+              canvasId: canvasesT.id,
+              number: sql`${input.number}`,
+              createdBy: sql`${input.createdBy}`,
+              source: sql`${input.source}`,
+              status: sql`'pending'`,
+              fileCount: sql`0`,
+              totalBytes: sql`0`,
+              manifest: sql`null`,
+              createdAt: sql`${Date.now()}`,
+            })
+            .from(canvasesT)
+            .where(and(eq(canvasesT.id, input.canvasId), isNull(canvasesT.purgeStartedAt))),
+        )
         .returning();
+      if (rows.length !== 1)
+        throw new Error("Cannot deploy to a canvas after permanent cleanup starts");
       return rows[0] as Version;
     },
 
@@ -70,7 +89,17 @@ export function versionsRepository(client: DbClient) {
           // biome-ignore lint/suspicious/noExplicitAny: Manifest is a Json subtype; cast at the dual-dialect seam (KTD-1)
           manifest: data.manifest as any as Json,
         })
-        .where(eq(t.id, id))
+        .where(
+          and(
+            eq(t.id, id),
+            exists(
+              db
+                .select({ id: canvasesT.id })
+                .from(canvasesT)
+                .where(and(eq(canvasesT.id, t.canvasId), isNull(canvasesT.purgeStartedAt))),
+            ),
+          ),
+        )
         .returning();
       // Assert exactly one row updated. A finalize whose canvas (and its version
       // rows) was purged between begin and commit would otherwise silently mark a

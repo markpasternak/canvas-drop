@@ -9,6 +9,12 @@ import {
   listAdminActivity,
 } from "../admin/activity.js";
 import { requireAdmin } from "../admin/authz.js";
+import {
+  type CanvasOperationDeps,
+  canvasOperationExecuteBody,
+  canvasOperationPreviewBody,
+  canvasOperations,
+} from "../admin/canvas-operations.js";
 import { adminInvestigation } from "../admin/investigation.js";
 import {
   type AdminSettingsService,
@@ -50,6 +56,7 @@ import type { InviteService } from "../invites/service.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "./canvas-kv.js";
 
 export interface AdminRoutesDeps {
+  operations: CanvasOperationDeps;
   config: Config;
   admin: AdminRepository;
   canvases: CanvasesRepository;
@@ -207,6 +214,20 @@ export function adminRoutes(deps: AdminRoutesDeps) {
 
   app.use("*", requireAdmin());
 
+  const operations = canvasOperations(deps.operations);
+  app.post("/canvases/operations/preview", sameOrigin, async (c) => {
+    const body = canvasOperationPreviewBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    return c.json(await operations.preview(body.data.action, body.data.ids));
+  });
+  app.post("/canvases/operations/execute", sameOrigin, async (c) => {
+    const body = canvasOperationExecuteBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    if (body.data.confirmation !== `${body.data.action.toUpperCase()} ${body.data.items.length}`)
+      return c.json({ error: "confirmation_required" }, 400);
+    return c.json(await operations.execute(body.data, c.get("user").id));
+  });
+
   const investigation = adminInvestigation(deps);
   app.get("/activity", async (c) => {
     const query = activityQuerySchema.safeParse(c.req.query());
@@ -350,6 +371,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         createdAt: cv.createdAt,
         // Soft-delete timestamp (purge factors on it); null unless status='deleted'.
         deletedAt: cv.deletedAt,
+        purgeStartedAt: cv.purgeStartedAt,
+        purgedAt: cv.purgedAt,
       };
     });
     // `total` echoed (with limit/offset) so the UI derives "showing X–Y of N" from

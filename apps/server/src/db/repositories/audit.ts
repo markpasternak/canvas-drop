@@ -53,6 +53,7 @@ export const CANVAS_AUDIT_ACTIONS = [
   "canvas_transfer",
   "canvas_delete",
   "canvas_purge",
+  "canvas_purge_failed",
   "canvas_archive",
   "canvas_unarchive",
   "canvas_unpublish",

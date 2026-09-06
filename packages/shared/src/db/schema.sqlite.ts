@@ -296,6 +296,8 @@ export const canvases = sqliteTable(
     createdAt: c.epochMs("created_at").notNull(),
     updatedAt: c.epochMs("updated_at").notNull(),
     deletedAt: c.epochMs("deleted_at"),
+    purgeStartedAt: c.epochMs("purge_started_at"),
+    purgedAt: c.epochMs("purged_at"),
   },
   (t) => [
     uniqueIndex("canvases_slug_uq").on(t.slug),

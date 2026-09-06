@@ -8,7 +8,7 @@ import {
   UserSwitch,
 } from "@phosphor-icons/react";
 import { useState } from "react";
-import type { AdminCanvasRow } from "../lib/api.js";
+import type { AdminCanvasOperation, AdminCanvasRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
 import { useClipboardCopy } from "../lib/clipboard.js";
 import { daysSince, formatBytes, relativeTime } from "../lib/format.js";
@@ -209,7 +209,13 @@ function ReassignDialog({
  *  per-row action behind a kebab). The status action (Disable/Enable/Restore)
  *  joins the navigation/copy actions in the same menu; archived canvases are
  *  owner-controlled, so they get only the navigation actions. */
-function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
+function RowActions({
+  canvas,
+  onOperation,
+}: {
+  canvas: AdminCanvasRow;
+  onOperation?: (action: AdminCanvasOperation, id: string) => void;
+}) {
   const [takedownOpen, setTakedownOpen] = useState(false);
   const [reassignOpen, setReassignOpen] = useState(false);
   const enable = useAdminEnableCanvas();
@@ -306,12 +312,22 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
             Enable
           </ActionMenuItem>
         )}
-        {canvas.status === "deleted" && (
+        {canvas.status === "deleted" && !canvas.purgeStartedAt && (
           <ActionMenuItem
             icon={<ArrowCounterClockwise size={MENU_ICON} aria-hidden />}
             onSelect={doRestore}
           >
             Restore
+          </ActionMenuItem>
+        )}
+        {onOperation && canvas.status !== "deleted" && (
+          <ActionMenuItem danger onSelect={() => onOperation("delete", canvas.id)}>
+            Delete
+          </ActionMenuItem>
+        )}
+        {onOperation && canvas.status === "deleted" && !canvas.purgedAt && (
+          <ActionMenuItem danger onSelect={() => onOperation("purge", canvas.id)}>
+            Permanently purge
           </ActionMenuItem>
         )}
       </ActionMenu>
@@ -358,6 +374,9 @@ export function AdminCanvasTable({
   hiddenColumns = [],
   compact = true,
   onInspect,
+  selected = [],
+  onSelect,
+  onOperation,
 }: {
   canvases: AdminCanvasRow[];
   onOwnerClick?: (owner: NonNullable<AdminCanvasRow["owner"]>) => void;
@@ -365,11 +384,30 @@ export function AdminCanvasTable({
   hiddenColumns?: Array<"owner" | "size" | "usage" | "activity">;
   compact?: boolean;
   onInspect: (id: string) => void;
+  selected?: string[];
+  onSelect?: (ids: string[]) => void;
+  onOperation?: (action: AdminCanvasOperation, id: string) => void;
 }) {
   return (
     <div className={compact ? "" : "[&_td]:py-4"}>
       <DataTable
         columns={[
+          ...(onSelect
+            ? [
+                {
+                  header: (
+                    <input
+                      type="checkbox"
+                      aria-label="Select this page"
+                      checked={
+                        canvases.length > 0 && canvases.every((c) => selected.includes(c.id))
+                      }
+                      onChange={(e) => onSelect(e.target.checked ? canvases.map((c) => c.id) : [])}
+                    />
+                  ),
+                },
+              ]
+            : []),
           { header: "Canvas" },
           ...(!hiddenColumns.includes("owner") ? [{ header: "Owner" }] : []),
           { header: "Access" },
@@ -384,6 +422,20 @@ export function AdminCanvasTable({
       >
         {canvases.map((c) => (
           <tr key={c.id} className="align-middle">
+            {onSelect && (
+              <td className="px-3 py-2">
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${c.title || c.slug}`}
+                  checked={selected.includes(c.id)}
+                  onChange={(e) =>
+                    onSelect(
+                      e.target.checked ? [...selected, c.id] : selected.filter((id) => id !== c.id),
+                    )
+                  }
+                />
+              </td>
+            )}
             <td className="px-3 py-2">
               <div className="flex items-center gap-2">
                 <button
@@ -417,7 +469,11 @@ export function AdminCanvasTable({
                   className="mt-0.5 text-xs text-subtle"
                   title={`Deleted ${relativeTime(c.deletedAt)}`}
                 >
-                  Deleted {daysSince(c.deletedAt)}d ago · awaiting purge
+                  {c.purgedAt
+                    ? "Permanently purged"
+                    : c.purgeStartedAt
+                      ? "Cleanup started · retry available"
+                      : `Deleted ${daysSince(c.deletedAt)}d ago · awaiting purge`}
                 </div>
               )}
             </td>
@@ -519,7 +575,7 @@ export function AdminCanvasTable({
                     Open
                   </a>
                 )}
-                <RowActions canvas={c} />
+                <RowActions canvas={c} onOperation={onOperation} />
               </div>
             </td>
           </tr>

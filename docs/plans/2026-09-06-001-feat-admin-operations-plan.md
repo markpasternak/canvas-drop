@@ -101,7 +101,14 @@ disabled profiles, secrets never returned, diagnostics restrictions and useful d
 Review the complete diff, simplify, run ce-code-review and fix substantive findings. Run
 lint, typecheck, full dual-dialect/dashboard tests, build, and generated-document checks.
 Browser-test desktop/mobile and representative multi-step workflows using local fixtures.
-Capture screenshots and a requirement-by-requirement evidence report. Update BUILD_BRIEF
+Capture screenshots and a requirement-by-requirement evidence report. After all features
+are finished and verified, update the admin documentation and marketing site before
+deployment (explicit user steering, 2026-09-06). Explain the finished governance workflows
+with real product screenshots: composed exposure filters, access explanations, activity,
+offboarding, Connections operations, and safe deletion/purge. Keep claims grounded in
+tested behavior and explain retention, permanence, and private-content boundaries clearly.
+Review the complete copy and screenshots, and include these updates in this same branch
+and PR. Do not publish intermediate feature claims. Update BUILD_BRIEF
 only to record the explicitly authorized admin scope, docs/site admin guidance, project status,
 and relevant shared learnings; regenerate docs. Push/open one PR linked to the tracking issue,
 wait for all required CI, squash merge and delete branch. Deploy from merged main through

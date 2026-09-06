@@ -14,6 +14,7 @@ import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { connectionsRepository } from "../db/repositories/connections.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
 import { emailTemplatesRepository } from "../db/repositories/email-templates.js";
 import { filesRepository } from "../db/repositories/files.js";
 import {
@@ -22,8 +23,10 @@ import {
   seedUndeployedCanvas,
 } from "../db/repositories/gallery-test-helpers.js";
 import { invitationsRepository } from "../db/repositories/invitations.js";
+import { kvRepository } from "../db/repositories/kv.js";
 import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
+import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { settingsRepository } from "../db/repositories/settings.js";
 import { teamsRepository } from "../db/repositories/teams.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
@@ -33,6 +36,7 @@ import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { seedDefaultTemplates } from "../email/templates.js";
 import type { AppEnv } from "../http/types.js";
 import { makeInviteService } from "../invites/testing.js";
+import { memStorage } from "../storage/mem.js";
 import { adminRoutes } from "./admin.js";
 
 const silent = pino({ level: "silent" });
@@ -61,6 +65,17 @@ function buildAdminApp(
   app.route(
     "/api/admin",
     adminRoutes({
+      operations: {
+        canvases,
+        versions: versionsRepository(client),
+        drafts: draftsRepository(client),
+        storage: memStorage(),
+        log: silent,
+        screenshots: screenshotsRepository(client),
+        files: filesRepository(client),
+        kv: kvRepository(client),
+        audit,
+      },
       config: appConfig,
       admin: adminRepository(client),
       auditReader: auditRepository(client),
@@ -114,6 +129,59 @@ describe("admin routes", () => {
   });
 
   describe.each(DIALECTS)("investigation [%s]", (dialect) => {
+    it("gates bulk preview and execution, bounds scope, and rejects missing confirmation", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "operations-owner");
+      const id = await seedPublishedCanvas(client, owner.id);
+      const denied = buildAdminApp(client, { id: owner.id, isAdmin: false }).app;
+      for (const action of ["preview", "execute"])
+        expect(
+          (await denied.request(`/api/admin/canvases/operations/${action}`, post({}))).status,
+        ).toBe(404);
+      const { app, canvases } = buildAdminApp(client, { id: owner.id, isAdmin: true });
+      const preview = (await (
+        await app.request(
+          "/api/admin/canvases/operations/preview",
+          post({ action: "delete", ids: [id] }),
+        )
+      ).json()) as { items: Array<{ id: string; eligible: boolean; updatedAt: number }> };
+      expect(preview.items[0]).toMatchObject({ id, eligible: true });
+      for (const ids of [[], [id, id], Array.from({ length: 51 }, (_, i) => `id-${i}`)])
+        expect(
+          (
+            await app.request(
+              "/api/admin/canvases/operations/preview",
+              post({ action: "purge", ids }),
+            )
+          ).status,
+        ).toBe(400);
+      const input = {
+        action: "delete",
+        items: [{ id, updatedAt: preview.items[0]?.updatedAt }],
+        reason: "Retired",
+        confirmation: "",
+      };
+      expect(
+        (await app.request("/api/admin/canvases/operations/execute", post(input))).status,
+      ).toBe(400);
+      expect((await canvases.findById(id))?.status).toBe("active");
+      const crossSite = post({ ...input, confirmation: "DELETE 1" });
+      expect(
+        (
+          await app.request("/api/admin/canvases/operations/execute", {
+            ...crossSite,
+            headers: { ...crossSite.headers, "sec-fetch-site": "cross-site" },
+          })
+        ).status,
+      ).toBe(403);
+      const result = (await (
+        await app.request(
+          "/api/admin/canvases/operations/execute",
+          post({ ...input, confirmation: "DELETE 1" }),
+        )
+      ).json()) as { outcomes: Array<{ status: string }> };
+      expect(result.outcomes[0]?.status).toBe("done");
+    });
     it("keeps the inspector and activity admin-only and exposes metadata without content or credentials", async () => {
       client = await makeTestDb(dialect);
       const owner = await seedUser(client, "private-owner");
