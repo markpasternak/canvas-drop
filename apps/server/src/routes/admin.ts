@@ -17,6 +17,11 @@ import {
 } from "../admin/canvas-operations.js";
 import { adminInvestigation } from "../admin/investigation.js";
 import {
+  type OffboardingDeps,
+  OffboardingError,
+  offboardingService,
+} from "../admin/offboarding.js";
+import {
   type AdminSettingsService,
   PUBLIC_LINKS_ENABLED_KEY,
   QUOTA_KEYS,
@@ -56,6 +61,7 @@ import type { InviteService } from "../invites/service.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "./canvas-kv.js";
 
 export interface AdminRoutesDeps {
+  offboarding: Pick<OffboardingDeps, "repository" | "revokeSessions" | "revokeMcpTokens">;
   operations: CanvasOperationDeps;
   config: Config;
   admin: AdminRepository;
@@ -618,6 +624,46 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     hub: deps.hub,
     notify: deps.invites,
   });
+  const offboarding = offboardingService({
+    ...deps,
+    ...deps.offboarding,
+    ownership,
+    log: deps.operations.log,
+    hub: deps.operations.hub,
+  });
+  const offboardingPreviewBody = z.object({
+    email: z
+      .string()
+      .trim()
+      .email()
+      .max(254)
+      .transform((v) => v.toLowerCase()),
+    toUserId: z.string().min(1).max(100).optional(),
+  });
+  const offboardingExecuteBody = offboardingPreviewBody.extend({
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    reason: z.string().trim().min(1).max(500),
+    confirmation: z.string().max(300),
+  });
+  app.post("/people/offboarding/preview", sameOrigin, async (c) => {
+    const body = offboardingPreviewBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    return c.json(await offboarding.preview(body.data.email, c.get("user").id, body.data.toUserId));
+  });
+  app.post("/people/offboarding/execute", sameOrigin, async (c) => {
+    const body = offboardingExecuteBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      return c.json(await offboarding.execute(body.data, c.get("user")));
+    } catch (err) {
+      if (err instanceof OffboardingError)
+        return c.json(
+          { error: err.code, message: err.message },
+          err.code === "SELF" || err.code === "CONFIRMATION_REQUIRED" ? 400 : 409,
+        );
+      throw err;
+    }
+  });
   const reassignBody = z.object({
     toUserId: z.string().min(1),
     reason: z.string().trim().min(1).max(500),
@@ -758,7 +804,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     if (target.isAdmin && !target.isBlocked && (await deps.users.countAdmins()) <= 1) {
       return c.json({ error: "last_admin", message: "cannot block the last admin" }, 409);
     }
-    await deps.users.setBlocked(id, true);
+    if (!(await deps.users.removeAuthority(id, "block")))
+      return c.json({ error: "last_admin", message: "cannot block the last admin" }, 409);
     // Kill any live MCP tokens immediately so the agent control plane honors the
     // block on the spot (the token surface also re-checks per call, defense in depth).
     await deps.revokeMcpTokensForUser?.(id);
@@ -810,7 +857,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     if (target.isAdmin && !target.isBlocked && (await deps.users.countAdmins()) <= 1) {
       return c.json({ error: "last_admin", message: "cannot demote the last admin" }, 409);
     }
-    await deps.users.setAdmin(id, false);
+    if (!(await deps.users.removeAuthority(id, "demote")))
+      return c.json({ error: "last_admin", message: "cannot demote the last admin" }, 409);
     deps.audit.recordAudit({
       action: "user_demote",
       actorId: actor.id,

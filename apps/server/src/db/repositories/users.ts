@@ -161,6 +161,48 @@ export function usersRepository(client: DbClient) {
       await db.update(t).set({ isBlocked }).where(eq(t.id, id));
     },
 
+    /** Serialize administrative removals on the same rows, including offboarding.
+     * Read-before-write last-admin checks alone race across simultaneous requests. */
+    async removeAuthority(
+      id: string,
+      action: "block" | "demote" | "offboard",
+      actorId?: string,
+    ): Promise<boolean> {
+      if (actorId === id) return false;
+      const yes = client.dialect === "sqlite" ? 1 : true;
+      const no = client.dialect === "sqlite" ? 0 : false;
+      // biome-ignore lint/suspicious/noExplicitAny: dual-dialect transaction executor
+      const perform = async (q: any) => {
+        const otherAdmin = sql`exists (select 1 from users other_admin where other_admin.id <> ${id} and other_admin.is_admin = ${yes} and other_admin.is_blocked = ${no})`;
+        const actorActive = actorId
+          ? sql`exists (select 1 from users acting where acting.id = ${actorId} and acting.is_admin = ${yes} and acting.is_blocked = ${no})`
+          : undefined;
+        const rows = await q
+          .update(t)
+          .set(
+            action === "block"
+              ? { isBlocked: true }
+              : action === "demote"
+                ? { isAdmin: false }
+                : { isBlocked: true, isAdmin: false },
+          )
+          .where(
+            and(
+              eq(t.id, id),
+              actorActive,
+              sql`(${t.isAdmin} = ${no} or ${t.isBlocked} = ${yes} or ${otherAdmin})`,
+            ),
+          )
+          .returning({ id: t.id });
+        return rows.length === 1;
+      };
+      if (client.dialect === "sqlite") return perform(db);
+      return db.transaction(async (q: typeof db) => {
+        await q.select({ id: t.id }).from(t).where(eq(t.isAdmin, true)).orderBy(t.id).for("update");
+        return perform(q);
+      });
+    },
+
     /**
      * Grant or revoke admin (in-app user-management, bootstrap model). Persists in
      * the DB: a login no longer clobbers it (see {@link upsert}). The route guards

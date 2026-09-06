@@ -22,7 +22,15 @@ const MENU_ICON = 15;
  *  demote, block/unblock. Self-protection is surfaced here (items disabled for your
  *  own row) AND enforced server-side; the last-admin guard can only fail
  *  server-side, so it arrives as a toast. */
-function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | undefined }) {
+function RowActions({
+  person,
+  meId,
+  onOffboard,
+}: {
+  person: AdminPersonRow;
+  meId: string | undefined;
+  onOffboard?: (email: string) => void;
+}) {
   const block = useAdminBlockUser();
   const promote = useAdminPromoteUser();
   const publishPublic = useAdminPublishPublic();
@@ -35,8 +43,6 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
   // from a hover menu, and revoke sweeps every public canvas the person owns back
   // to private. The restorative directions (unblock / restore) stay one-click.
   const [confirming, setConfirming] = useState<"block" | "revoke" | null>(null);
-
-  if (!userId && !firstPending) return <span className="text-subtle">—</span>;
 
   async function togglePublic() {
     if (!userId) return;
@@ -92,6 +98,11 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
   return (
     <>
       <ActionMenu label={`Actions for ${person.name || person.email}`}>
+        {onOffboard && (
+          <ActionMenuItem danger disabled={isSelf} onSelect={() => onOffboard(person.email)}>
+            Offboard person
+          </ActionMenuItem>
+        )}
         {firstPending && (
           <ActionMenuItem
             danger
@@ -180,9 +191,11 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
 export function AdminUserTable({
   people,
   meId,
+  onOffboard,
 }: {
   people: AdminPersonRow[];
   meId: string | undefined;
+  onOffboard?: (email: string) => void;
 }) {
   const navigate = useNavigate();
 
@@ -264,7 +277,7 @@ export function AdminUserTable({
             {u.lastSeenAt !== null ? relativeTime(u.lastSeenAt) : "never"}
           </td>
           <td className="px-3 py-2 text-right">
-            <RowActions person={u} meId={meId} />
+            <RowActions person={u} meId={meId} onOffboard={onOffboard} />
           </td>
         </tr>
       ))}

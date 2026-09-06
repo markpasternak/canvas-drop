@@ -141,7 +141,40 @@ export function ownershipService(deps: OwnershipDeps) {
     );
   }
 
+  async function validateReassign(
+    canvas: Canvas,
+    adminId: string,
+    toUserId: string,
+  ): Promise<User | OwnershipError> {
+    if (toUserId === adminId) return err("SELF", "Reassign to another member, not yourself.");
+    if (isOwnerOf(canvas, toUserId))
+      return err("ALREADY_OWNER", "That person already owns this canvas.");
+    const target = await loadTarget(toUserId);
+    if ("ok" in target) return target;
+    if (deps.tenancyActive) {
+      const orgIds = await orgIdsOf(target);
+      const member = canvas.orgId !== null ? orgIds.has(canvas.orgId) : orgIds.size > 0;
+      if (!member) {
+        return err(
+          "TARGET_NOT_MEMBER",
+          canvas.orgId !== null
+            ? "The new owner must be a member of the canvas's org."
+            : "The new owner must be an org member.",
+        );
+      }
+    }
+    return target;
+  }
+
   return {
+    async previewReassign(canvas: Canvas, adminId: string, toUserId: string) {
+      const target = await validateReassign(canvas, adminId, toUserId);
+      if ("ok" in target) return target;
+      return {
+        ok: true as const,
+        publicLinkReverted: await mustRevertPublicLink(canvas, toUserId),
+      };
+    },
     /**
      * Who the owner may hand the canvas to (review #7): every EFFECTIVE editor — a direct
      * editor row, or a member of an editor-role team — filtered through the same live org
@@ -251,23 +284,8 @@ export function ownershipService(deps: OwnershipDeps) {
       toUserId: string,
       reason: string,
     ): Promise<OwnershipResult | OwnershipError> {
-      if (toUserId === admin.id) return err("SELF", "Reassign to another member, not yourself.");
-      if (isOwnerOf(canvas, toUserId))
-        return err("ALREADY_OWNER", "That person already owns this canvas.");
-      const target = await loadTarget(toUserId);
+      const target = await validateReassign(canvas, admin.id, toUserId);
       if ("ok" in target) return target;
-      if (deps.tenancyActive) {
-        const orgIds = await orgIdsOf(target);
-        const member = canvas.orgId !== null ? orgIds.has(canvas.orgId) : orgIds.size > 0;
-        if (!member) {
-          return err(
-            "TARGET_NOT_MEMBER",
-            canvas.orgId !== null
-              ? "The new owner must be a member of the canvas's org."
-              : "The new owner must be an org member.",
-          );
-        }
-      }
       const previousOwnerEditor = await previousOwnerKeepsEditor(canvas);
       const revertPublicLink = await mustRevertPublicLink(canvas, toUserId);
       // Rotate the deploy key in the same write; the plaintext is discarded on purpose.

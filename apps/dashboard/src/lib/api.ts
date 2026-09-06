@@ -926,6 +926,49 @@ export type AdminCanvasOperation =
   | "delete"
   | "restore"
   | "purge";
+export interface AdminOffboardingPreview {
+  email: string;
+  fingerprint: string;
+  self: boolean;
+  user: null | {
+    id: string;
+    name: string;
+    isAdmin: boolean;
+    isBlocked: boolean;
+    canPublishPublic: boolean;
+  };
+  recipient: null | { id: string; email: string; blocked: boolean; canPublishPublic: boolean };
+  owned: Array<{
+    id: string;
+    title: string;
+    slug: string;
+    orgId: string | null;
+    status: string;
+    access: string;
+    updatedAt: number;
+    transferEligible: boolean;
+    transferExplanation: string | null;
+    publicLinkReverted: boolean;
+  }>;
+  direct: Array<{ id: string; canvasId: string; title: string; role: string }>;
+  permits: Array<{ id: string }>;
+  organizations: Array<{ id: string; name: string }>;
+  createdTeams: Array<{ id: string; name: string; orgId: string | null }>;
+  memberships: Array<{ id: string; name: string }>;
+  pending: Array<{ id: string; targetId: string; targetType: string; role: string | null }>;
+}
+export interface AdminOffboardingResults {
+  outcomes: Array<{
+    kind: string;
+    id: string;
+    label: string;
+    status: "done" | "failed" | "unresolved";
+    message: string;
+  }>;
+  unresolved: string[];
+  complete: boolean;
+  accountBlocked: boolean | null;
+}
 export interface AdminCanvasOperationPreview {
   action: AdminCanvasOperation;
   retentionDays: number;
@@ -1565,6 +1608,22 @@ export const api = {
 
   // --- Admin (§6.10, M7; user-mgmt + member-parity filters plan 006) ---
   admin: {
+    previewOffboarding: (email: string, toUserId?: string) =>
+      request<AdminOffboardingPreview>("/api/admin/people/offboarding/preview", {
+        method: "POST",
+        body: JSON.stringify({ email, toUserId }),
+      }),
+    executeOffboarding: (input: {
+      email: string;
+      toUserId?: string;
+      fingerprint: string;
+      reason: string;
+      confirmation: string;
+    }) =>
+      request<AdminOffboardingResults>("/api/admin/people/offboarding/execute", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
     previewCanvasOperation: (action: AdminCanvasOperation, ids: string[]) =>
       request<AdminCanvasOperationPreview>("/api/admin/canvases/operations/preview", {
         method: "POST",

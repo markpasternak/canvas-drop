@@ -24,9 +24,12 @@ import {
 } from "../db/repositories/gallery-test-helpers.js";
 import { invitationsRepository } from "../db/repositories/invitations.js";
 import { kvRepository } from "../db/repositories/kv.js";
+import { oauthRepository } from "../db/repositories/oauth.js";
+import { offboardingRepository } from "../db/repositories/offboarding.js";
 import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
+import { sessionsRepository } from "../db/repositories/sessions.js";
 import { settingsRepository } from "../db/repositories/settings.js";
 import { teamsRepository } from "../db/repositories/teams.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
@@ -65,6 +68,11 @@ function buildAdminApp(
   app.route(
     "/api/admin",
     adminRoutes({
+      offboarding: {
+        repository: offboardingRepository(client),
+        revokeSessions: (id) => sessionsRepository(client).revokeAllForUser(id),
+        revokeMcpTokens: (id) => oauthRepository(client).tokens.revokeAllForUser(id),
+      },
       operations: {
         canvases,
         versions: versionsRepository(client),
@@ -129,6 +137,64 @@ describe("admin routes", () => {
   });
 
   describe.each(DIALECTS)("investigation [%s]", (dialect) => {
+    it("guards offboarding and revokes real sign-in and agent tokens after confirmation", async () => {
+      client = await makeTestDb(dialect);
+      const actor = await seedUser(client, "offboarding-admin");
+      const leaving = await seedUser(client, "departing");
+      await usersRepository(client).setAdmin(actor.id, true);
+      const denied = buildAdminApp(client, { id: leaving.id, isAdmin: false }).app;
+      for (const operation of ["preview", "execute"])
+        expect(
+          (await denied.request(`/api/admin/people/offboarding/${operation}`, post({}))).status,
+        ).toBe(404);
+      const { app } = buildAdminApp(client, { id: actor.id, isAdmin: true });
+      const url = "/api/admin/people/offboarding";
+      expect((await app.request(`${url}/preview`, post({ email: "invalid" }))).status).toBe(400);
+      expect(
+        (
+          await app.request(`${url}/preview`, {
+            ...post({ email: leaving.email }),
+            headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+          })
+        ).status,
+      ).toBe(403);
+      const sessions = sessionsRepository(client);
+      const tokens = oauthRepository(client).tokens;
+      await sessions.create({
+        userId: leaving.id,
+        token: "departing-session",
+        expiresAt: Date.now() + 60000,
+      });
+      for (const kind of ["access", "refresh"] as const)
+        await tokens.create({
+          userId: leaving.id,
+          clientId: "test-client",
+          kind,
+          token: `departing-${kind}`,
+          expiresAt: Date.now() + 60000,
+        });
+      const preview = (await (
+        await app.request(`${url}/preview`, post({ email: leaving.email }))
+      ).json()) as { fingerprint: string };
+      const input = {
+        email: leaving.email,
+        fingerprint: preview.fingerprint,
+        reason: "Departure",
+        confirmation: `OFFBOARD ${leaving.email}`,
+      };
+      expect(
+        (await app.request(`${url}/execute`, post({ ...input, confirmation: "yes" }))).status,
+      ).toBe(400);
+      expect(await sessions.findLiveByToken("departing-session")).not.toBeNull();
+      const response = await app.request(`${url}/execute`, post(input));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ complete: true, accountBlocked: true });
+      expect(await sessions.findLiveByToken("departing-session")).toBeNull();
+      expect(await tokens.findLive("departing-access", "access")).toBeNull();
+      expect(await tokens.findLive("departing-refresh", "refresh")).toBeNull();
+      expect((await app.request(`${url}/execute`, post(input))).status).toBe(409);
+    });
+
     it("gates bulk preview and execution, bounds scope, and rejects missing confirmation", async () => {
       client = await makeTestDb(dialect);
       const owner = await seedUser(client, "operations-owner");

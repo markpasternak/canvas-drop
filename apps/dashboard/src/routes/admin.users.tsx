@@ -1,8 +1,9 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AddUsersPanel } from "../components/AddUsersPanel.js";
 import { AdminBooleanFilter } from "../components/AdminBooleanFilter.js";
 import { AdminHeader } from "../components/AdminHeader.js";
+import { AdminOffboardingDialog } from "../components/AdminOffboardingDialog.js";
 import { AdminUserTable } from "../components/AdminUserTable.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -57,6 +58,7 @@ const PUBLIC_OPTIONS = [
  *  identity facts only; no per-user behavioral data. Admin-only (server 404s
  *  non-admins; the entry is reached from the Admin page). */
 export default function AdminUsers() {
+  const [offboardingEmail, setOffboardingEmail] = useState<string | null>(null);
   const search = useSearch({ strict: false }) as AdminUsersSearch;
   const navigate = useNavigate();
   const me = useMe();
@@ -248,7 +250,7 @@ export default function AdminUsers() {
       )}
       {people.length > 0 && (
         <div className="space-y-3">
-          <AdminUserTable people={people} meId={me.data?.id} />
+          <AdminUserTable people={people} meId={me.data?.id} onOffboard={setOffboardingEmail} />
           <div className="flex items-center justify-between gap-3 pt-1">
             <p className="text-xs text-subtle">
               Showing {from}–{to} of {total}
@@ -273,6 +275,14 @@ export default function AdminUsers() {
             </div>
           </div>
         </div>
+      )}
+      {offboardingEmail && (
+        <AdminOffboardingDialog
+          key={offboardingEmail}
+          email={offboardingEmail}
+          meId={me.data?.id}
+          onClose={() => setOffboardingEmail(null)}
+        />
       )}
     </div>
   );

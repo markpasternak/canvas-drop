@@ -97,3 +97,23 @@ required. Production has not been changed by this round.
 After every feature is finished and verified, update the admin docs and marketing site
 in this same branch/PR before deployment. Use finished-product behavior and real
 screenshots, and explain deletion versus purge, retention, and backup boundaries.
+
+## U4 — guided offboarding
+
+- Metadata inventory covers owned canvases, live organizations, direct grants, teams,
+  pending invitations, individual permits, and team creator responsibilities. A fingerprint
+  rejects changed previews; each transfer rechecks ownership and successor eligibility.
+- Confirmed execution blocks the account, revokes sign-in and MCP access/refresh tokens,
+  reuses ownership reassignment, removes grants/memberships/invitations/permits, revokes
+  remaining deploy keys, and reports partial failures and unresolved items with fresh retries.
+  Team creator attribution and identity-provider membership require separate follow-up.
+- Shared atomic administrator-removal logic protects the last usable administrator across
+  offboarding, blocking, and demotion. Tests cover competing removals, stale inventory,
+  live recipient eligibility, partial failure/retry, grants arriving during cleanup, and
+  pending-only people. Route tests verify actual session/token revocation and origin gates.
+- Required gates passed: lint, typecheck, 174 server files / 3,072 tests (four external
+  infrastructure tests skipped), and 84 dashboard files / 747 tests. UI tests ensure the
+  result stays visible even if the person disappears from the current filtered table.
+- Browser verified local seeded Aisha's five-canvas handover to Dana, reason and exact
+  confirmation, completion report, and blocked account. Production was not touched.
+  Screenshot: task-local `output/playwright/admin-offboarding-preview.png`.

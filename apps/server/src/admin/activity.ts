@@ -16,6 +16,7 @@ export const ADMIN_ACTIVITY_ACTIONS = [
   "connection_profile_update",
   "connection_profile_delete",
   "user_offboard",
+  "user_offboard_step",
 ] as const;
 
 export const activityQuerySchema = z
@@ -39,6 +40,9 @@ const reason = z.string().max(500).optional();
 const identifier = z.string().max(200).optional();
 const strings = z.array(z.string().max(200)).max(50).optional();
 const safeSchemas: Record<string, z.ZodType> = {
+  user_offboard_step: z.object({ reason, step: identifier, resourceId: identifier }),
+  user_block: z.object({ reason }),
+  user_demote: z.object({ reason }),
   canvas_enable: z.object({ reason }),
   canvas_restore: z.object({ reason }),
   canvas_archive: z.object({ reason }),
@@ -90,6 +94,7 @@ const safeSchemas: Record<string, z.ZodType> = {
     reason,
     reassigned: z.number().optional(),
     failed: z.number().optional(),
+    unresolved: z.number().optional(),
   }),
 };
 
