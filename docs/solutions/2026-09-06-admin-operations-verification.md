@@ -117,3 +117,29 @@ screenshots, and explain deletion versus purge, retention, and backup boundaries
 - Browser verified local seeded Aisha's five-canvas handover to Dana, reason and exact
   confirmation, completion report, and blocked account. Production was not touched.
   Screenshot: task-local `output/playwright/admin-offboarding-preview.png`.
+
+## U5 — Connections operations and actionable overview
+
+- Complete-window SQL aggregates show 24-hour successes/failures, average latency,
+  last success/failure, and distinct canvases with failures. Empty traffic and failed
+  reads have distinct UI states. Named recent outcomes open the metadata inspector.
+- Admin-only HEAD diagnostics reuse pinned egress, configured methods and protected
+  headers, with no redirects, a five-second timeout, 32 KB response ceiling, and a
+  per-profile ten-second cooldown. Only outcome/status/timing are returned and audited;
+  probes do not become canvas traffic. Rotation guidance explains complete replacement,
+  real-workflow verification, and upstream revocation of the previous credential.
+- Needs attention contains incomplete purges and observed Connection failures or
+  unavailable credentials. Routine public sharing, disabled canvases and elapsed
+  retention are separate. Purge filters cover retained/eligible/incomplete/complete
+  across the full dataset; completed tombstones no longer inflate cleanup backlog.
+- A PostgreSQL grouped-JSON parameter mismatch failed the new test and was fixed by
+  grouping on the selected expression's position. Migration 0040 adds the type/time
+  event index on both dialects for the observed-window query.
+- Required gates passed: lint, typecheck, 174 server files / 3,082 tests (four external
+  infrastructure tests skipped), 84 dashboard files / 745 tests. Coverage includes
+  profile isolation, absent traffic, safe fields, diagnostic limits/authorization,
+  purge-state pagination, and failure-versus-routine overview semantics.
+- Browser: local `Diagnostic verification` profile sent HEAD to `https://example.com`,
+  returned HTTP 200 in 104 ms, retained `No recent traffic`, and showed no response body.
+  Confirmed the overview's distinct exception and routine sections. Screenshots are
+  task-local `admin-connections-diagnostic.png` and `admin-overview-operations.png`.

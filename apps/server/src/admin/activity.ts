@@ -15,6 +15,7 @@ export const ADMIN_ACTIVITY_ACTIONS = [
   "connection_profile_create",
   "connection_profile_update",
   "connection_profile_delete",
+  "connection_diagnostic",
   "user_offboard",
   "user_offboard_step",
 ] as const;
@@ -40,6 +41,12 @@ const reason = z.string().max(500).optional();
 const identifier = z.string().max(200).optional();
 const strings = z.array(z.string().max(200)).max(50).optional();
 const safeSchemas: Record<string, z.ZodType> = {
+  connection_diagnostic: z.object({
+    outcome: identifier,
+    upstreamStatus: z.number().nullable(),
+    durationMs: z.number(),
+    checkedAt: z.number(),
+  }),
   user_offboard_step: z.object({ reason, step: identifier, resourceId: identifier }),
   user_block: z.object({ reason }),
   user_demote: z.object({ reason }),

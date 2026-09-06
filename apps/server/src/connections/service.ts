@@ -8,6 +8,7 @@ import {
 } from "../db/repositories/connections.js";
 import { isUniqueViolation } from "../db/unique-violation.js";
 import type { SecretCipher } from "./secret-cipher.js";
+import { ConnectionTransportError, defaultConnectionTransport } from "./transport.js";
 import {
   type ProtectedHeaderInput,
   validateMethods,
@@ -24,7 +25,9 @@ export type ConnectionServiceErrorCode =
   | "CONNECTION_CONFIRMATION_REQUIRED"
   | "CONNECTION_NOT_GRANTED"
   | "CONNECTION_DISABLED"
-  | "CONNECTION_KEY_UNAVAILABLE";
+  | "CONNECTION_KEY_UNAVAILABLE"
+  | "DIAGNOSTIC_UNAVAILABLE"
+  | "DIAGNOSTIC_BUSY";
 
 export class ConnectionServiceError extends Error {
   constructor(
@@ -81,7 +84,9 @@ export function connectionService(deps: {
   canvases: Pick<CanvasesRepository, "findById">;
   cipher: SecretCipher;
   audit: AuditLog;
+  transport?: typeof defaultConnectionTransport;
 }) {
+  const diagnosticCooldown = new Map<string, number>();
   // The first release is deliberately single-process. Serialize grant mutations per
   // profile so the affected-canvas count an admin confirms cannot change between the
   // count and the cascading DELETE. The database still makes the delete + revocation
@@ -147,6 +152,69 @@ export function connectionService(deps: {
   }
 
   return {
+    /** Admin-only HEAD probe through the exact same pinned, bounded egress transport.
+     * Discard all upstream content/headers and do not count probes as canvas traffic. */
+    async diagnose(actorId: string, id: string, path: string) {
+      const profile = await find(id);
+      if (!profile.enabled || !profile.allowedMethods.includes("HEAD"))
+        throw new ConnectionServiceError(
+          "DIAGNOSTIC_UNAVAILABLE",
+          "Enable this connection and allow HEAD before running a diagnostic.",
+        );
+      if (profile.protectedHeadersEnvelope && !deps.cipher.available)
+        throw new ConnectionServiceError(
+          "CONNECTION_KEY_UNAVAILABLE",
+          "Connection credentials are unavailable.",
+        );
+      const now = Date.now();
+      for (const [key, until] of diagnosticCooldown)
+        if (until <= now) diagnosticCooldown.delete(key);
+      if (diagnosticCooldown.has(id))
+        throw new ConnectionServiceError(
+          "DIAGNOSTIC_BUSY",
+          "Wait ten seconds before checking this connection again.",
+        );
+      diagnosticCooldown.set(id, now + 10000);
+      let outcome: string;
+      let upstreamStatus: number | null = null;
+      try {
+        const headers = profile.protectedHeadersEnvelope
+          ? deps.cipher.decrypt(id, profile.protectedHeadersEnvelope)
+          : {};
+        const response = await (deps.transport ?? defaultConnectionTransport).fetch({
+          origin: profile.origin,
+          path,
+          method: "HEAD",
+          allowedMethods: profile.allowedMethods,
+          callerHeaders: [],
+          protectedHeaders: Object.entries(headers),
+          maxResponseBytes: 32768,
+          timeoutMs: 5000,
+          maxRedirects: 0,
+        });
+        upstreamStatus = response.status;
+        outcome = response.status >= 200 && response.status < 300 ? "success" : "upstream_status";
+      } catch (error) {
+        outcome =
+          error instanceof ConnectionTransportError
+            ? error.code.toLowerCase()
+            : "diagnostic_failed";
+      }
+      const result = {
+        outcome,
+        upstreamStatus,
+        durationMs: Date.now() - now,
+        checkedAt: Date.now(),
+      };
+      deps.audit.recordAudit({
+        actorId,
+        action: "connection_diagnostic",
+        targetType: "connection_profile",
+        targetId: id,
+        meta: result,
+      });
+      return result;
+    },
     async create(actorId: string, input: CreateConnectionInput): Promise<AdminConnectionView> {
       const id = uuidv7();
       const now = Date.now();

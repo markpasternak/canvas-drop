@@ -281,6 +281,13 @@
       "when": 1788722882164,
       "tag": "0039_admin-purge-state",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788724953329,
+      "tag": "0040_connection-health-index",
+      "breakpoints": true
     }
   ]
 }

@@ -33,6 +33,7 @@ export function normalizeAdminCanvasSearch(input: unknown): AdminCanvasesSearch 
       "public_link",
     ]),
     expiry: choice(v.expiry, ["none", "active", "expired", "not_expired"]),
+    purge: choice(v.purge, ["eligible", "retained", "incomplete", "complete"]),
     context: choice(v.context, ["personal", "org", "team"]),
     sort: choice(v.sort, ["recent", "created", "title"]),
   };
@@ -71,6 +72,7 @@ export function adminCanvasConditions(
   if (search.access)
     conditions.push({ key: "access", label: `Configured access: ${accessLabels[search.access]}` });
   if (search.expiry) conditions.push({ key: "expiry", label: expiryLabels[search.expiry] });
+  if (search.purge) conditions.push({ key: "purge", label: `Purge: ${search.purge}` });
   for (const key of ["status", "context", "owner", "person", "q"] as const) {
     if (search[key])
       conditions.push({ key, label: `${key === "q" ? "Search" : key}: ${search[key]}` });

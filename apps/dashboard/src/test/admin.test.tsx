@@ -1089,118 +1089,83 @@ describe("admin dashboard", () => {
     });
   });
 
-  describe("needs-attention lane (U18)", () => {
-    function overviewHandlers(overviewBody: unknown, aiBody: unknown = AI_USAGE) {
+  describe("operational exceptions and routine reviews", () => {
+    function handlers(
+      attention = {
+        incompletePurgeCount: 0,
+        purgeEligibleCount: 0,
+        connections: [] as Array<{
+          id: string;
+          label: string;
+          detail: string;
+          affectedCanvasCount: number;
+        }>,
+      },
+    ) {
       return {
         "GET /api/me": () => json(ADMIN_ME),
-        "GET /api/admin/overview": () => json(overviewBody),
-        "GET /api/admin/ai-usage": () => json(aiBody),
+        "GET /api/admin/overview": () => json(OVERVIEW),
+        "GET /api/admin/ai-usage": () => json(AI_USAGE),
+        "GET /api/admin/attention": () => json({ sinceMs: Date.now() - 86400000, ...attention }),
         "GET /api/admin/canvases": () => canvasPage([ROW]),
-        "GET /api/admin/canvases?access=public_link&limit=50&offset=0": () => canvasPage([ROW]),
-        "GET /api/admin/canvases?status=deleted&limit=50&offset=0": () => canvasPage([]),
-        "GET /api/admin/canvases?status=disabled&limit=50&offset=0": () => canvasPage([]),
       };
     }
-
-    it("renders each derivable signal with its count (public links, purge, disabled, spend, usage)", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
+    it("keeps intentional public sharing and normal activity out of the exception lane", async () => {
+      mockFetch(handlers());
       renderAt("/admin");
-      // Public-link exposure (publicLinkCount=2) — scope the count to its row.
-      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
-      expect(publicRow).not.toBeNull();
-      expect(within(publicRow as HTMLElement).getByText("2")).toBeInTheDocument();
-      // Purge backlog (deleted=4, oldest 12d ago).
-      expect(screen.getByText("Awaiting purge")).toBeInTheDocument();
-      expect(screen.getByText(/Oldest deleted 12d ago/)).toBeInTheDocument();
-      // Disabled (1).
-      expect(screen.getByText("Disabled canvases")).toBeInTheDocument();
-      // Top AI spender ($4.00 from AI_USAGE).
-      expect(screen.getByText("Top AI spender")).toBeInTheDocument();
-      // Most active canvas (1,280 ops, from topCanvases).
-      expect(screen.getByText("Most active canvas")).toBeInTheDocument();
-    });
-
-    it("links each signal to its filtered admin canvases view", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
-      renderAt("/admin");
-      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
-      expect(publicRow).toHaveAttribute("href", expect.stringContaining("access=public_link"));
-      const purgeRow = screen.getByText("Awaiting purge").closest("a");
-      expect(purgeRow).toHaveAttribute("href", expect.stringContaining("status=deleted"));
-      const disabledRow = screen.getByText("Disabled canvases").closest("a");
-      expect(disabledRow).toHaveAttribute("href", expect.stringContaining("status=disabled"));
-    });
-
-    it("clicking the public-link signal navigates to the access=public_link table view", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
-      renderAt("/admin");
-      const user = userEvent.setup();
-      await user.click(await screen.findByText("Public-link canvases"));
-      await waitFor(() =>
-        expect(
-          calls.some((c) => c.path === "/api/admin/canvases?access=public_link&limit=50&offset=0"),
-        ).toBe(true),
+      expect(await screen.findByText("Nothing needs attention right now")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Routine reviews/ })).toBeInTheDocument();
+      expect(screen.getByText("Public-link canvases").closest("a")).toHaveAttribute(
+        "href",
+        expect.stringContaining("access=public_link"),
       );
+      expect(screen.getByText("Disabled canvases").closest("a")).toHaveAttribute(
+        "href",
+        expect.stringContaining("status=disabled"),
+      );
+      expect(screen.queryByText("Top AI spender")).not.toBeInTheDocument();
+      expect(screen.queryByText("Most active canvas")).not.toBeInTheDocument();
     });
-
-    it("hides individual signals with nothing to surface (no public links, no deleted, no disabled)", async () => {
-      const clean = {
-        ...OVERVIEW,
-        canvasCountByStatus: { active: 5 },
-        publicLinkCount: 0,
-        oldestDeletedAt: null,
-        topCanvases: [],
-      };
-      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+    it("links incomplete purge and observed connection failures to the relevant action", async () => {
+      mockFetch(
+        handlers({
+          incompletePurgeCount: 2,
+          purgeEligibleCount: 4,
+          connections: [
+            {
+              id: "p1",
+              label: "Stock connection",
+              detail: "Three failures in 24 hours",
+              affectedCanvasCount: 1,
+            },
+          ],
+        }),
+      );
       renderAt("/admin");
-      expect(await screen.findByText("Total views")).toBeInTheDocument();
-      // No signals → none of the signal rows render.
-      expect(screen.queryByText("Public-link canvases")).not.toBeInTheDocument();
-      expect(screen.queryByText("Awaiting purge")).not.toBeInTheDocument();
-      expect(screen.queryByText("Disabled canvases")).not.toBeInTheDocument();
+      const purge = (await screen.findByText("Incomplete canvas cleanup")).closest(
+        "a",
+      ) as HTMLElement;
+      expect(purge).toHaveAttribute("href", expect.stringContaining("purge=incomplete"));
+      expect(within(purge).getByText("2")).toBeInTheDocument();
+      expect(purge.className).toMatch(/warning/);
+      expect(screen.getByText("Retention elapsed").closest("a")).toHaveAttribute(
+        "href",
+        expect.stringContaining("purge=eligible"),
+      );
+      expect(screen.getByText("Stock connection").closest("a")).toHaveAttribute(
+        "href",
+        "/admin/connections#connection-p1",
+      );
+      expect(screen.queryByText("Nothing needs attention right now")).not.toBeInTheDocument();
     });
-
-    it("renders an all-clear state (lane stays visible) when nothing is flagged", async () => {
-      const clean = {
-        ...OVERVIEW,
-        canvasCountByStatus: { active: 5 },
-        publicLinkCount: 0,
-        oldestDeletedAt: null,
-        topCanvases: [],
-      };
-      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+    it("does not report all-clear when attention checks fail", async () => {
+      mockFetch({
+        ...handlers(),
+        "GET /api/admin/attention": () => json({ error: "unavailable" }, 503),
+      });
       renderAt("/admin");
-      // The lane itself is ALWAYS shown — the section header + a calm all-clear message
-      // explaining what it watches, never vanishing on a clean instance.
-      expect(await screen.findByRole("button", { name: /Needs attention/i })).toBeInTheDocument();
-      expect(screen.getByText("Nothing needs attention right now")).toBeInTheDocument();
-      expect(screen.getByText(/public-link exposure/i)).toBeInTheDocument();
-    });
-
-    it("has no trend-delta or screenshot-failure UI", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
-      renderAt("/admin");
-      await screen.findByText("Public-link canvases");
-      expect(screen.queryByText(/week over week/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/screenshot/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/vs\.? last/i)).not.toBeInTheDocument();
-    });
-
-    it("renders the URGENT (amber) purge treatment when the oldest deleted canvas is >30 days old", async () => {
-      // 31-day-old oldest-deleted crosses the PURGE_URGENT_DAYS=30 threshold, so the
-      // "Awaiting purge" row reads as urgent (amber accent + warning-toned count),
-      // not the routine info treatment.
-      const urgentPurge = { ...OVERVIEW, oldestDeletedAt: Date.now() - 31 * 86400000 };
-      mockFetch(overviewHandlers(urgentPurge));
-      renderAt("/admin");
-
-      const detail = await screen.findByText(/Oldest deleted 31d ago/);
-      const row = detail.closest("a") as HTMLElement;
-      // The whole row carries the amber urgent accent…
-      expect(row.className).toMatch(/warning/);
-      // …and the count is rendered in the warning tone (not the calm fg tone).
-      const count = within(row).getByText("4");
-      expect(count.className).toMatch(/text-warning/);
+      expect(await screen.findByText(/Attention checks could not be loaded/)).toBeInTheDocument();
+      expect(screen.queryByText("Nothing needs attention right now")).not.toBeInTheDocument();
     });
   });
 

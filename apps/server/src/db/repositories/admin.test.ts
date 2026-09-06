@@ -1,3 +1,5 @@
+import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
@@ -25,6 +27,44 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
+  });
+
+  it("separates retained, eligible, incomplete and completed purges before pagination", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "purge-owner");
+    const canvases = canvasesRepository(client);
+    const states = ["retained", "eligible", "incomplete", "complete"] as const;
+    const ids: string[] = [];
+    const t = dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
+    // biome-ignore lint/suspicious/noExplicitAny: dual-dialect test fixture
+    const db = client.db as any;
+    for (const state of states) {
+      const row = await canvases.create({
+        ownerId: owner.id,
+        slug: `purge-${state}`,
+        apiKeyHash: `hash-${state}`,
+      });
+      ids.push(row.id);
+      await db
+        .update(t)
+        .set({
+          status: "deleted",
+          deletedAt: Date.now() - (state === "retained" ? 1 : 31) * 86400000,
+          purgeStartedAt: state === "incomplete" || state === "complete" ? Date.now() : null,
+          purgedAt: state === "complete" ? Date.now() : null,
+        })
+        .where(eq(t.id, row.id));
+    }
+    const repo = adminRepository(client);
+    for (const [index, purge] of states.entries()) {
+      const result = await repo.listAllCanvasesFiltered({ purge, limit: 1, offset: 0 });
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.id).toBe(ids[index]);
+      expect((await repo.listAllCanvasesFiltered({ purge, limit: 1, offset: 1 })).items).toEqual(
+        [],
+      );
+    }
+    expect((await repo.platformStats(1)).canvasCountByStatus.deleted).toBe(3);
   });
 
   it("lists canvases across multiple owners, newest-first, excluding deleted by default", async () => {

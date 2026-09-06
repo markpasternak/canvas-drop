@@ -194,6 +194,20 @@ export function useAdminEmailTemplates() {
 export function useAdminConnections() {
   return useQuery({ queryKey: keys.adminConnections, queryFn: api.admin.listConnections });
 }
+export function useAdminConnectionHealth() {
+  return useQuery({
+    queryKey: ["admin", "connection-health"],
+    queryFn: api.admin.connectionHealth,
+    staleTime: 30000,
+  });
+}
+export function useAdminAttention() {
+  return useQuery({
+    queryKey: ["admin", "attention"],
+    queryFn: api.admin.attention,
+    staleTime: 30000,
+  });
+}
 
 export function useAdminConnectionCanvases(id: string, enabled = true) {
   return useQuery({

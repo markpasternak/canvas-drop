@@ -104,6 +104,7 @@ export default function AdminCanvases() {
   const filtering = conditions.length > 0;
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminCanvases({
+    purge: search.purge,
     status,
     access,
     public: search.public,
@@ -286,6 +287,31 @@ export default function AdminCanvases() {
           options={ADMIN_SORT_OPTIONS}
           value={sort}
           onValueChange={setSort}
+        />
+        <FilterSelect
+          label="Purge state"
+          value={search.purge ?? "all"}
+          options={[
+            { value: "all", label: "Any purge state" },
+            { value: "eligible", label: "Retention elapsed" },
+            { value: "retained", label: "Within retention" },
+            { value: "incomplete", label: "Cleanup incomplete" },
+            { value: "complete", label: "Purged" },
+          ]}
+          onValueChange={(value) =>
+            navigate({
+              to: "/admin/canvases",
+              search: (previous) => ({
+                ...previous,
+                page: 1,
+                status: value === "all" ? status : "deleted",
+                purge:
+                  value === "all"
+                    ? undefined
+                    : (value as "eligible" | "retained" | "incomplete" | "complete"),
+              }),
+            })
+          }
         />
       </div>
 

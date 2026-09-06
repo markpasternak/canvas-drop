@@ -191,6 +191,7 @@ const onboardingRoute = createRoute({
  *  route) and coerced in the view, mirroring the Your-canvases list. Lives here with
  *  the other route search types so views don't import it across sibling route files. */
 export interface AdminCanvasesSearch {
+  purge?: "eligible" | "retained" | "incomplete" | "complete";
   inspect?: string;
   status?: AdminCanvasStatus;
   /** Access-rung governance filter (e.g. find every `public_link`). */

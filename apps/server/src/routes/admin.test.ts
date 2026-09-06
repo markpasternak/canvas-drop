@@ -137,6 +137,71 @@ describe("admin routes", () => {
   });
 
   describe.each(DIALECTS)("investigation [%s]", (dialect) => {
+    it("exposes observed connection health and actionable attention without diagnostic privilege bypass", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "health-owner");
+      const id = await seedPublishedCanvas(client, owner.id);
+      const denied = buildAdminApp(client, { id: owner.id, isAdmin: false }).app;
+      expect((await denied.request("/api/admin/attention")).status).toBe(404);
+      expect((await denied.request("/api/admin/connections/health")).status).toBe(404);
+      expect(
+        (await denied.request("/api/admin/connections/p1/diagnose", post({ path: "/" }))).status,
+      ).toBe(404);
+      const { app } = buildAdminApp(client, { id: owner.id, isAdmin: true });
+      const created = (await (
+        await app.request(
+          "/api/admin/connections",
+          post({
+            key: "health",
+            label: "Health source",
+            origin: "https://api.example.com",
+            allowedMethods: ["GET"],
+          }),
+        )
+      ).json()) as { connection: { id: string } };
+      const profileId = created.connection.id;
+      await usageEventsRepository(client).record({
+        canvasId: id,
+        userId: owner.id,
+        type: "connection_op",
+        meta: {
+          profileId,
+          outcome: "upstream_timeout",
+          durationMs: 5000,
+          headers: "secret-canary",
+        },
+      });
+      const attention = await (await app.request("/api/admin/attention")).json();
+      expect(attention).toMatchObject({
+        incompletePurgeCount: 0,
+        purgeEligibleCount: 0,
+        connections: [{ id: profileId, label: "Health source", affectedCanvasCount: 1 }],
+      });
+      const health = await (await app.request("/api/admin/connections/health")).json();
+      expect(health).toMatchObject({ profiles: [{ profileId, requests: 1, failures: 1 }] });
+      expect(JSON.stringify([attention, health])).not.toContain("secret-canary");
+      expect(
+        (await app.request(`/api/admin/connections/${profileId}/diagnose`, post({ path: "/" })))
+          .status,
+      ).toBe(409);
+      expect(
+        (
+          await app.request(`/api/admin/connections/${profileId}/diagnose`, {
+            ...post({ path: "/" }),
+            headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await app.request(
+            `/api/admin/connections/${profileId}/diagnose`,
+            post({ path: "/", method: "POST" }),
+          )
+        ).status,
+      ).toBe(400);
+    });
+
     it("guards offboarding and revokes real sign-in and agent tokens after confirmation", async () => {
       client = await makeTestDb(dialect);
       const actor = await seedUser(client, "offboarding-admin");

@@ -83,7 +83,7 @@ export interface AdminRoutesDeps {
   invites: InviteService;
   audit: AuditLog;
   connections: ConnectionService;
-  usage: Pick<UsageEventsRepository, "recentConnectionEvents">;
+  usage: Pick<UsageEventsRepository, "recentConnectionEvents" | "connectionHealth">;
   /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
    *  plane honors the block instantly, not just on the token's next use. */
   revokeMcpTokensForUser?: (userId: string) => Promise<void>;
@@ -119,6 +119,7 @@ const listQuery = z.object({
   external: boolFlag,
   pending: boolFlag,
   expiry: z.enum(EXPIRY_FILTERS).optional(),
+  purge: z.enum(["eligible", "retained", "incomplete", "complete"]).optional(),
   context: z.enum(CONTEXT_FILTERS).optional(),
   templatable: boolFlag,
   listed: boolFlag,
@@ -267,6 +268,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       external: c.req.query("external"),
       pending: c.req.query("pending"),
       expiry: c.req.query("expiry"),
+      purge: c.req.query("purge"),
       context: c.req.query("context"),
       templatable: c.req.query("templatable"),
       listed: c.req.query("listed"),
@@ -289,6 +291,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       external: q.data.external,
       pending: q.data.pending,
       expiry: q.data.expiry as AdminCanvasExpiryFilter | undefined,
+      purge: q.data.purge,
       context: q.data.context as AdminCanvasContextFilter | undefined,
       templatable: q.data.templatable,
       listed: q.data.listed,
@@ -429,6 +432,60 @@ export function adminRoutes(deps: AdminRoutesDeps) {
 
   // --- Admin-granted outbound connection profiles and canvas authority. ---
   app.get("/connections", async (c) => c.json({ connections: await deps.connections.listAdmin() }));
+
+  app.get("/connections/health", async (c) => {
+    const sinceMs = Date.now() - 24 * 60 * 60 * 1000;
+    return c.json({ sinceMs, profiles: await deps.usage.connectionHealth(sinceMs) });
+  });
+
+  app.get("/attention", async (c) => {
+    const sinceMs = Date.now() - 24 * 60 * 60 * 1000;
+    const [incomplete, eligible, profiles, health] = await Promise.all([
+      deps.admin.listAllCanvasesFiltered({ purge: "incomplete", limit: 1, offset: 0 }),
+      deps.admin.listAllCanvasesFiltered({ purge: "eligible", limit: 1, offset: 0 }),
+      deps.connections.listAdmin(),
+      deps.usage.connectionHealth(sinceMs),
+    ]);
+    const byId = new Map(health.map((row) => [row.profileId, row]));
+    const connections = profiles.flatMap((profile) => {
+      const observed = byId.get(profile.id);
+      const missingKey = !profile.encryptionKeyAvailable && profile.protectedHeaders.length > 0;
+      if (!profile.enabled || (!missingKey && !observed?.failures)) return [];
+      return [
+        {
+          id: profile.id,
+          label: profile.label,
+          detail: missingKey
+            ? "Protected credentials are unavailable. Restore the encryption key or replace the headers."
+            : `${observed?.failures} failed requests in 24 hours. Review recent outcomes and test the upstream.`,
+          affectedCanvasCount: missingKey
+            ? profile.affectedCanvasCount
+            : (observed?.affectedCanvasCount ?? 0),
+        },
+      ];
+    });
+    return c.json({
+      sinceMs,
+      incompletePurgeCount: incomplete.total,
+      purgeEligibleCount: eligible.total,
+      connections,
+    });
+  });
+
+  app.post("/connections/:id/diagnose", sameOrigin, async (c) => {
+    const body = z
+      .object({ path: z.string().min(1).max(2048).startsWith("/") })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      return c.json(
+        await deps.connections.diagnose(c.get("user").id, c.req.param("id"), body.data.path),
+      );
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
 
   app.post("/connections", sameOrigin, async (c) => {
     const body = connectionCreateBody.safeParse(await c.req.json().catch(() => ({})));

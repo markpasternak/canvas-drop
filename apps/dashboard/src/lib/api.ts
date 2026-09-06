@@ -857,6 +857,7 @@ export type AdminCanvasSort = "recent" | "created" | "title";
 /** Admin all-canvases browse query (plan 006). Mirrors the member CanvasesQuery;
  *  `owner` is the drill-down filter from the user table ("see what they have"). */
 export interface AdminCanvasesQuery {
+  purge?: "eligible" | "retained" | "incomplete" | "complete";
   status?: AdminCanvasStatus;
   access?: AccessFilter;
   /** Effective public-link filter. */
@@ -1229,6 +1230,8 @@ export interface ConnectionProfileInput {
 export interface AdminConnectionEvent {
   id: string;
   canvasId: string;
+  canvasTitle?: string | null;
+  canvasSlug?: string | null;
   userId: string;
   key: string | null;
   origin: string | null;
@@ -1239,6 +1242,29 @@ export interface AdminConnectionEvent {
   requestBytes: number | null;
   responseBytes: number | null;
   createdAt: number;
+}
+
+export interface AdminConnectionHealth {
+  profileId: string;
+  requests: number;
+  successes: number;
+  failures: number;
+  averageDurationMs: number | null;
+  lastSuccessAt: number | null;
+  lastFailureAt: number | null;
+  affectedCanvasCount: number;
+}
+export interface AdminConnectionDiagnostic {
+  outcome: string;
+  upstreamStatus: number | null;
+  durationMs: number;
+  checkedAt: number;
+}
+export interface AdminAttention {
+  sinceMs: number;
+  incompletePurgeCount: number;
+  purgeEligibleCount: number;
+  connections: Array<{ id: string; label: string; detail: string; affectedCanvasCount: number }>;
 }
 
 /** Fields shared by every admin Configuration row, secret or not. */
@@ -1660,6 +1686,7 @@ export const api = {
       if (query.public !== undefined) sp.set("public", String(query.public));
       if (query.password !== undefined) sp.set("password", String(query.password));
       if (query.expiry) sp.set("expiry", query.expiry);
+      if (query.purge) sp.set("purge", query.purge);
       if (query.context) sp.set("context", query.context);
       if (query.external !== undefined) sp.set("external", String(query.external));
       if (query.pending !== undefined) sp.set("pending", String(query.pending));
@@ -1682,6 +1709,16 @@ export const api = {
     listConnections: () =>
       request<{ connections: AdminConnection[] }>("/api/admin/connections").then(
         (r) => r.connections,
+      ),
+    connectionHealth: () =>
+      request<{ sinceMs: number; profiles: AdminConnectionHealth[] }>(
+        "/api/admin/connections/health",
+      ),
+    attention: () => request<AdminAttention>("/api/admin/attention"),
+    diagnoseConnection: (id: string, path: string) =>
+      request<AdminConnectionDiagnostic>(
+        `/api/admin/connections/${id}/diagnose`,
+        jsonBody({ path }),
       ),
     createConnection: (input: ConnectionProfileInput) =>
       request<{ connection: AdminConnection }>("/api/admin/connections", jsonBody(input)).then(

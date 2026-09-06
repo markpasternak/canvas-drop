@@ -39,6 +39,34 @@ describe.each(DIALECTS)("usageEventsRepository [%s]", (dialect) => {
     expect(counts.file_op).toBe(1);
   });
 
+  it("aggregates connection health across the whole window without leaking payloads", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const repo = usageEventsRepository(client);
+    for (const [profileId, outcome, durationMs] of [
+      ["a", "success", 20],
+      ["a", "upstream_server_error", 100],
+      ["b", "success", 5],
+    ] as const)
+      await repo.record({
+        canvasId,
+        userId,
+        type: "connection_op",
+        meta: { profileId, outcome, durationMs, body: "never-return-this" },
+      });
+    const health = await repo.connectionHealth(0);
+    expect(health.find((row) => row.profileId === "a")).toMatchObject({
+      requests: 2,
+      failures: 1,
+      successes: 1,
+      averageDurationMs: 60,
+      affectedCanvasCount: 1,
+    });
+    expect(health.find((row) => row.profileId === "a")?.lastFailureAt).toBeGreaterThan(0);
+    expect(JSON.stringify(health)).not.toContain("never-return-this");
+    expect(await repo.connectionHealth(Date.now() + 60000)).toEqual([]);
+  });
+
   it("countByType honors the since window and scopes by canvas", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seed(client);

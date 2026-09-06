@@ -21,6 +21,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { ADMIN_PURGE_RETENTION_DAYS } from "../../canvas/purge.js";
 import type { DbClient } from "../factory.js";
 
 /** Window for the "new in the last N days" growth stats (§6.10.6). */
@@ -47,6 +48,7 @@ export interface AdminCanvasExposure {
 }
 
 export interface ListAllCanvasesQuery {
+  purge?: "eligible" | "retained" | "incomplete" | "complete";
   /** Narrow to one status; default returns all non-deleted canvases. */
   status?: AdminCanvasStatus;
   /** Substring match over title / slug / owner email (case-insensitive). */
@@ -329,7 +331,24 @@ export function adminRepository(client: DbClient) {
       const filters: Array<SQL | undefined> = [];
       const now = Date.now();
       if (q.status) filters.push(eq(canvasesT.status, q.status));
-      else filters.push(ne(canvasesT.status, "deleted"));
+      else if (!q.purge) filters.push(ne(canvasesT.status, "deleted"));
+      if (q.purge) {
+        filters.push(eq(canvasesT.status, "deleted"));
+        const cutoff = now - ADMIN_PURGE_RETENTION_DAYS * DAY_MS;
+        if (q.purge === "complete") filters.push(isNotNull(canvasesT.purgedAt));
+        else {
+          filters.push(isNull(canvasesT.purgedAt));
+          if (q.purge === "incomplete") filters.push(isNotNull(canvasesT.purgeStartedAt));
+          else {
+            filters.push(isNull(canvasesT.purgeStartedAt));
+            filters.push(
+              q.purge === "eligible"
+                ? sql`${canvasesT.deletedAt} <= ${cutoff}`
+                : sql`${canvasesT.deletedAt} > ${cutoff}`,
+            );
+          }
+        }
+      }
       if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
       if (q.publicLink !== undefined) {
         const enabled =
@@ -823,6 +842,7 @@ export function adminRepository(client: DbClient) {
         db
           .select({ status: canvasesT.status, count: sql<number>`count(*)` })
           .from(canvasesT)
+          .where(isNull(canvasesT.purgedAt))
           .groupBy(canvasesT.status),
         // Active public-link canvases (governance: what's exposed beyond the org).
         // Scoped to `active` so it aligns with the live-canvas overview signals.
@@ -844,7 +864,7 @@ export function adminRepository(client: DbClient) {
         db
           .select({ oldest: sql<number | null>`min(${canvasesT.deletedAt})` })
           .from(canvasesT)
-          .where(eq(canvasesT.status, "deleted")),
+          .where(and(eq(canvasesT.status, "deleted"), isNull(canvasesT.purgedAt))),
         db
           .select({ canvasId: usageT.canvasId, ops: sql<number>`count(*)` })
           .from(usageT)
