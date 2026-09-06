@@ -77,14 +77,13 @@ const ACCESS_RUNGS = ["private", "specific_people", "team", "whole_org", "public
 // team) — the value the dashboard's access filter sends (restricted access model).
 const ACCESS_FILTERS = [...ACCESS_RUNGS, "restricted"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
-const EXPIRY_FILTERS = ["none", "active", "expired"] as const;
+const EXPIRY_FILTERS = ["none", "active", "expired", "not_expired"] as const;
 const CONTEXT_FILTERS = ["personal", "org", "team"] as const;
-// `"true"` ⇒ on; anything else (absent / "false") ⇒ off. Boolean facets are
-// presence-style flags in the URL (?templatable=true), mirroring the member list.
+// Missing means Any; false is an explicit negative condition, never absence.
 const boolFlag = z
   .union([z.literal("true"), z.literal("false")])
   .optional()
-  .transform((v) => v === "true");
+  .transform((v) => (v === undefined ? undefined : v === "true"));
 const connectionEventsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
   offset: z.coerce.number().int().min(0).optional().default(0),
@@ -285,7 +284,12 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
         ownerCanPublishPublic: owner?.canPublishPublic ?? null,
         publicLinkEffective:
-          cv.access === "public_link" && publicLinksEnabled && (owner?.canPublishPublic ?? false),
+          cv.access === "public_link" &&
+          cv.status === "active" &&
+          cv.currentVersionId !== null &&
+          (cv.sharedExpiresAt === null || cv.sharedExpiresAt > Date.now()) &&
+          publicLinksEnabled &&
+          (owner?.canPublishPublic ?? false),
         expiryState:
           cv.sharedExpiresAt === null
             ? "none"

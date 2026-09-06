@@ -18,12 +18,13 @@ export function useDebouncedUrlSearch(
   delayMs = 300,
 ): [string, (value: string) => void] {
   const navigate = useNavigate();
-  const [text, setText] = useState(q ?? "");
-
-  // Seed/refresh the field from the URL (shared link, back-nav, external clear).
-  useEffect(() => {
-    setText(q ?? "");
-  }, [q]);
+  const [draft, setDraft] = useState({ query: q, text: q ?? "" });
+  // Reconcile external navigation before running the outbound debounce. Two opposing
+  // effects race when a saved view/back navigation changes q while the input is empty:
+  // the stale empty input can immediately erase the incoming URL's search term.
+  const text = draft.query === q ? draft.text : (q ?? "");
+  if (draft.query !== q) setDraft({ query: q, text });
+  const setText = (value: string) => setDraft({ query: q, text: value });
 
   useEffect(() => {
     const value = text.trim() || undefined;

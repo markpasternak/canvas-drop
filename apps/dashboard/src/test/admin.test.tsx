@@ -325,13 +325,11 @@ describe("admin dashboard", () => {
     expect(within(table).getByText("Effective public")).toBeInTheDocument();
     expect(within(table).getByText("Password")).toBeInTheDocument();
     expect(within(table).getByText("Expires")).toBeInTheDocument();
-    expect(within(table).getByText("2 teams")).toBeInTheDocument();
-    expect(within(table).getByText("3 people")).toBeInTheDocument();
-    expect(within(table).getByText("1 external")).toBeInTheDocument();
+    expect(within(table).getByText("2 teams · 3 people · 1 external")).toBeInTheDocument();
     expect(within(table).getByText("1 pending access")).toBeInTheDocument();
   });
 
-  it("filters the Canvases table with exposure chips", async () => {
+  it("filters the Canvases table with exposure conditions", async () => {
     const external = { ...ROW, id: "external-row", title: "External Row" };
     mockFetch({
       "GET /api/me": () => json(ADMIN_ME),
@@ -341,7 +339,8 @@ describe("admin dashboard", () => {
     renderAt("/admin/canvases");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "External people" }));
+    await user.click(screen.getByRole("combobox", { name: "External people" }));
+    await user.click(screen.getByRole("option", { name: "External people: Yes" }));
     expect(await screen.findByText("External Row")).toBeInTheDocument();
     expect(
       calls.some((c) => c.path === "/api/admin/canvases?external=true&limit=50&offset=0"),
@@ -360,6 +359,71 @@ describe("admin dashboard", () => {
     expect(calls.some((c) => c.path === "/api/admin/canvases?owner=u1&limit=50&offset=0")).toBe(
       true,
     );
+  });
+
+  it("preserves negative AND conditions through URLs, saved views, removal and reload", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    const mounted = renderAt(
+      "/admin/canvases?access=public_link&password=false&external=false&q=Happy",
+    );
+    const user = userEvent.setup();
+    await screen.findByText("Happy Otter");
+    await waitFor(() =>
+      expect(
+        calls.some((c) =>
+          c.path.includes("access=public_link&password=false&external=false&q=Happy"),
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: No");
+    await user.click(screen.getByRole("button", { name: "Save view" }));
+    await user.type(screen.getByLabelText("View name"), "Open without passwords");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save view" }));
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: Any");
+    await user.click(screen.getByRole("button", { name: "Open without passwords" }));
+    await waitFor(() =>
+      expect(screen.getByRole("searchbox", { name: "Search all canvases" })).toHaveValue("Happy"),
+    );
+    expect(screen.getByRole("combobox", { name: "External people" })).toHaveTextContent(
+      "External people: No",
+    );
+    await user.click(screen.getByRole("button", { name: "Remove Password: No" }));
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: Any");
+    expect(screen.getByRole("combobox", { name: "External people" })).toHaveTextContent(
+      "External people: No",
+    );
+    mounted.unmount();
+    renderAt("/admin/canvases");
+    await user.click(await screen.findByRole("button", { name: "Open without passwords" }));
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: No");
+  });
+
+  it("keeps saved views and display preferences scoped to the signed-in admin", async () => {
+    localStorage.setItem(
+      "admin:canvas-views:v1:another-admin",
+      JSON.stringify([{ name: "Another admin view", search: { password: false } }]),
+    );
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    const mounted = renderAt("/admin/canvases");
+    const user = userEvent.setup();
+    await screen.findByText("Happy Otter");
+    expect(screen.queryByText("Another admin view")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Table display"));
+    await user.click(screen.getByRole("checkbox", { name: "Size" }));
+    expect(screen.queryByRole("columnheader", { name: "Size" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Compact rows" }));
+    mounted.unmount();
+    renderAt("/admin/canvases");
+    await screen.findByText("Happy Otter");
+    expect(screen.queryByRole("columnheader", { name: "Size" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Compact rows", hidden: true })).not.toBeChecked();
   });
 
   it("links a user's canvas count to that user's filtered Canvases tab", async () => {
@@ -1065,7 +1129,8 @@ describe("admin dashboard", () => {
       renderAt("/admin/canvases");
       const user = userEvent.setup();
       expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Template" }));
+      await user.click(screen.getByRole("combobox", { name: "Template" }));
+      await user.click(screen.getByRole("option", { name: "Template: Yes" }));
       expect(await screen.findByText("Starter Kit")).toBeInTheDocument();
       await waitFor(() =>
         expect(
@@ -1083,7 +1148,8 @@ describe("admin dashboard", () => {
       renderAt("/admin/canvases");
       const user = userEvent.setup();
       expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Gallery" }));
+      await user.click(screen.getByRole("combobox", { name: "Gallery listing" }));
+      await user.click(screen.getByRole("option", { name: "Gallery listing: Yes" }));
       await waitFor(() =>
         expect(
           calls.some((c) => c.path === "/api/admin/canvases?listed=true&limit=50&offset=0"),

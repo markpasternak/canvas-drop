@@ -304,10 +304,13 @@ describe("admin routes", () => {
     expect(ids.has(tmplId)).toBe(true);
     expect(ids.has(plainId)).toBe(false);
 
-    // Absent flags → no facet narrowing (all three present), and a "false" reads as off.
+    // Absent flags do not narrow; explicit false selects the negative condition.
+    expect(((await (await app.request("/api/admin/canvases")).json()) as Page).total).toBe(3);
     const allRes = await app.request("/api/admin/canvases?templatable=false&listed=false");
     const allPage = (await allRes.json()) as Page;
-    expect(allPage.total).toBe(3);
+    expect(allPage.total).toBe(1);
+    expect(allPage.canvases.map((r) => r.id)).toEqual([plainId]);
+    expect((await app.request("/api/admin/canvases?password=perhaps")).status).toBe(400);
   });
 
   it("feature on a non-existent canvas id → 404 (existence-404 admin semantics)", async () => {
@@ -644,6 +647,9 @@ describe("admin routes", () => {
       new Set([alice.email, "pending@partner.io"]),
     );
     expect(await peopleEmails("blocked=true")).toEqual(["signed@partner.io"]);
+    expect(await peopleEmails("blocked=false")).not.toContain("signed@partner.io");
+    expect(await peopleEmails("admin=false")).not.toContain(admin.email);
+    expect(await peopleEmails("pending=false&permit=false")).not.toContain("pending@partner.io");
     expect(await peopleEmails("admin=true")).toEqual([admin.email]);
     expect(new Set(await peopleEmails("permit=true"))).toEqual(
       new Set([alice.email, "pending@partner.io"]),
@@ -836,6 +842,16 @@ describe("admin routes", () => {
       canvases: Array<{ id: string }>;
     };
     expect(pendingBody.canvases.map((c) => c.id)).toEqual([pending.id]);
+    const withoutExposure = (await (
+      await app.request("/api/admin/canvases?external=false&pending=false")
+    ).json()) as { canvases: Array<{ id: string }>; total: number };
+    expect(withoutExposure.canvases.map((c) => c.id)).toEqual([unrelated.id]);
+    await canvases.setStatus(pending.id, "deleted");
+    const deletedPending = (await (
+      await app.request("/api/admin/canvases?status=deleted&pending=true&password=false")
+    ).json()) as { canvases: Array<{ id: string }>; total: number };
+    expect(deletedPending.canvases.map((c) => c.id)).toEqual([pending.id]);
+    expect(deletedPending.total).toBe(1);
   });
 
   it("filters admin canvases by effective public, password, expiry, and context", async () => {
@@ -849,11 +865,7 @@ describe("admin routes", () => {
       domains: ["example.com"],
     });
     const { app, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
-    const effectivePublic = await canvases.create({
-      ownerId: publicOwner.id,
-      slug: "effective-public",
-      apiKeyHash: "u7-pub",
-    });
+    const effectivePublic = { id: await seedPublishedCanvas(client, publicOwner.id) };
     await canvases.setAccess(effectivePublic.id, "public_link");
     const stalePublic = await canvases.create({
       ownerId: revokedOwner.id,
@@ -911,6 +923,26 @@ describe("admin routes", () => {
       publicLinkEffective: true,
       ownerCanPublishPublic: true,
     });
+    const negative = (await (
+      await app.request("/api/admin/canvases?public=false&password=false")
+    ).json()) as {
+      canvases: Array<{ id: string; publicLinkEffective: boolean; hasPassword: boolean }>;
+    };
+    expect(negative.canvases.some((c) => c.id === stalePublic.id)).toBe(true);
+    expect(negative.canvases.every((c) => !c.publicLinkEffective && !c.hasPassword)).toBe(true);
+    expect(negative.canvases.some((c) => c.id === effectivePublic.id)).toBe(false);
+    await settingsRepository(client).set("access.publicLinksEnabled", false);
+    const globallyOff = (await (await app.request("/api/admin/canvases?public=true")).json()) as {
+      total: number;
+    };
+    expect(globallyOff.total).toBe(0);
+    const configured = (await (
+      await app.request("/api/admin/canvases?access=public_link&public=false")
+    ).json()) as { canvases: Array<{ id: string; publicLinkEffective: boolean }> };
+    expect(new Set(configured.canvases.map((c) => c.id))).toEqual(
+      new Set([effectivePublic.id, stalePublic.id]),
+    );
+    expect(configured.canvases.every((c) => !c.publicLinkEffective)).toBe(true);
 
     const passwordBody = (await (
       await app.request("/api/admin/canvases?password=true")

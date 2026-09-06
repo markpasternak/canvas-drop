@@ -1,12 +1,14 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AddUsersPanel } from "../components/AddUsersPanel.js";
+import { AdminBooleanFilter } from "../components/AdminBooleanFilter.js";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { AdminUserTable } from "../components/AdminUserTable.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
-import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { FilterBar, FilterSelect } from "../components/Filters.js";
 import { SearchInput } from "../components/SearchInput.js";
+import { optionalBoolean } from "../lib/admin-filters.js";
 import {
   ADMIN_PAGE_SIZE,
   type AdminPersonKind,
@@ -62,16 +64,22 @@ export default function AdminUsers() {
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "active";
   const kind = search.kind;
-  const pending = search.pending === true;
-  const blocked = search.blocked === true;
-  const adminOnly = search.admin === true;
-  const permit = search.permit === true;
+  const pending = optionalBoolean(search.pending);
+  const blocked = optionalBoolean(search.blocked);
+  const adminOnly = optionalBoolean(search.admin);
+  const permit = optionalBoolean(search.permit);
   const publicCapability = search.publicCapability;
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * ADMIN_PAGE_SIZE;
   const filtering = Boolean(
-    q || kind || pending || blocked || adminOnly || permit || publicCapability,
+    q ||
+      kind ||
+      pending !== undefined ||
+      blocked !== undefined ||
+      adminOnly !== undefined ||
+      permit !== undefined ||
+      publicCapability,
   );
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminPeople({
@@ -125,10 +133,10 @@ export default function AdminUsers() {
       }),
     });
   }
-  function toggleFlag(flag: "pending" | "blocked" | "admin" | "permit", value: boolean) {
+  function setFlag(flag: "pending" | "blocked" | "admin" | "permit", value: boolean | undefined) {
     navigate({
       to: "/admin/users",
-      search: (prev) => ({ ...prev, [flag]: value ? undefined : true, page: 1 }),
+      search: (prev) => ({ ...prev, [flag]: value, page: 1 }),
     });
   }
   function clearFilters() {
@@ -185,18 +193,26 @@ export default function AdminUsers() {
       </div>
 
       <FilterBar>
-        <FilterChip active={pending} onClick={() => toggleFlag("pending", pending)}>
-          Pending access
-        </FilterChip>
-        <FilterChip active={blocked} onClick={() => toggleFlag("blocked", blocked)}>
-          Blocked
-        </FilterChip>
-        <FilterChip active={adminOnly} onClick={() => toggleFlag("admin", adminOnly)}>
-          Admins
-        </FilterChip>
-        <FilterChip active={permit} onClick={() => toggleFlag("permit", permit)}>
-          Sign-in permits
-        </FilterChip>
+        <AdminBooleanFilter
+          label="Pending access"
+          value={pending}
+          onChange={(value) => setFlag("pending", value)}
+        />
+        <AdminBooleanFilter
+          label="Blocked"
+          value={blocked}
+          onChange={(value) => setFlag("blocked", value)}
+        />
+        <AdminBooleanFilter
+          label="Admin"
+          value={adminOnly}
+          onChange={(value) => setFlag("admin", value)}
+        />
+        <AdminBooleanFilter
+          label="Sign-in permit"
+          value={permit}
+          onChange={(value) => setFlag("permit", value)}
+        />
         {filtering && (
           <button
             type="button"

@@ -781,7 +781,7 @@ function jsonBody(body: unknown): RequestInit {
 //     404s non-admins, and the UI hides the entry behind `me.isAdmin`. ---
 
 export type AdminCanvasStatus = CanvasStatus;
-export type AdminCanvasExpiryFilter = "none" | "active" | "expired";
+export type AdminCanvasExpiryFilter = "none" | "active" | "expired" | "not_expired";
 export type AdminCanvasContextFilter = "personal" | "org" | "team";
 
 export interface AdminCanvasExposure {
@@ -1444,14 +1444,14 @@ export const api = {
       const sp = new URLSearchParams();
       if (query.status) sp.set("status", query.status);
       if (query.access) sp.set("access", query.access);
-      if (query.public) sp.set("public", "true");
-      if (query.password) sp.set("password", "true");
+      if (query.public !== undefined) sp.set("public", String(query.public));
+      if (query.password !== undefined) sp.set("password", String(query.password));
       if (query.expiry) sp.set("expiry", query.expiry);
       if (query.context) sp.set("context", query.context);
-      if (query.external) sp.set("external", "true");
-      if (query.pending) sp.set("pending", "true");
-      if (query.templatable) sp.set("templatable", "true");
-      if (query.listed) sp.set("listed", "true");
+      if (query.external !== undefined) sp.set("external", String(query.external));
+      if (query.pending !== undefined) sp.set("pending", String(query.pending));
+      if (query.templatable !== undefined) sp.set("templatable", String(query.templatable));
+      if (query.listed !== undefined) sp.set("listed", String(query.listed));
       if (query.q) sp.set("q", query.q);
       if (query.owner) sp.set("owner", query.owner);
       if (query.person) sp.set("person", query.person);
@@ -1511,10 +1511,10 @@ export const api = {
       const sp = new URLSearchParams();
       if (query.q) sp.set("q", query.q);
       if (query.kind) sp.set("kind", query.kind);
-      if (query.pending) sp.set("pending", "true");
-      if (query.blocked) sp.set("blocked", "true");
-      if (query.admin) sp.set("admin", "true");
-      if (query.permit) sp.set("permit", "true");
+      if (query.pending !== undefined) sp.set("pending", String(query.pending));
+      if (query.blocked !== undefined) sp.set("blocked", String(query.blocked));
+      if (query.admin !== undefined) sp.set("admin", String(query.admin));
+      if (query.permit !== undefined) sp.set("permit", String(query.permit));
       if (query.publicCapability) sp.set("publicCapability", query.publicCapability);
       if (query.sort && query.sort !== "active") sp.set("sort", query.sort);
       if (query.limit !== undefined) sp.set("limit", String(query.limit));
