@@ -9,6 +9,17 @@ Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usag
 
 **M10 ops/packaging is the one open milestone.**
 
+The [admin operations round](plans/2026-09-06-001-feat-admin-operations-plan.md), tracked
+in issue #114, adds composed/negative filters, local saved views, a metadata inspector,
+live access explanations, safe searchable activity, guided offboarding, bounded bulk
+actions, permanent file/data purge, and Connections operations. Its implementation and
+local workflow checks and review are complete. The
+[verification ledger](solutions/2026-09-06-admin-operations-verification.md) records
+implementation evidence; [issue #114](https://github.com/markpasternak/canvas-drop/issues/114)
+holds the PR, CI, deployment, and cleanup receipts.
+The [administration guide](site/self-hosting/administration.md) documents the workflows
+and their retention, backup, and access boundaries.
+
 The [publishing and brand refresh](plans/2026-09-04-001-feat-publishing-experience-plan.md) and [library-to-publish UX round](plans/2026-09-05-001-feat-library-to-publish-ux-plan.md) add clearer library scanning, details for resuming work, audience summaries, publish review, version-recovery guidance, and keyboard/mobile polish. The marketing walkthrough, documentation screenshots, and animated tour above show the refreshed UI with example content.
 
 | Shipped | Still deferred |
@@ -23,4 +34,3 @@ The [publishing and brand refresh](plans/2026-09-04-001-feat-publishing-experien
 > **Maturity, honestly:** canvas-drop boots, passes the dual-dialect suite, and self-hosts via Docker, but it has not been load-tested or run through a multi-user pilot yet; those are the open M10 items. Self-host reports, issues, and PRs are welcome.
 
 Not started, and not claimed anywhere above: a CLI, DB-backed custom domains, multi-org tenancy, KV change subscriptions, and a structured-output AI helper. Plans and their status live in [`docs/plans/`](plans/).
-

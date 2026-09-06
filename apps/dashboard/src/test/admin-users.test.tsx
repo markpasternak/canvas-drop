@@ -86,6 +86,144 @@ afterEach(() => {
 });
 
 describe("admin users", () => {
+  const offboardingPreview = {
+    email: "bob@example.com",
+    fingerprint: "preview-1",
+    self: false,
+    user: null,
+    recipient: null,
+    owned: [],
+    direct: [],
+    memberships: [],
+    organizations: [],
+    createdTeams: [],
+    permits: [{ id: "permit-1" }],
+    pending: [{ id: "invite-1", targetId: "canvas-1", targetType: "canvas", role: "viewer" }],
+  };
+
+  it("requires confirmation and keeps pending-only results visible after the person leaves the directory", async () => {
+    let removed = false;
+    let submitted: unknown;
+    mockFetch({
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/people": () =>
+        peoplePage(removed ? [] : [personRow({ userId: null, kind: "pending", name: null })]),
+      "GET /api/admin/users": () => json({ users: [] }),
+      "POST /api/admin/people/offboarding/preview": () => json(offboardingPreview),
+      "POST /api/admin/people/offboarding/execute": (init) => {
+        submitted = JSON.parse(init?.body as string);
+        removed = true;
+        return json({
+          outcomes: [
+            {
+              id: "invite-1",
+              kind: "invitation",
+              label: "Canvas invitation",
+              status: "done",
+              message: "Completed",
+            },
+          ],
+          unresolved: [],
+          complete: true,
+          accountBlocked: null,
+        });
+      },
+    });
+    renderAt("/admin/users?kind=pending");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for bob@example.com" }));
+    await user.click(screen.getByRole("menuitem", { name: "Offboard person" }));
+    const dialog = await screen.findByRole("dialog", { name: "Offboard bob@example.com" });
+    const confirm = await within(dialog).findByRole("button", { name: "Confirm offboarding" });
+    expect(confirm).toBeDisabled();
+    expect(
+      within(dialog).getByText(/does not create an account or a permanent email ban/),
+    ).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Offboarding reason"), "Invitation withdrawn");
+    await user.type(
+      within(dialog).getByLabelText("Type OFFBOARD bob@example.com to confirm"),
+      "OFFBOARD bob@example.com",
+    );
+    expect(submitted).toBeUndefined();
+    await user.click(confirm);
+    expect(await within(dialog).findByText("Offboarding complete")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("table")).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(submitted).toEqual({
+      email: "bob@example.com",
+      fingerprint: "preview-1",
+      reason: "Invitation withdrawn",
+      confirmation: "OFFBOARD bob@example.com",
+    });
+  });
+
+  it("refreshes the impact after choosing a successor and reports unresolved results", async () => {
+    let submitted: { toUserId?: string; fingerprint?: string } | undefined;
+    mockFetch({
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/people": () => peoplePage([personRow({})]),
+      "GET /api/admin/users": () =>
+        json({
+          users: [{ id: "successor", name: "Alice", email: "alice@example.com", isBlocked: false }],
+        }),
+      "POST /api/admin/people/offboarding/preview": (init) => {
+        const { toUserId } = JSON.parse(init?.body as string);
+        return json({
+          ...offboardingPreview,
+          user: { id: "u-bob", name: "Bob", isBlocked: false },
+          fingerprint: toUserId ? "preview-2" : "preview-1",
+          recipient: toUserId ? { id: toUserId, email: "alice@example.com" } : null,
+          owned: [
+            {
+              id: "canvas-1",
+              title: "Important canvas",
+              status: "active",
+              transferEligible: !!toUserId,
+              transferExplanation: toUserId ? null : "Choose a successor",
+            },
+          ],
+        });
+      },
+      "POST /api/admin/people/offboarding/execute": (init) => {
+        submitted = JSON.parse(init?.body as string);
+        return json({
+          complete: false,
+          accountBlocked: true,
+          outcomes: [
+            {
+              kind: "canvas",
+              id: "canvas-1",
+              label: "Important canvas",
+              status: "failed",
+              message: "Failed; review and retry",
+            },
+          ],
+          unresolved: ["Ownership: Important canvas"],
+        });
+      },
+    });
+    renderAt("/admin/users");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for Bob" }));
+    await user.click(screen.getByRole("menuitem", { name: "Offboard person" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(await within(dialog).findByLabelText("Successor"), "alice");
+    await user.click(
+      await within(dialog).findByRole("button", { name: "Alice · alice@example.com" }),
+    );
+    expect(await within(dialog).findByText("Transfer to alice@example.com")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Offboarding reason"), "Leaving");
+    await user.type(
+      within(dialog).getByLabelText("Type OFFBOARD bob@example.com to confirm"),
+      "OFFBOARD bob@example.com",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Confirm offboarding" }));
+    expect(await within(dialog).findByText("Offboarding needs follow-up")).toBeInTheDocument();
+    expect(within(dialog).getByText("Ownership: Important canvas")).toBeInTheDocument();
+    expect(submitted).toMatchObject({ toUserId: "successor", fingerprint: "preview-2" });
+    expect(within(dialog).getByRole("button", { name: "Review a fresh preview" })).toBeEnabled();
+  });
   it("renders the People table with canvas count, role, and status", async () => {
     mockFetch({
       "GET /api/me": () => json(ME),

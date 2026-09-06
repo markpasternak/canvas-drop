@@ -3,7 +3,24 @@ import type { Canvas, CanvasStatus } from "@canvas-drop/shared/db";
 import { publicationState } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { z } from "zod";
+import {
+  ADMIN_ACTIVITY_ACTIONS,
+  activityQuerySchema,
+  listAdminActivity,
+} from "../admin/activity.js";
 import { requireAdmin } from "../admin/authz.js";
+import {
+  type CanvasOperationDeps,
+  canvasOperationExecuteBody,
+  canvasOperationPreviewBody,
+  canvasOperations,
+} from "../admin/canvas-operations.js";
+import { adminInvestigation } from "../admin/investigation.js";
+import {
+  type OffboardingDeps,
+  OffboardingError,
+  offboardingService,
+} from "../admin/offboarding.js";
 import {
   type AdminSettingsService,
   PUBLIC_LINKS_ENABLED_KEY,
@@ -28,10 +45,12 @@ import type {
 } from "../db/repositories/admin.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
+import type { AuditRepository } from "../db/repositories/audit.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { EmailTemplatesRepository } from "../db/repositories/email-templates.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -42,6 +61,8 @@ import type { InviteService } from "../invites/service.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "./canvas-kv.js";
 
 export interface AdminRoutesDeps {
+  offboarding: Pick<OffboardingDeps, "repository" | "revokeSessions" | "revokeMcpTokens">;
+  operations: CanvasOperationDeps;
   config: Config;
   admin: AdminRepository;
   canvases: CanvasesRepository;
@@ -54,13 +75,15 @@ export interface AdminRoutesDeps {
   /** Admin-editable email templates (plan 003 phase 3). */
   emailTemplates: EmailTemplatesRepository;
   /** Pending delegated grants surfaced in the People directory. */
-  invitations: Pick<InvitationsRepository, "cancelPending">;
+  invitations: InvitationsRepository;
+  teams: TeamsRepository;
+  auditReader: AuditRepository;
   /** The invite primitive (plan 003 U5) — Add-users permits + invites through it (so the new
    *  email gets a courtesy email and, on a matching domain, org membership on first login). */
   invites: InviteService;
   audit: AuditLog;
   connections: ConnectionService;
-  usage: Pick<UsageEventsRepository, "recentConnectionEvents">;
+  usage: Pick<UsageEventsRepository, "recentConnectionEvents" | "connectionHealth">;
   /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
    *  plane honors the block instantly, not just on the token's next use. */
   revokeMcpTokensForUser?: (userId: string) => Promise<void>;
@@ -77,14 +100,13 @@ const ACCESS_RUNGS = ["private", "specific_people", "team", "whole_org", "public
 // team) — the value the dashboard's access filter sends (restricted access model).
 const ACCESS_FILTERS = [...ACCESS_RUNGS, "restricted"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
-const EXPIRY_FILTERS = ["none", "active", "expired"] as const;
+const EXPIRY_FILTERS = ["none", "active", "expired", "not_expired"] as const;
 const CONTEXT_FILTERS = ["personal", "org", "team"] as const;
-// `"true"` ⇒ on; anything else (absent / "false") ⇒ off. Boolean facets are
-// presence-style flags in the URL (?templatable=true), mirroring the member list.
+// Missing means Any; false is an explicit negative condition, never absence.
 const boolFlag = z
   .union([z.literal("true"), z.literal("false")])
   .optional()
-  .transform((v) => v === "true");
+  .transform((v) => (v === undefined ? undefined : v === "true"));
 const connectionEventsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
   offset: z.coerce.number().int().min(0).optional().default(0),
@@ -97,6 +119,7 @@ const listQuery = z.object({
   external: boolFlag,
   pending: boolFlag,
   expiry: z.enum(EXPIRY_FILTERS).optional(),
+  purge: z.enum(["eligible", "retained", "incomplete", "complete"]).optional(),
   context: z.enum(CONTEXT_FILTERS).optional(),
   templatable: boolFlag,
   listed: boolFlag,
@@ -198,6 +221,42 @@ export function adminRoutes(deps: AdminRoutesDeps) {
 
   app.use("*", requireAdmin());
 
+  const operations = canvasOperations(deps.operations);
+  app.post("/canvases/operations/preview", sameOrigin, async (c) => {
+    const body = canvasOperationPreviewBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    return c.json(await operations.preview(body.data.action, body.data.ids));
+  });
+  app.post("/canvases/operations/execute", sameOrigin, async (c) => {
+    const body = canvasOperationExecuteBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    if (body.data.confirmation !== `${body.data.action.toUpperCase()} ${body.data.items.length}`)
+      return c.json({ error: "confirmation_required" }, 400);
+    return c.json(await operations.execute(body.data, c.get("user").id));
+  });
+
+  const investigation = adminInvestigation(deps);
+  app.get("/activity", async (c) => {
+    const query = activityQuerySchema.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: "invalid_query" }, 400);
+    return c.json({
+      ...(await listAdminActivity(deps.auditReader, query.data)),
+      actions: ADMIN_ACTIVITY_ACTIONS,
+    });
+  });
+  app.get("/canvases/:id/inspect", async (c) => {
+    const result = await investigation.inspect(c.req.param("id"));
+    return result ? c.json(result) : c.json({ error: "not_found" }, 404);
+  });
+  app.get("/canvases/:id/access-explanation", async (c) => {
+    const query = z
+      .object({ email: z.string().trim().toLowerCase().email().max(254).optional() })
+      .safeParse(c.req.query());
+    if (!query.success) return c.json({ error: "invalid_query" }, 400);
+    const result = await investigation.explainAccess(c.req.param("id"), query.data.email);
+    return result ? c.json(result) : c.json({ error: "not_found" }, 404);
+  });
+
   // --- All-canvases list (§6.10.1): owner / status / size / usage / last-activity.
   //     Member-parity filter/search/sort + offset paging (plan 006). ---
   app.get("/canvases", async (c) => {
@@ -209,6 +268,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       external: c.req.query("external"),
       pending: c.req.query("pending"),
       expiry: c.req.query("expiry"),
+      purge: c.req.query("purge"),
       context: c.req.query("context"),
       templatable: c.req.query("templatable"),
       listed: c.req.query("listed"),
@@ -231,6 +291,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       external: q.data.external,
       pending: q.data.pending,
       expiry: q.data.expiry as AdminCanvasExpiryFilter | undefined,
+      purge: q.data.purge,
       context: q.data.context as AdminCanvasContextFilter | undefined,
       templatable: q.data.templatable,
       listed: q.data.listed,
@@ -285,7 +346,12 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
         ownerCanPublishPublic: owner?.canPublishPublic ?? null,
         publicLinkEffective:
-          cv.access === "public_link" && publicLinksEnabled && (owner?.canPublishPublic ?? false),
+          cv.access === "public_link" &&
+          cv.status === "active" &&
+          cv.currentVersionId !== null &&
+          (cv.sharedExpiresAt === null || cv.sharedExpiresAt > Date.now()) &&
+          publicLinksEnabled &&
+          (owner?.canPublishPublic ?? false),
         expiryState:
           cv.sharedExpiresAt === null
             ? "none"
@@ -314,6 +380,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         createdAt: cv.createdAt,
         // Soft-delete timestamp (purge factors on it); null unless status='deleted'.
         deletedAt: cv.deletedAt,
+        purgeStartedAt: cv.purgeStartedAt,
+        purgedAt: cv.purgedAt,
       };
     });
     // `total` echoed (with limit/offset) so the UI derives "showing X–Y of N" from
@@ -364,6 +432,60 @@ export function adminRoutes(deps: AdminRoutesDeps) {
 
   // --- Admin-granted outbound connection profiles and canvas authority. ---
   app.get("/connections", async (c) => c.json({ connections: await deps.connections.listAdmin() }));
+
+  app.get("/connections/health", async (c) => {
+    const sinceMs = Date.now() - 24 * 60 * 60 * 1000;
+    return c.json({ sinceMs, profiles: await deps.usage.connectionHealth(sinceMs) });
+  });
+
+  app.get("/attention", async (c) => {
+    const sinceMs = Date.now() - 24 * 60 * 60 * 1000;
+    const [incomplete, eligible, profiles, health] = await Promise.all([
+      deps.admin.listAllCanvasesFiltered({ purge: "incomplete", limit: 1, offset: 0 }),
+      deps.admin.listAllCanvasesFiltered({ purge: "eligible", limit: 1, offset: 0 }),
+      deps.connections.listAdmin(),
+      deps.usage.connectionHealth(sinceMs),
+    ]);
+    const byId = new Map(health.map((row) => [row.profileId, row]));
+    const connections = profiles.flatMap((profile) => {
+      const observed = byId.get(profile.id);
+      const missingKey = !profile.encryptionKeyAvailable && profile.protectedHeaders.length > 0;
+      if (!profile.enabled || (!missingKey && !observed?.failures)) return [];
+      return [
+        {
+          id: profile.id,
+          label: profile.label,
+          detail: missingKey
+            ? "Protected credentials are unavailable. Restore the encryption key or replace the headers."
+            : `${observed?.failures} failed requests in 24 hours. Review recent outcomes and test the upstream.`,
+          affectedCanvasCount: missingKey
+            ? profile.affectedCanvasCount
+            : (observed?.affectedCanvasCount ?? 0),
+        },
+      ];
+    });
+    return c.json({
+      sinceMs,
+      incompletePurgeCount: incomplete.total,
+      purgeEligibleCount: eligible.total,
+      connections,
+    });
+  });
+
+  app.post("/connections/:id/diagnose", sameOrigin, async (c) => {
+    const body = z
+      .object({ path: z.string().min(1).max(2048).startsWith("/") })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      return c.json(
+        await deps.connections.diagnose(c.get("user").id, c.req.param("id"), body.data.path),
+      );
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
 
   app.post("/connections", sameOrigin, async (c) => {
     const body = connectionCreateBody.safeParse(await c.req.json().catch(() => ({})));
@@ -559,6 +681,46 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     hub: deps.hub,
     notify: deps.invites,
   });
+  const offboarding = offboardingService({
+    ...deps,
+    ...deps.offboarding,
+    ownership,
+    log: deps.operations.log,
+    hub: deps.operations.hub,
+  });
+  const offboardingPreviewBody = z.object({
+    email: z
+      .string()
+      .trim()
+      .email()
+      .max(254)
+      .transform((v) => v.toLowerCase()),
+    toUserId: z.string().min(1).max(100).optional(),
+  });
+  const offboardingExecuteBody = offboardingPreviewBody.extend({
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    reason: z.string().trim().min(1).max(500),
+    confirmation: z.string().max(300),
+  });
+  app.post("/people/offboarding/preview", sameOrigin, async (c) => {
+    const body = offboardingPreviewBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    return c.json(await offboarding.preview(body.data.email, c.get("user").id, body.data.toUserId));
+  });
+  app.post("/people/offboarding/execute", sameOrigin, async (c) => {
+    const body = offboardingExecuteBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      return c.json(await offboarding.execute(body.data, c.get("user")));
+    } catch (err) {
+      if (err instanceof OffboardingError)
+        return c.json(
+          { error: err.code, message: err.message },
+          err.code === "SELF" || err.code === "CONFIRMATION_REQUIRED" ? 400 : 409,
+        );
+      throw err;
+    }
+  });
   const reassignBody = z.object({
     toUserId: z.string().min(1),
     reason: z.string().trim().min(1).max(500),
@@ -699,7 +861,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     if (target.isAdmin && !target.isBlocked && (await deps.users.countAdmins()) <= 1) {
       return c.json({ error: "last_admin", message: "cannot block the last admin" }, 409);
     }
-    await deps.users.setBlocked(id, true);
+    if (!(await deps.users.removeAuthority(id, "block")))
+      return c.json({ error: "last_admin", message: "cannot block the last admin" }, 409);
     // Kill any live MCP tokens immediately so the agent control plane honors the
     // block on the spot (the token surface also re-checks per call, defense in depth).
     await deps.revokeMcpTokensForUser?.(id);
@@ -751,7 +914,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     if (target.isAdmin && !target.isBlocked && (await deps.users.countAdmins()) <= 1) {
       return c.json({ error: "last_admin", message: "cannot demote the last admin" }, 409);
     }
-    await deps.users.setAdmin(id, false);
+    if (!(await deps.users.removeAuthority(id, "demote")))
+      return c.json({ error: "last_admin", message: "cannot demote the last admin" }, 409);
     deps.audit.recordAudit({
       action: "user_demote",
       actorId: actor.id,

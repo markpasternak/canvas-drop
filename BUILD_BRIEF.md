@@ -292,6 +292,16 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 8. Audit log viewer [v1.1] (log itself is v1)
 9. User management (block user, view user's canvases) [v1.1]
 
+Authorized admin operations extension (2026-09-06; plan `2026-09-06-001-feat-admin-operations`):
+composable positive/negative filters and local saved views; metadata inspector and live
+access explanations; searchable safe activity; guided offboarding with guarded handover
+and revocation; explicit-selection bulk lifecycle operations and permanent file/data purge;
+observed Connections health, constrained diagnostics and rotation guidance; actionable
+exceptions separated from routine reviews. Admin purge uses a 30-day deletion window,
+keeps identity/audit tombstones, and supports interrupted cleanup. Admin cross-owner
+operations remain outside per-account MCP and never grant private-content access.
+This extension excludes new budget reporting and configuration-change history/preview.
+
 ### 6.11 Security, observability, operations
 1. Append-only audit log: auth events, canvas CRUD, key/slug regen, deploys, password attempts, admin actions [v1]
 2. Rate limiting per-user and per-canvas on all API classes (§12.3) [v1]

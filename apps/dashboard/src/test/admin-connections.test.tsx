@@ -76,6 +76,85 @@ afterEach(() => {
 });
 
 describe("admin connections", () => {
+  it("shows observed failures, named canvases and a bounded diagnostic outcome", async () => {
+    const calls = mockFetch({
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/connections": () =>
+        json({ connections: [{ ...PROFILE, allowedMethods: ["HEAD"] }] }),
+      "GET /api/admin/connections/health": () =>
+        json({
+          sinceMs: 1,
+          profiles: [
+            {
+              profileId: "p1",
+              requests: 4,
+              successes: 3,
+              failures: 1,
+              averageDurationMs: 80,
+              lastSuccessAt: 1000,
+              lastFailureAt: 500,
+              affectedCanvasCount: 1,
+            },
+          ],
+        }),
+      "GET /api/admin/connections/p1/canvases": () => json({ canvases: [] }),
+      "GET /api/admin/connections/p1/events": () =>
+        json({
+          events: [
+            {
+              id: "e1",
+              canvasId: "c1",
+              canvasTitle: "Market board",
+              createdAt: 500,
+              outcome: "upstream_server_error",
+              upstreamStatus: 503,
+              durationMs: 80,
+            },
+          ],
+          limit: 25,
+          offset: 0,
+        }),
+      "GET /api/admin/canvases": () => json({ canvases: [], total: 0 }),
+      "POST /api/admin/connections/p1/diagnose": () =>
+        json({ outcome: "upstream_status", upstreamStatus: 401, durationMs: 20, checkedAt: 1000 }),
+    });
+    renderPage();
+    const user = userEvent.setup();
+    expect(await screen.findByText("Failures observed")).toBeInTheDocument();
+    expect(screen.getByText("80 ms")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Manage" }));
+    expect(await screen.findByRole("link", { name: "Market board" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("inspect=c1"),
+    );
+    await user.type(screen.getByRole("textbox", { name: "Diagnostic path" }), "health");
+    await user.click(screen.getByRole("button", { name: "Run HEAD diagnostic" }));
+    expect(await screen.findByText(/HTTP 401/)).toBeInTheDocument();
+    expect(JSON.parse(calls.find((call) => call.method === "POST")?.body ?? "{}")).toEqual({
+      path: "/health",
+    });
+    expect(screen.getByText("Rotate protected credentials")).toBeInTheDocument();
+  });
+
+  it("distinguishes no recent traffic from unavailable health data", async () => {
+    const handlers = {
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/connections": () => json({ connections: [PROFILE] }),
+      "GET /api/admin/connections/health": () => json({ sinceMs: 1, profiles: [] }),
+      "GET /api/admin/canvases": () => json({ canvases: [], total: 0 }),
+    };
+    mockFetch(handlers);
+    const client = renderPage();
+    expect(await screen.findByText("No recent traffic")).toBeInTheDocument();
+    mockFetch({
+      ...handlers,
+      "GET /api/admin/connections/health": () => json({ error: "unavailable" }, 503),
+    });
+    await client.invalidateQueries({ queryKey: ["admin", "connection-health"] });
+    expect(await screen.findByText(/Observed health is unavailable/)).toBeInTheDocument();
+    expect(screen.queryByText("No recent traffic")).not.toBeInTheDocument();
+  });
+
   it("creates a GET stock profile and never reloads its protected value into the DOM or cache", async () => {
     let profiles: AdminConnection[] = [];
     const calls = mockFetch({

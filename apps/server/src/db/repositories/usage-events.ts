@@ -16,6 +16,8 @@ export interface UsageEventInput {
 export interface ConnectionUsageEvent {
   id: string;
   canvasId: string;
+  canvasTitle: string | null;
+  canvasSlug: string | null;
   userId: string;
   key: string | null;
   origin: string | null;
@@ -26,6 +28,17 @@ export interface ConnectionUsageEvent {
   requestBytes: number | null;
   responseBytes: number | null;
   createdAt: number;
+}
+
+export interface ConnectionHealth {
+  profileId: string;
+  requests: number;
+  successes: number;
+  failures: number;
+  averageDurationMs: number | null;
+  lastSuccessAt: number | null;
+  lastFailureAt: number | null;
+  affectedCanvasCount: number;
 }
 
 /**
@@ -42,6 +55,48 @@ export function usageEventsRepository(client: DbClient) {
   const canvasesT = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
 
   return {
+    /** Aggregate in SQL over the complete observed window, never a page/sample. */
+    async connectionHealth(sinceMs: number): Promise<ConnectionHealth[]> {
+      const jsonText = (key: string) =>
+        client.dialect === "sqlite"
+          ? sql`json_extract(${t.meta}, ${`$.${key}`})`
+          : sql`${t.meta}->>${key}`;
+      const profile = jsonText("profileId");
+      const success = sql`${jsonText("outcome")} = 'success'`;
+      const duration =
+        client.dialect === "sqlite"
+          ? sql`case when json_type(${t.meta}, '$.durationMs') in ('integer', 'real') then json_extract(${t.meta}, '$.durationMs') end`
+          : sql`case when jsonb_typeof(${t.meta}->'durationMs') = 'number' then (${t.meta}->>'durationMs')::double precision end`;
+      const rows = await db
+        .select({
+          profileId: profile,
+          requests: sql`count(*)`,
+          successes: sql`sum(case when ${success} then 1 else 0 end)`,
+          failures: sql`sum(case when ${success} then 0 else 1 end)`,
+          averageDurationMs: sql`avg(${duration})`,
+          lastSuccessAt: sql`max(case when ${success} then ${t.createdAt} end)`,
+          lastFailureAt: sql`max(case when ${success} then null else ${t.createdAt} end)`,
+          affectedCanvasCount: sql`count(distinct case when ${success} then null else ${t.canvasId} end)`,
+        })
+        .from(t)
+        .where(
+          and(eq(t.type, "connection_op"), gte(t.createdAt, sinceMs), sql`${profile} is not null`),
+        )
+        // Positional grouping avoids separate bound JSON-key parameters being
+        // treated as different expressions by PostgreSQL.
+        .groupBy(sql`1`);
+      return rows.map((row: ConnectionHealth) => ({
+        profileId: row.profileId,
+        requests: Number(row.requests),
+        successes: Number(row.successes),
+        failures: Number(row.failures),
+        averageDurationMs:
+          row.averageDurationMs === null ? null : Math.round(Number(row.averageDurationMs)),
+        lastSuccessAt: row.lastSuccessAt === null ? null : Number(row.lastSuccessAt),
+        lastFailureAt: row.lastFailureAt === null ? null : Number(row.lastFailureAt),
+        affectedCanvasCount: Number(row.affectedCanvasCount),
+      }));
+    },
     async record(input: UsageEventInput): Promise<void> {
       await db.insert(t).values({
         id: uuidv7(),
@@ -90,11 +145,14 @@ export function usageEventsRepository(client: DbClient) {
         .select({
           id: t.id,
           canvasId: t.canvasId,
+          canvasTitle: canvasesT.title,
+          canvasSlug: canvasesT.slug,
           userId: t.userId,
           meta: t.meta,
           createdAt: t.createdAt,
         })
         .from(t)
+        .leftJoin(canvasesT, eq(t.canvasId, canvasesT.id))
         .where(
           and(
             eq(t.type, "connection_op"),
@@ -102,11 +160,13 @@ export function usageEventsRepository(client: DbClient) {
             sql`${profileIdExpr} = ${input.profileId}`,
           ),
         )
-        .orderBy(desc(t.createdAt))
+        .orderBy(desc(t.createdAt), desc(t.id))
         .limit(input.limit)
         .offset(input.offset)) as Array<{
         id: string;
         canvasId: string;
+        canvasTitle: string | null;
+        canvasSlug: string | null;
         userId: string;
         meta: Json | null;
         createdAt: number;
@@ -123,6 +183,8 @@ export function usageEventsRepository(client: DbClient) {
         return {
           id: row.id,
           canvasId: row.canvasId,
+          canvasTitle: row.canvasTitle,
+          canvasSlug: row.canvasSlug,
           userId: row.userId,
           key: text(meta, "key"),
           origin: text(meta, "origin"),

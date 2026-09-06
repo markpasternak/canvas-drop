@@ -25,7 +25,7 @@ export interface AuditLog extends AuthEventSink {
   flush(): Promise<void>;
 }
 
-export function createAuditLog(repo: AuditRepository, log: Logger): AuditLog {
+export function createAuditLog(repo: Pick<AuditRepository, "append">, log: Logger): AuditLog {
   const pending = new Set<Promise<void>>();
 
   const write = (input: RecordAuditInput): void => {

@@ -296,6 +296,8 @@ export const canvases = sqliteTable(
     createdAt: c.epochMs("created_at").notNull(),
     updatedAt: c.epochMs("updated_at").notNull(),
     deletedAt: c.epochMs("deleted_at"),
+    purgeStartedAt: c.epochMs("purge_started_at"),
+    purgedAt: c.epochMs("purged_at"),
   },
   (t) => [
     uniqueIndex("canvases_slug_uq").on(t.slug),
@@ -594,6 +596,7 @@ export const usageEvents = sqliteTable(
   (t) => [
     // Stats aggregation + retention prune both filter by canvas + created_at.
     index("usage_events_canvas_created_idx").on(t.canvasId, t.createdAt),
+    index("usage_events_type_created_idx").on(t.type, t.createdAt),
     // recordView's per-viewer dedup runs on the serve hot path and filters
     // (canvas_id, user_id, type, created_at>=since) — this composite makes it a
     // prefix probe instead of scanning every event for the canvas.

@@ -1,9 +1,13 @@
+import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
 import { adminRepository } from "./admin.js";
 import { canvasesRepository } from "./canvases.js";
 import { filesRepository } from "./files.js";
+import { seedPublishedCanvas } from "./gallery-test-helpers.js";
+import { invitationsRepository } from "./invitations.js";
 import { orgsRepository } from "./orgs.js";
 import { teamsRepository } from "./teams.js";
 import { usageEventsRepository } from "./usage-events.js";
@@ -23,6 +27,44 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
+  });
+
+  it("separates retained, eligible, incomplete and completed purges before pagination", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "purge-owner");
+    const canvases = canvasesRepository(client);
+    const states = ["retained", "eligible", "incomplete", "complete"] as const;
+    const ids: string[] = [];
+    const t = dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
+    // biome-ignore lint/suspicious/noExplicitAny: dual-dialect test fixture
+    const db = client.db as any;
+    for (const state of states) {
+      const row = await canvases.create({
+        ownerId: owner.id,
+        slug: `purge-${state}`,
+        apiKeyHash: `hash-${state}`,
+      });
+      ids.push(row.id);
+      await db
+        .update(t)
+        .set({
+          status: "deleted",
+          deletedAt: Date.now() - (state === "retained" ? 1 : 31) * 86400000,
+          purgeStartedAt: state === "incomplete" || state === "complete" ? Date.now() : null,
+          purgedAt: state === "complete" ? Date.now() : null,
+        })
+        .where(eq(t.id, row.id));
+    }
+    const repo = adminRepository(client);
+    for (const [index, purge] of states.entries()) {
+      const result = await repo.listAllCanvasesFiltered({ purge, limit: 1, offset: 0 });
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.id).toBe(ids[index]);
+      expect((await repo.listAllCanvasesFiltered({ purge, limit: 1, offset: 1 })).items).toEqual(
+        [],
+      );
+    }
+    expect((await repo.platformStats(1)).canvasCountByStatus.deleted).toBe(3);
   });
 
   it("lists canvases across multiple owners, newest-first, excluding deleted by default", async () => {
@@ -255,6 +297,153 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
       listed: true,
     });
     expect(both.items.map((c) => c.id)).toEqual([tmpl.id]);
+    const neither = await admin.listAllCanvasesFiltered({
+      limit: 50,
+      offset: 0,
+      templatable: false,
+      listed: false,
+    });
+    expect(neither.items.map((c) => c.id)).toEqual([plain.id]);
+  });
+
+  it("ANDs negative facets before counting and pagination, distinguishing false from absent", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const owner = await seedUser(client, "filter-owner");
+    const made: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const cv = await canvases.create({
+        ownerId: owner.id,
+        slug: `negative-${i}`,
+        apiKeyHash: `h${i}`,
+        passwordHash: i < 2 ? undefined : "hash",
+      });
+      await canvases.updateSettings(cv.id, { access: "public_link" });
+      made.push(cv.id);
+    }
+    const admin = adminRepository(client);
+    const query = {
+      access: "public_link" as const,
+      password: false,
+      external: false,
+      pending: false,
+      limit: 1,
+    };
+    const first = await admin.listAllCanvasesFiltered({ ...query, offset: 0 });
+    const second = await admin.listAllCanvasesFiltered({ ...query, offset: 1 });
+    expect(first.total).toBe(2);
+    expect(second.total).toBe(2);
+    expect(new Set([...first.items, ...second.items].map((c) => c.id))).toEqual(
+      new Set(made.slice(0, 2)),
+    );
+    expect((await admin.listAllCanvasesFiltered({ limit: 50, offset: 0 })).total).toBe(4);
+    expect(
+      (await admin.listAllCanvasesFiltered({ ...query, external: true, offset: 0 })).total,
+    ).toBe(0);
+  });
+
+  it("not expired includes no expiry and future expiry, excluding elapsed expiry", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const owner = await seedUser(client, "expiry-owner");
+    const ids: string[] = [];
+    for (const [i, expiry] of [null, Date.now() + 60_000, Date.now() - 1_000].entries()) {
+      const cv = await canvases.create({
+        ownerId: owner.id,
+        slug: `expiry-${i}`,
+        apiKeyHash: `h${i}`,
+      });
+      await canvases.updateSettings(cv.id, { sharedExpiresAt: expiry });
+      ids.push(cv.id);
+    }
+    const result = await adminRepository(client).listAllCanvasesFiltered({
+      expiry: "not_expired",
+      limit: 50,
+      offset: 0,
+    });
+    expect(new Set(result.items.map((c) => c.id))).toEqual(new Set(ids.slice(0, 2)));
+    expect(result.total).toBe(2);
+  });
+
+  it("effective public is a full availability predicate and false is its complement", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const owner = await seedUser(client, "availability-owner");
+    const revoked = await seedUser(client, "availability-revoked");
+    await usersRepository(client).setPublishPublic(revoked.id, false);
+    const live = await seedPublishedCanvas(client, owner.id);
+    const expired = await seedPublishedCanvas(client, owner.id);
+    const disabled = await seedPublishedCanvas(client, owner.id);
+    const denied = await seedPublishedCanvas(client, revoked.id);
+    const draft = await canvases.create({
+      ownerId: owner.id,
+      slug: "public-draft",
+      apiKeyHash: "draft",
+    });
+    for (const id of [live, expired, disabled, denied, draft.id])
+      await canvases.setAccess(id, "public_link");
+    await canvases.updateSettings(expired, { sharedExpiresAt: Date.now() - 1 });
+    await canvases.setStatus(disabled, "disabled");
+    const repo = adminRepository(client);
+    const base = { limit: 50, offset: 0 };
+    expect(
+      (await repo.listAllCanvasesFiltered({ ...base, publicLink: true })).items.map((c) => c.id),
+    ).toEqual([live]);
+    const negative = await repo.listAllCanvasesFiltered({ ...base, publicLink: false });
+    expect(new Set(negative.items.map((c) => c.id))).toEqual(
+      new Set([expired, disabled, denied, draft.id]),
+    );
+    expect(
+      (await repo.listAllCanvasesFiltered({ ...base, publicLink: true, publicLinksEnabled: false }))
+        .total,
+    ).toBe(0);
+    expect(
+      (
+        await repo.listAllCanvasesFiltered({
+          ...base,
+          publicLink: false,
+          publicLinksEnabled: false,
+        })
+      ).total,
+    ).toBe(5);
+    expect((await repo.listAllCanvasesFiltered({ ...base, access: "public_link" })).total).toBe(5);
+  });
+
+  it("negative exposure includes deleted canvases and counts before paging", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const owner = await seedUser(client, "deleted-owner");
+    const pending = await canvases.create({
+      ownerId: owner.id,
+      slug: "pending-deleted",
+      apiKeyHash: "pending",
+    });
+    const clean = await canvases.create({
+      ownerId: owner.id,
+      slug: "clean-deleted",
+      apiKeyHash: "clean",
+    });
+    await invitationsRepository(client).record({
+      email: "outside@partner.io",
+      target: { type: "canvas", id: pending.id },
+      invitedBy: owner.id,
+    });
+    await canvases.setStatus(pending.id, "deleted");
+    await canvases.setStatus(clean.id, "deleted");
+    const repo = adminRepository(client);
+    const base = { status: "deleted" as const, limit: 1, offset: 0 };
+    expect(
+      (await repo.listAllCanvasesFiltered({ ...base, external: true, pending: true })).items.map(
+        (c) => c.id,
+      ),
+    ).toEqual([pending.id]);
+    const negative = await repo.listAllCanvasesFiltered({
+      ...base,
+      external: false,
+      pending: false,
+    });
+    expect(negative.total).toBe(1);
+    expect(negative.items.map((c) => c.id)).toEqual([clean.id]);
   });
 
   it("listUsers returns per-user canvas counts (excluding deleted), with search + sort", async () => {

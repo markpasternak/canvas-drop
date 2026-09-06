@@ -781,7 +781,7 @@ function jsonBody(body: unknown): RequestInit {
 //     404s non-admins, and the UI hides the entry behind `me.isAdmin`. ---
 
 export type AdminCanvasStatus = CanvasStatus;
-export type AdminCanvasExpiryFilter = "none" | "active" | "expired";
+export type AdminCanvasExpiryFilter = "none" | "active" | "expired" | "not_expired";
 export type AdminCanvasContextFilter = "personal" | "org" | "team";
 
 export interface AdminCanvasExposure {
@@ -792,6 +792,8 @@ export interface AdminCanvasExposure {
 }
 
 export interface AdminCanvasRow {
+  purgeStartedAt?: number | null;
+  purgedAt?: number | null;
   id: string;
   slug: string;
   url: string;
@@ -855,6 +857,7 @@ export type AdminCanvasSort = "recent" | "created" | "title";
 /** Admin all-canvases browse query (plan 006). Mirrors the member CanvasesQuery;
  *  `owner` is the drill-down filter from the user table ("see what they have"). */
 export interface AdminCanvasesQuery {
+  purge?: "eligible" | "retained" | "incomplete" | "complete";
   status?: AdminCanvasStatus;
   access?: AccessFilter;
   /** Effective public-link filter. */
@@ -884,6 +887,174 @@ export interface AdminCanvasesPage {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface AdminActivityEvent {
+  id: string;
+  actorId: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  canvasTitle: string | null;
+  canvasSlug: string | null;
+  createdAt: number;
+  details: Record<string, string | number | boolean | string[]>;
+}
+export interface AdminActivityQuery {
+  q?: string;
+  actor?: string;
+  canvasId?: string;
+  action?: string;
+  since?: number;
+  until?: number;
+  limit?: number;
+  offset?: number;
+}
+export interface AdminActivityPage {
+  events: AdminActivityEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+  actions?: string[];
+}
+export type AdminCanvasOperation =
+  | "disable"
+  | "enable"
+  | "archive"
+  | "unarchive"
+  | "delete"
+  | "restore"
+  | "purge";
+export interface AdminOffboardingPreview {
+  email: string;
+  fingerprint: string;
+  self: boolean;
+  user: null | {
+    id: string;
+    name: string;
+    isAdmin: boolean;
+    isBlocked: boolean;
+    canPublishPublic: boolean;
+  };
+  recipient: null | { id: string; email: string; blocked: boolean; canPublishPublic: boolean };
+  owned: Array<{
+    id: string;
+    title: string;
+    slug: string;
+    orgId: string | null;
+    status: string;
+    access: string;
+    updatedAt: number;
+    transferEligible: boolean;
+    transferExplanation: string | null;
+    publicLinkReverted: boolean;
+  }>;
+  direct: Array<{ id: string; canvasId: string; title: string; role: string }>;
+  permits: Array<{ id: string }>;
+  organizations: Array<{ id: string; name: string }>;
+  createdTeams: Array<{ id: string; name: string; orgId: string | null }>;
+  memberships: Array<{ id: string; name: string }>;
+  pending: Array<{ id: string; targetId: string; targetType: string; role: string | null }>;
+}
+export interface AdminOffboardingResults {
+  outcomes: Array<{
+    kind: string;
+    id: string;
+    label: string;
+    status: "done" | "failed" | "unresolved";
+    message: string;
+  }>;
+  unresolved: string[];
+  complete: boolean;
+  accountBlocked: boolean | null;
+}
+export interface AdminCanvasOperationPreview {
+  action: AdminCanvasOperation;
+  retentionDays: number;
+  items: Array<{
+    id: string;
+    title: string;
+    updatedAt: number | null;
+    eligible: boolean;
+    explanation: string | null;
+    resources: null | {
+      versions: number;
+      storageObjects: number;
+      versionBytes: number;
+      hasDraft: boolean;
+      fileCount: number;
+      fileBytes: number;
+      kvRows: number;
+      eligibleAt: number | null;
+      cleanupStarted: boolean;
+    };
+  }>;
+}
+export interface AdminCanvasOperationResults {
+  outcomes: Array<{ id: string; status: string; message: string }>;
+}
+
+export interface AdminInspection {
+  canvas: {
+    id: string;
+    title: string;
+    slug: string;
+    ownerId: string;
+    orgId: string | null;
+    status: AdminCanvasStatus;
+    publicationState: PublicationState;
+    access: AccessRung;
+    hasPassword: boolean;
+    sharedExpiresAt: number | null;
+    disabledReason: string | null;
+    deletedAt: number | null;
+    createdAt: number;
+    updatedAt: number;
+    backendEnabled: boolean;
+    publicLinkEffective: boolean;
+  };
+  owner: {
+    id: string;
+    name: string;
+    email: string;
+    blocked: boolean;
+    canPublishPublic: boolean;
+  } | null;
+  people: Array<{
+    userId: string | null;
+    email: string | null;
+    role: "viewer" | "editor";
+    createdAt: number;
+  }>;
+  teams: Array<{ id: string; name: string; role: "viewer" | "editor" }>;
+  pending: Array<{
+    id: string;
+    email: string;
+    role: string | null;
+    createdAt: number;
+    via: string;
+  }>;
+  usage: {
+    operations: number;
+    uploadedFileBytes: number;
+    versionCount: number;
+    deployedBytes: number;
+  };
+  connections: CanvasConnection[];
+  activity: AdminActivityPage;
+}
+export interface AdminAccessExplanation {
+  email: string | null;
+  userId: string | null;
+  subject: "account" | "anonymous";
+  managementRole: "owner" | "editor" | "none";
+  result: "allowed" | "password_required" | "denied";
+  reasons: string[];
+  checkedAt: number;
+  staticOnly: boolean;
+  pendingInvitations: number;
 }
 
 /** Admin users sort axes (plan 006). `active` (default) = most-recently-seen. */
@@ -1059,6 +1230,8 @@ export interface ConnectionProfileInput {
 export interface AdminConnectionEvent {
   id: string;
   canvasId: string;
+  canvasTitle?: string | null;
+  canvasSlug?: string | null;
   userId: string;
   key: string | null;
   origin: string | null;
@@ -1069,6 +1242,29 @@ export interface AdminConnectionEvent {
   requestBytes: number | null;
   responseBytes: number | null;
   createdAt: number;
+}
+
+export interface AdminConnectionHealth {
+  profileId: string;
+  requests: number;
+  successes: number;
+  failures: number;
+  averageDurationMs: number | null;
+  lastSuccessAt: number | null;
+  lastFailureAt: number | null;
+  affectedCanvasCount: number;
+}
+export interface AdminConnectionDiagnostic {
+  outcome: string;
+  upstreamStatus: number | null;
+  durationMs: number;
+  checkedAt: number;
+}
+export interface AdminAttention {
+  sinceMs: number;
+  incompletePurgeCount: number;
+  purgeEligibleCount: number;
+  connections: Array<{ id: string; label: string; detail: string; affectedCanvasCount: number }>;
 }
 
 /** Fields shared by every admin Configuration row, secret or not. */
@@ -1438,20 +1634,64 @@ export const api = {
 
   // --- Admin (§6.10, M7; user-mgmt + member-parity filters plan 006) ---
   admin: {
+    previewOffboarding: (email: string, toUserId?: string) =>
+      request<AdminOffboardingPreview>("/api/admin/people/offboarding/preview", {
+        method: "POST",
+        body: JSON.stringify({ email, toUserId }),
+      }),
+    executeOffboarding: (input: {
+      email: string;
+      toUserId?: string;
+      fingerprint: string;
+      reason: string;
+      confirmation: string;
+    }) =>
+      request<AdminOffboardingResults>("/api/admin/people/offboarding/execute", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    previewCanvasOperation: (action: AdminCanvasOperation, ids: string[]) =>
+      request<AdminCanvasOperationPreview>("/api/admin/canvases/operations/preview", {
+        method: "POST",
+        body: JSON.stringify({ action, ids }),
+      }),
+    executeCanvasOperation: (input: {
+      action: AdminCanvasOperation;
+      items: Array<{ id: string; updatedAt: number }>;
+      reason: string;
+      confirmation: string;
+    }) =>
+      request<AdminCanvasOperationResults>("/api/admin/canvases/operations/execute", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    activity: (query: AdminActivityQuery = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query))
+        if (value !== undefined && value !== "") params.set(key, String(value));
+      return request<AdminActivityPage>(`/api/admin/activity?${params}`);
+    },
+    inspect: (id: string) =>
+      request<AdminInspection>(`/api/admin/canvases/${encodeURIComponent(id)}/inspect`),
+    explainAccess: (id: string, email?: string) =>
+      request<AdminAccessExplanation>(
+        `/api/admin/canvases/${encodeURIComponent(id)}/access-explanation${email ? `?email=${encodeURIComponent(email)}` : ""}`,
+      ),
     /** All-canvases list with filter/search/sort + offset paging (plan 006).
      *  Empty/default params are omitted so a clean view has a bare URL. */
     listCanvases: (query: AdminCanvasesQuery = {}) => {
       const sp = new URLSearchParams();
       if (query.status) sp.set("status", query.status);
       if (query.access) sp.set("access", query.access);
-      if (query.public) sp.set("public", "true");
-      if (query.password) sp.set("password", "true");
+      if (query.public !== undefined) sp.set("public", String(query.public));
+      if (query.password !== undefined) sp.set("password", String(query.password));
       if (query.expiry) sp.set("expiry", query.expiry);
+      if (query.purge) sp.set("purge", query.purge);
       if (query.context) sp.set("context", query.context);
-      if (query.external) sp.set("external", "true");
-      if (query.pending) sp.set("pending", "true");
-      if (query.templatable) sp.set("templatable", "true");
-      if (query.listed) sp.set("listed", "true");
+      if (query.external !== undefined) sp.set("external", String(query.external));
+      if (query.pending !== undefined) sp.set("pending", String(query.pending));
+      if (query.templatable !== undefined) sp.set("templatable", String(query.templatable));
+      if (query.listed !== undefined) sp.set("listed", String(query.listed));
       if (query.q) sp.set("q", query.q);
       if (query.owner) sp.set("owner", query.owner);
       if (query.person) sp.set("person", query.person);
@@ -1469,6 +1709,16 @@ export const api = {
     listConnections: () =>
       request<{ connections: AdminConnection[] }>("/api/admin/connections").then(
         (r) => r.connections,
+      ),
+    connectionHealth: () =>
+      request<{ sinceMs: number; profiles: AdminConnectionHealth[] }>(
+        "/api/admin/connections/health",
+      ),
+    attention: () => request<AdminAttention>("/api/admin/attention"),
+    diagnoseConnection: (id: string, path: string) =>
+      request<AdminConnectionDiagnostic>(
+        `/api/admin/connections/${id}/diagnose`,
+        jsonBody({ path }),
       ),
     createConnection: (input: ConnectionProfileInput) =>
       request<{ connection: AdminConnection }>("/api/admin/connections", jsonBody(input)).then(
@@ -1511,10 +1761,10 @@ export const api = {
       const sp = new URLSearchParams();
       if (query.q) sp.set("q", query.q);
       if (query.kind) sp.set("kind", query.kind);
-      if (query.pending) sp.set("pending", "true");
-      if (query.blocked) sp.set("blocked", "true");
-      if (query.admin) sp.set("admin", "true");
-      if (query.permit) sp.set("permit", "true");
+      if (query.pending !== undefined) sp.set("pending", String(query.pending));
+      if (query.blocked !== undefined) sp.set("blocked", String(query.blocked));
+      if (query.admin !== undefined) sp.set("admin", String(query.admin));
+      if (query.permit !== undefined) sp.set("permit", String(query.permit));
       if (query.publicCapability) sp.set("publicCapability", query.publicCapability);
       if (query.sort && query.sort !== "active") sp.set("sort", query.sort);
       if (query.limit !== undefined) sp.set("limit", String(query.limit));

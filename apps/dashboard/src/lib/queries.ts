@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
+  type AdminActivityQuery,
   type AdminCanvasesQuery,
   type AdminPeopleQuery,
   type AdminUsersQuery,
@@ -126,6 +127,29 @@ export function useAdminCanvases(query: AdminCanvasesQuery = {}) {
   });
 }
 
+export function useAdminActivity(query: AdminActivityQuery = {}) {
+  return useQuery({
+    queryKey: ["admin", "activity", query],
+    queryFn: () => api.admin.activity(query),
+    placeholderData: keepPreviousData,
+  });
+}
+export function useAdminInspection(id: string) {
+  return useQuery({
+    queryKey: ["admin", "inspection", id],
+    queryFn: () => api.admin.inspect(id),
+    enabled: !!id,
+  });
+}
+export function useAdminAccessExplanation(id: string, email: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["admin", "access-explanation", id, email],
+    queryFn: () => api.admin.explainAccess(id, email),
+    enabled: !!id && enabled,
+    staleTime: 0,
+  });
+}
+
 /** The admin People directory, server-side filter/search/sort + offset paging. */
 export function useAdminPeople(query: AdminPeopleQuery = {}) {
   return useQuery({
@@ -169,6 +193,20 @@ export function useAdminEmailTemplates() {
 
 export function useAdminConnections() {
   return useQuery({ queryKey: keys.adminConnections, queryFn: api.admin.listConnections });
+}
+export function useAdminConnectionHealth() {
+  return useQuery({
+    queryKey: ["admin", "connection-health"],
+    queryFn: api.admin.connectionHealth,
+    staleTime: 30000,
+  });
+}
+export function useAdminAttention() {
+  return useQuery({
+    queryKey: ["admin", "attention"],
+    queryFn: api.admin.attention,
+    staleTime: 30000,
+  });
 }
 
 export function useAdminConnectionCanvases(id: string, enabled = true) {

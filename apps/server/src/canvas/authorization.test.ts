@@ -58,6 +58,8 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     createdAt: 0,
     updatedAt: 0,
     deletedAt: null,
+    purgeStartedAt: null,
+    purgedAt: null,
     ...overrides,
   };
 }

@@ -38,6 +38,7 @@ import {
   type AllowedEmailsRepository,
   allowedEmailsRepository,
 } from "./db/repositories/allowed-emails.js";
+import { auditRepository } from "./db/repositories/audit.js";
 import { authoringUsageRepository } from "./db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import { connectionsRepository } from "./db/repositories/connections.js";
@@ -45,8 +46,10 @@ import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
 import { invitationsRepository } from "./db/repositories/invitations.js";
 import { kvRepository } from "./db/repositories/kv.js";
+import { offboardingRepository } from "./db/repositories/offboarding.js";
 import { type OrgMembersRepository, orgMembersRepository } from "./db/repositories/org-members.js";
 import { type OrgsRepository, orgsRepository } from "./db/repositories/orgs.js";
+import { sessionsRepository } from "./db/repositories/sessions.js";
 import { settingsRepository } from "./db/repositories/settings.js";
 import { teamsRepository } from "./db/repositories/teams.js";
 import type { UsersRepository } from "./db/repositories/users.js";
@@ -733,8 +736,27 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   app.route(
     "/api/admin",
     adminRoutes({
+      offboarding: {
+        repository: offboardingRepository(deps.db),
+        revokeSessions: (id) => sessionsRepository(deps.db).revokeAllForUser(id),
+        revokeMcpTokens: (id) => oauth.tokens.revokeAllForUser(id),
+      },
+      operations: {
+        canvases: deps.canvases,
+        versions: deps.versions,
+        drafts: deps.drafts,
+        storage: deps.storage,
+        log: deps.rootLogger,
+        screenshots,
+        files,
+        kv: kvRepository(deps.db),
+        audit: deps.audit,
+        hub: deps.hub,
+      },
       config: deps.config,
       admin: adminRepository(deps.db),
+      auditReader: auditRepository(deps.db),
+      teams,
       canvases: deps.canvases,
       versions: deps.versions,
       users: deps.users,

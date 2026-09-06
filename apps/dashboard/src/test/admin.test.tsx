@@ -42,7 +42,7 @@ function renderAt(path: string) {
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  return render(
+  const view = render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
         <ToastProvider>
@@ -52,6 +52,7 @@ function renderAt(path: string) {
       </QueryClientProvider>
     </ThemeProvider>,
   );
+  return { ...view, router };
 }
 
 const ROW = {
@@ -227,6 +228,237 @@ afterEach(() => {
 });
 
 describe("admin dashboard", () => {
+  it("previews only selected canvases and requires explicit confirmation before a bulk action", async () => {
+    let previewUnavailable = false;
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () =>
+        canvasPage([ROW, { ...ROW, id: "c2", title: "Other canvas" }], 150),
+      "POST /api/admin/canvases/operations/preview": () =>
+        previewUnavailable
+          ? json({ error: "unavailable" }, 503)
+          : json({
+              action: "delete",
+              retentionDays: 30,
+              items: [
+                {
+                  id: "c1",
+                  title: ROW.title,
+                  updatedAt: 123,
+                  eligible: true,
+                  explanation: null,
+                  resources: null,
+                },
+              ],
+            }),
+      "POST /api/admin/canvases/operations/execute": () =>
+        json({
+          outcomes: [
+            { id: "c1", status: "changed", message: "Changed since preview. Review it again." },
+          ],
+        }),
+    });
+    renderAt("/admin/canvases");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("checkbox", { name: "Select Happy Otter" }));
+    await user.click(screen.getByRole("button", { name: "Delete selected" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete canvases" });
+    await within(dialog).findByText("Ready");
+    expect(
+      JSON.parse(calls.find((c) => c.path.endsWith("operations/preview"))?.body ?? "{}"),
+    ).toEqual({ action: "delete", ids: ["c1"] });
+    const execute = within(dialog).getByRole("button", { name: "Delete 1 selected" });
+    expect(execute).toBeDisabled();
+    await user.type(within(dialog).getByLabelText("Reason for this operation"), "Retired");
+    await user.type(within(dialog).getByLabelText("Type DELETE 1 to confirm"), "DELETE 1");
+    expect(calls.filter((c) => c.path.endsWith("operations/execute"))).toHaveLength(0);
+    await user.click(execute);
+    expect(await within(dialog).findByText(/Changed since preview/)).toBeInTheDocument();
+    expect(
+      JSON.parse(calls.find((c) => c.path.endsWith("operations/execute"))?.body ?? "{}"),
+    ).toEqual({
+      action: "delete",
+      items: [{ id: "c1", updatedAt: 123 }],
+      reason: "Retired",
+      confirmation: "DELETE 1",
+    });
+    previewUnavailable = true;
+    await user.click(
+      within(dialog).getByRole("button", { name: "Refresh preview for another attempt" }),
+    );
+    await within(dialog).findByText(/Could not prepare the preview/);
+    await user.type(within(dialog).getByLabelText("Type DELETE 1 to confirm"), "DELETE 1");
+    expect(within(dialog).getByRole("button", { name: "Delete 1 selected" })).toBeDisabled();
+  });
+
+  it("shows purge in deleted row actions and explains real-file removal and retention", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () =>
+        canvasPage([{ ...ROW, status: "deleted", deletedAt: Date.now() }]),
+      "POST /api/admin/canvases/operations/preview": () =>
+        json({
+          action: "purge",
+          retentionDays: 30,
+          items: [
+            {
+              id: "c1",
+              title: ROW.title,
+              updatedAt: 123,
+              eligible: false,
+              explanation: "Retained for 30 days after deletion",
+              resources: {
+                versions: 2,
+                storageObjects: 8,
+                versionBytes: 20,
+                hasDraft: true,
+                fileCount: 1,
+                fileBytes: 10,
+                kvRows: 3,
+                eligibleAt: Date.now() + 30 * 86_400_000,
+                cleanupStarted: false,
+              },
+            },
+          ],
+        }),
+    });
+    renderAt("/admin/canvases?status=deleted");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+    await user.click(screen.getByRole("menuitem", { name: "Permanently purge" }));
+    const dialog = await screen.findByRole("dialog", { name: "Permanently purge canvases" });
+    expect(await within(dialog).findByText(/8 actual storage files/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Skipped: Retained for 30 days/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("textbox", { name: /to confirm/ })).not.toBeInTheDocument();
+    expect(calls.some((c) => c.path.endsWith("operations/execute"))).toBe(false);
+  });
+  const inspection = {
+    canvas: { ...ROW, ownerId: "u1", orgId: null, backendEnabled: true },
+    owner: { ...ROW.owner, blocked: false },
+    people: [],
+    teams: [],
+    pending: [],
+    usage: { operations: 12, versionCount: 2, deployedBytes: 100, uploadedFileBytes: 0 },
+    connections: [],
+    activity: { events: [], total: 0 },
+  };
+
+  it("opens the inspector in place, checks access, and restores filters, page and focus", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW], 150),
+      "GET /api/admin/canvases/c1/inspect": () => json(inspection),
+      "GET /api/admin/canvases/c1/access-explanation": () =>
+        json({
+          email: "guest@example.com",
+          subject: "account",
+          result: "password_required",
+          managementRole: "none",
+          staticOnly: false,
+          reasons: ["Direct viewer grant; the password must also be entered."],
+          checkedAt: Date.now(),
+        }),
+    });
+    const { router } = renderAt("/admin/canvases?public=true&password=false&page=2");
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole("button", { name: /Inspect Happy Otter/i });
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "Happy Otter" });
+    expect(router.state.location.search).toMatchObject({
+      public: true,
+      password: false,
+      page: 2,
+      inspect: "c1",
+    });
+    expect(within(dialog).getByText("alice@example.com")).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Person's email"), "guest@example.com");
+    await user.click(within(dialog).getByRole("button", { name: "Check access" }));
+    expect(await within(dialog).findByText("Password required")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.includes("access-explanation?email=guest%40example.com"))).toBe(
+      true,
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(router.state.location.search).toMatchObject({ public: true, password: false, page: 2 });
+    expect(router.state.location.search).not.toHaveProperty("inspect");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("keeps the inspector closeable when its canvas is unavailable and allows retry", async () => {
+    let available = false;
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+      "GET /api/admin/canvases/c1/inspect": () =>
+        available ? json(inspection) : json({ error: "not_found" }, 404),
+    });
+    renderAt("/admin/canvases?inspect=c1");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Could not load this canvas",
+    );
+    available = true;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Refresh" }));
+    expect(await within(dialog).findByText("alice@example.com")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close inspector" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("searches and pages activity using URL filters and opens the target inspector", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+      "GET /api/admin/canvases/c1/inspect": () => json(inspection),
+      "GET /api/admin/activity": () =>
+        json({
+          events: [
+            {
+              id: "a1",
+              action: "canvas_disable",
+              actorEmail: "admin@example.com",
+              targetId: "c1",
+              targetType: "canvas",
+              canvasTitle: "Happy Otter",
+              createdAt: Date.now(),
+              details: { reason: "Outdated content" },
+            },
+          ],
+          total: 30,
+          actions: ["canvas_disable"],
+        }),
+    });
+    const { router } = renderAt(
+      "/admin/activity?actor=admin%40example.com&canvasId=c1&from=2026-09-01&to=2026-09-06",
+    );
+    const user = userEvent.setup();
+    expect(await screen.findByText("Outdated content")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.path.includes("/activity?") &&
+            c.path.includes("offset=25") &&
+            c.path.includes("since=") &&
+            c.path.includes("until="),
+        ),
+      ).toBe(true),
+    );
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search administrative activity" }),
+      "outdated",
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        q: "outdated",
+        page: 1,
+        canvasId: "c1",
+      }),
+    );
+    await user.click(screen.getByRole("link", { name: "Happy Otter" }));
+    expect(await screen.findByRole("dialog", { name: "Happy Otter" })).toBeInTheDocument();
+  });
+
   it("shows the Admin nav link only when me.isAdmin", async () => {
     mockFetch({
       "GET /api/me": () =>
@@ -325,13 +557,11 @@ describe("admin dashboard", () => {
     expect(within(table).getByText("Effective public")).toBeInTheDocument();
     expect(within(table).getByText("Password")).toBeInTheDocument();
     expect(within(table).getByText("Expires")).toBeInTheDocument();
-    expect(within(table).getByText("2 teams")).toBeInTheDocument();
-    expect(within(table).getByText("3 people")).toBeInTheDocument();
-    expect(within(table).getByText("1 external")).toBeInTheDocument();
+    expect(within(table).getByText("2 teams · 3 people · 1 external")).toBeInTheDocument();
     expect(within(table).getByText("1 pending access")).toBeInTheDocument();
   });
 
-  it("filters the Canvases table with exposure chips", async () => {
+  it("filters the Canvases table with exposure conditions", async () => {
     const external = { ...ROW, id: "external-row", title: "External Row" };
     mockFetch({
       "GET /api/me": () => json(ADMIN_ME),
@@ -341,7 +571,8 @@ describe("admin dashboard", () => {
     renderAt("/admin/canvases");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "External people" }));
+    await user.click(screen.getByRole("combobox", { name: "External people" }));
+    await user.click(screen.getByRole("option", { name: "External people: Yes" }));
     expect(await screen.findByText("External Row")).toBeInTheDocument();
     expect(
       calls.some((c) => c.path === "/api/admin/canvases?external=true&limit=50&offset=0"),
@@ -360,6 +591,71 @@ describe("admin dashboard", () => {
     expect(calls.some((c) => c.path === "/api/admin/canvases?owner=u1&limit=50&offset=0")).toBe(
       true,
     );
+  });
+
+  it("preserves negative AND conditions through URLs, saved views, removal and reload", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    const mounted = renderAt(
+      "/admin/canvases?access=public_link&password=false&external=false&q=Happy",
+    );
+    const user = userEvent.setup();
+    await screen.findByText("Happy Otter");
+    await waitFor(() =>
+      expect(
+        calls.some((c) =>
+          c.path.includes("access=public_link&password=false&external=false&q=Happy"),
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: No");
+    await user.click(screen.getByRole("button", { name: "Save view" }));
+    await user.type(screen.getByLabelText("View name"), "Open without passwords");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save view" }));
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: Any");
+    await user.click(screen.getByRole("button", { name: "Open without passwords" }));
+    await waitFor(() =>
+      expect(screen.getByRole("searchbox", { name: "Search all canvases" })).toHaveValue("Happy"),
+    );
+    expect(screen.getByRole("combobox", { name: "External people" })).toHaveTextContent(
+      "External people: No",
+    );
+    await user.click(screen.getByRole("button", { name: "Remove Password: No" }));
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: Any");
+    expect(screen.getByRole("combobox", { name: "External people" })).toHaveTextContent(
+      "External people: No",
+    );
+    mounted.unmount();
+    renderAt("/admin/canvases");
+    await user.click(await screen.findByRole("button", { name: "Open without passwords" }));
+    expect(screen.getByRole("combobox", { name: "Password" })).toHaveTextContent("Password: No");
+  });
+
+  it("keeps saved views and display preferences scoped to the signed-in admin", async () => {
+    localStorage.setItem(
+      "admin:canvas-views:v1:another-admin",
+      JSON.stringify([{ name: "Another admin view", search: { password: false } }]),
+    );
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    const mounted = renderAt("/admin/canvases");
+    const user = userEvent.setup();
+    await screen.findByText("Happy Otter");
+    expect(screen.queryByText("Another admin view")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Table display"));
+    await user.click(screen.getByRole("checkbox", { name: "Size" }));
+    expect(screen.queryByRole("columnheader", { name: "Size" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Compact rows" }));
+    mounted.unmount();
+    renderAt("/admin/canvases");
+    await screen.findByText("Happy Otter");
+    expect(screen.queryByRole("columnheader", { name: "Size" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Compact rows", hidden: true })).not.toBeChecked();
   });
 
   it("links a user's canvas count to that user's filtered Canvases tab", async () => {
@@ -624,7 +920,7 @@ describe("admin dashboard", () => {
     await waitFor(() => expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument());
   });
 
-  it("surfaces an audit-log placeholder (recorded, browser not yet built)", async () => {
+  it("links the overview audit section to searchable activity", async () => {
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
@@ -635,7 +931,9 @@ describe("admin dashboard", () => {
     renderAt("/admin");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /Audit log/i }));
-    expect(await screen.findByText("Audit log — coming soon")).toBeVisible();
+    expect(
+      await screen.findByRole("link", { name: "Browse administrative activity" }),
+    ).toHaveAttribute("href", "/admin/activity");
   });
 
   it("Configuration finder searches labels, keys, env vars, groups, help, source, and values", async () => {
@@ -801,118 +1099,83 @@ describe("admin dashboard", () => {
     });
   });
 
-  describe("needs-attention lane (U18)", () => {
-    function overviewHandlers(overviewBody: unknown, aiBody: unknown = AI_USAGE) {
+  describe("operational exceptions and routine reviews", () => {
+    function handlers(
+      attention = {
+        incompletePurgeCount: 0,
+        purgeEligibleCount: 0,
+        connections: [] as Array<{
+          id: string;
+          label: string;
+          detail: string;
+          affectedCanvasCount: number;
+        }>,
+      },
+    ) {
       return {
         "GET /api/me": () => json(ADMIN_ME),
-        "GET /api/admin/overview": () => json(overviewBody),
-        "GET /api/admin/ai-usage": () => json(aiBody),
+        "GET /api/admin/overview": () => json(OVERVIEW),
+        "GET /api/admin/ai-usage": () => json(AI_USAGE),
+        "GET /api/admin/attention": () => json({ sinceMs: Date.now() - 86400000, ...attention }),
         "GET /api/admin/canvases": () => canvasPage([ROW]),
-        "GET /api/admin/canvases?access=public_link&limit=50&offset=0": () => canvasPage([ROW]),
-        "GET /api/admin/canvases?status=deleted&limit=50&offset=0": () => canvasPage([]),
-        "GET /api/admin/canvases?status=disabled&limit=50&offset=0": () => canvasPage([]),
       };
     }
-
-    it("renders each derivable signal with its count (public links, purge, disabled, spend, usage)", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
+    it("keeps intentional public sharing and normal activity out of the exception lane", async () => {
+      mockFetch(handlers());
       renderAt("/admin");
-      // Public-link exposure (publicLinkCount=2) — scope the count to its row.
-      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
-      expect(publicRow).not.toBeNull();
-      expect(within(publicRow as HTMLElement).getByText("2")).toBeInTheDocument();
-      // Purge backlog (deleted=4, oldest 12d ago).
-      expect(screen.getByText("Awaiting purge")).toBeInTheDocument();
-      expect(screen.getByText(/Oldest deleted 12d ago/)).toBeInTheDocument();
-      // Disabled (1).
-      expect(screen.getByText("Disabled canvases")).toBeInTheDocument();
-      // Top AI spender ($4.00 from AI_USAGE).
-      expect(screen.getByText("Top AI spender")).toBeInTheDocument();
-      // Most active canvas (1,280 ops, from topCanvases).
-      expect(screen.getByText("Most active canvas")).toBeInTheDocument();
-    });
-
-    it("links each signal to its filtered admin canvases view", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
-      renderAt("/admin");
-      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
-      expect(publicRow).toHaveAttribute("href", expect.stringContaining("access=public_link"));
-      const purgeRow = screen.getByText("Awaiting purge").closest("a");
-      expect(purgeRow).toHaveAttribute("href", expect.stringContaining("status=deleted"));
-      const disabledRow = screen.getByText("Disabled canvases").closest("a");
-      expect(disabledRow).toHaveAttribute("href", expect.stringContaining("status=disabled"));
-    });
-
-    it("clicking the public-link signal navigates to the access=public_link table view", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
-      renderAt("/admin");
-      const user = userEvent.setup();
-      await user.click(await screen.findByText("Public-link canvases"));
-      await waitFor(() =>
-        expect(
-          calls.some((c) => c.path === "/api/admin/canvases?access=public_link&limit=50&offset=0"),
-        ).toBe(true),
+      expect(await screen.findByText("Nothing needs attention right now")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Routine reviews/ })).toBeInTheDocument();
+      expect(screen.getByText("Public-link canvases").closest("a")).toHaveAttribute(
+        "href",
+        expect.stringContaining("access=public_link"),
       );
+      expect(screen.getByText("Disabled canvases").closest("a")).toHaveAttribute(
+        "href",
+        expect.stringContaining("status=disabled"),
+      );
+      expect(screen.queryByText("Top AI spender")).not.toBeInTheDocument();
+      expect(screen.queryByText("Most active canvas")).not.toBeInTheDocument();
     });
-
-    it("hides individual signals with nothing to surface (no public links, no deleted, no disabled)", async () => {
-      const clean = {
-        ...OVERVIEW,
-        canvasCountByStatus: { active: 5 },
-        publicLinkCount: 0,
-        oldestDeletedAt: null,
-        topCanvases: [],
-      };
-      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+    it("links incomplete purge and observed connection failures to the relevant action", async () => {
+      mockFetch(
+        handlers({
+          incompletePurgeCount: 2,
+          purgeEligibleCount: 4,
+          connections: [
+            {
+              id: "p1",
+              label: "Stock connection",
+              detail: "Three failures in 24 hours",
+              affectedCanvasCount: 1,
+            },
+          ],
+        }),
+      );
       renderAt("/admin");
-      expect(await screen.findByText("Total views")).toBeInTheDocument();
-      // No signals → none of the signal rows render.
-      expect(screen.queryByText("Public-link canvases")).not.toBeInTheDocument();
-      expect(screen.queryByText("Awaiting purge")).not.toBeInTheDocument();
-      expect(screen.queryByText("Disabled canvases")).not.toBeInTheDocument();
+      const purge = (await screen.findByText("Incomplete canvas cleanup")).closest(
+        "a",
+      ) as HTMLElement;
+      expect(purge).toHaveAttribute("href", expect.stringContaining("purge=incomplete"));
+      expect(within(purge).getByText("2")).toBeInTheDocument();
+      expect(purge.className).toMatch(/warning/);
+      expect(screen.getByText("Retention elapsed").closest("a")).toHaveAttribute(
+        "href",
+        expect.stringContaining("purge=eligible"),
+      );
+      expect(screen.getByText("Stock connection").closest("a")).toHaveAttribute(
+        "href",
+        "/admin/connections#connection-p1",
+      );
+      expect(screen.queryByText("Nothing needs attention right now")).not.toBeInTheDocument();
     });
-
-    it("renders an all-clear state (lane stays visible) when nothing is flagged", async () => {
-      const clean = {
-        ...OVERVIEW,
-        canvasCountByStatus: { active: 5 },
-        publicLinkCount: 0,
-        oldestDeletedAt: null,
-        topCanvases: [],
-      };
-      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+    it("does not report all-clear when attention checks fail", async () => {
+      mockFetch({
+        ...handlers(),
+        "GET /api/admin/attention": () => json({ error: "unavailable" }, 503),
+      });
       renderAt("/admin");
-      // The lane itself is ALWAYS shown — the section header + a calm all-clear message
-      // explaining what it watches, never vanishing on a clean instance.
-      expect(await screen.findByRole("button", { name: /Needs attention/i })).toBeInTheDocument();
-      expect(screen.getByText("Nothing needs attention right now")).toBeInTheDocument();
-      expect(screen.getByText(/public-link exposure/i)).toBeInTheDocument();
-    });
-
-    it("has no trend-delta or screenshot-failure UI", async () => {
-      mockFetch(overviewHandlers(OVERVIEW));
-      renderAt("/admin");
-      await screen.findByText("Public-link canvases");
-      expect(screen.queryByText(/week over week/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/screenshot/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/vs\.? last/i)).not.toBeInTheDocument();
-    });
-
-    it("renders the URGENT (amber) purge treatment when the oldest deleted canvas is >30 days old", async () => {
-      // 31-day-old oldest-deleted crosses the PURGE_URGENT_DAYS=30 threshold, so the
-      // "Awaiting purge" row reads as urgent (amber accent + warning-toned count),
-      // not the routine info treatment.
-      const urgentPurge = { ...OVERVIEW, oldestDeletedAt: Date.now() - 31 * 86400000 };
-      mockFetch(overviewHandlers(urgentPurge));
-      renderAt("/admin");
-
-      const detail = await screen.findByText(/Oldest deleted 31d ago/);
-      const row = detail.closest("a") as HTMLElement;
-      // The whole row carries the amber urgent accent…
-      expect(row.className).toMatch(/warning/);
-      // …and the count is rendered in the warning tone (not the calm fg tone).
-      const count = within(row).getByText("4");
-      expect(count.className).toMatch(/text-warning/);
+      expect(await screen.findByText(/Attention checks could not be loaded/)).toBeInTheDocument();
+      expect(screen.queryByText("Nothing needs attention right now")).not.toBeInTheDocument();
     });
   });
 
@@ -1065,7 +1328,8 @@ describe("admin dashboard", () => {
       renderAt("/admin/canvases");
       const user = userEvent.setup();
       expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Template" }));
+      await user.click(screen.getByRole("combobox", { name: "Template" }));
+      await user.click(screen.getByRole("option", { name: "Template: Yes" }));
       expect(await screen.findByText("Starter Kit")).toBeInTheDocument();
       await waitFor(() =>
         expect(
@@ -1083,7 +1347,8 @@ describe("admin dashboard", () => {
       renderAt("/admin/canvases");
       const user = userEvent.setup();
       expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Gallery" }));
+      await user.click(screen.getByRole("combobox", { name: "Gallery listing" }));
+      await user.click(screen.getByRole("option", { name: "Gallery listing: Yes" }));
       await waitFor(() =>
         expect(
           calls.some((c) => c.path === "/api/admin/canvases?listed=true&limit=50&offset=0"),

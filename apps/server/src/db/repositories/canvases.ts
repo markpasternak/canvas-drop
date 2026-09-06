@@ -1489,7 +1489,26 @@ export function canvasesRepository(client: DbClient) {
     async setStatus(id: string, status: CanvasStatus): Promise<void> {
       const set: Record<string, unknown> = { status, updatedAt: nextUpdatedAt() };
       if (status === "deleted") set.deletedAt = Date.now();
-      await db.update(t).set(set).where(eq(t.id, id));
+      await db
+        .update(t)
+        .set(set)
+        .where(and(eq(t.id, id), isNull(t.purgeStartedAt)));
+    },
+
+    async adminDelete(id: string, expectedUpdatedAt: number): Promise<boolean> {
+      const rows = await db
+        .update(t)
+        .set({ status: "deleted", deletedAt: Date.now(), updatedAt: nextUpdatedAt() })
+        .where(
+          and(
+            eq(t.id, id),
+            eq(t.updatedAt, expectedUpdatedAt),
+            ne(t.status, "deleted"),
+            isNull(t.purgeStartedAt),
+          ),
+        )
+        .returning({ id: t.id });
+      return rows.length === 1;
     },
 
     /**
@@ -1500,14 +1519,20 @@ export function canvasesRepository(client: DbClient) {
      * Returns false when the row is missing or not active, so the route 409s
      * instead of silently no-opping. Does NOT touch `deletedAt`.
      */
-    async archive(id: string): Promise<boolean> {
+    async archive(id: string, expectedUpdatedAt?: number): Promise<boolean> {
       const rows = (await db
         .update(t)
         // Archiving leaves the published state, so it reverts sharing and gallery
         // listing too. Unarchive restores the canvas at the same URL; the owner
         // re-shares deliberately.
         .set({ status: "archived", ...CLEARED_PUBLICATION_FIELDS, updatedAt: nextUpdatedAt() })
-        .where(and(eq(t.id, id), eq(t.status, "active")))
+        .where(
+          and(
+            eq(t.id, id),
+            expectedUpdatedAt === undefined ? undefined : eq(t.updatedAt, expectedUpdatedAt),
+            eq(t.status, "active"),
+          ),
+        )
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
     },
@@ -1518,11 +1543,17 @@ export function canvasesRepository(client: DbClient) {
      * can reject the invalid transition rather than flipping an active/disabled
      * canvas's status out from under it.
      */
-    async unarchive(id: string): Promise<boolean> {
+    async unarchive(id: string, expectedUpdatedAt?: number): Promise<boolean> {
       const rows = (await db
         .update(t)
         .set({ status: "active", updatedAt: nextUpdatedAt() })
-        .where(and(eq(t.id, id), eq(t.status, "archived")))
+        .where(
+          and(
+            eq(t.id, id),
+            expectedUpdatedAt === undefined ? undefined : eq(t.updatedAt, expectedUpdatedAt),
+            eq(t.status, "archived"),
+          ),
+        )
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
     },
@@ -1534,11 +1565,17 @@ export function canvasesRepository(client: DbClient) {
      * `disabledReason`. Returns false for any non-active row so the route 409s
      * `NOT_ACTIVE`.
      */
-    async setDisabled(id: string, reason: string): Promise<boolean> {
+    async setDisabled(id: string, reason: string, expectedUpdatedAt?: number): Promise<boolean> {
       const rows = (await db
         .update(t)
         .set({ status: "disabled", disabledReason: reason, updatedAt: nextUpdatedAt() })
-        .where(and(eq(t.id, id), eq(t.status, "active")))
+        .where(
+          and(
+            eq(t.id, id),
+            expectedUpdatedAt === undefined ? undefined : eq(t.updatedAt, expectedUpdatedAt),
+            eq(t.status, "active"),
+          ),
+        )
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
     },
@@ -1548,11 +1585,17 @@ export function canvasesRepository(client: DbClient) {
      * row; clears `disabledReason` so no stale takedown note survives. Returns
      * false for a non-disabled row.
      */
-    async enable(id: string): Promise<boolean> {
+    async enable(id: string, expectedUpdatedAt?: number): Promise<boolean> {
       const rows = (await db
         .update(t)
         .set({ status: "active", disabledReason: null, updatedAt: nextUpdatedAt() })
-        .where(and(eq(t.id, id), eq(t.status, "disabled")))
+        .where(
+          and(
+            eq(t.id, id),
+            expectedUpdatedAt === undefined ? undefined : eq(t.updatedAt, expectedUpdatedAt),
+            eq(t.status, "disabled"),
+          ),
+        )
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
     },
@@ -1562,7 +1605,7 @@ export function canvasesRepository(client: DbClient) {
      * currently `deleted` row; clears `deletedAt` so the row leaves the purge
      * sweep and is live again. Returns false for a non-deleted row.
      */
-    async restore(id: string): Promise<boolean> {
+    async restore(id: string, expectedUpdatedAt?: number): Promise<boolean> {
       const rows = (await db
         .update(t)
         // Clear disabledReason too — a deleted canvas that was previously disabled
@@ -1573,19 +1616,28 @@ export function canvasesRepository(client: DbClient) {
           disabledReason: null,
           updatedAt: nextUpdatedAt(),
         })
-        .where(and(eq(t.id, id), eq(t.status, "deleted")))
+        .where(
+          and(
+            eq(t.id, id),
+            expectedUpdatedAt === undefined ? undefined : eq(t.updatedAt, expectedUpdatedAt),
+            eq(t.status, "deleted"),
+            isNull(t.purgeStartedAt),
+          ),
+        )
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
     },
 
     async setCurrentVersion(id: string, versionId: string): Promise<void> {
-      await db
+      const rows = await db
         .update(t)
         // Publishing is the inverse of authoring revoke/unpublish. Clear the
         // marker atomically with the live-version pointer so status cannot stay
         // "revoked" after content is published again.
         .set({ currentVersionId: versionId, revokedAt: null, updatedAt: nextUpdatedAt() })
-        .where(eq(t.id, id));
+        .where(and(eq(t.id, id), isNull(t.purgeStartedAt)))
+        .returning({ id: t.id });
+      if (rows.length !== 1) throw new Error("Canvas is unavailable for publication");
     },
 
     /**
@@ -1675,7 +1727,71 @@ export function canvasesRepository(client: DbClient) {
         cutoffMs === null
           ? eq(t.status, "deleted")
           : and(eq(t.status, "deleted"), lte(t.deletedAt, cutoffMs));
-      return (await db.select().from(t).where(where).orderBy(t.deletedAt)) as Canvas[];
+      return (await db
+        .select()
+        .from(t)
+        .where(and(where, isNull(t.purgedAt)))
+        .orderBy(t.deletedAt)) as Canvas[];
+    },
+
+    /** Atomic boundary against restore. Once cleanup starts this tombstone cannot
+     * return to service, even when storage fails halfway through. A retry starts
+     * from a fresh preview/update timestamp and repeats idempotent cleanup. */
+    async claimPurge(
+      id: string,
+      expectedUpdatedAt: number,
+      cutoffMs: number,
+      now: number,
+    ): Promise<boolean> {
+      const rows = await db
+        .update(t)
+        .set({
+          purgeStartedAt: sql`coalesce(${t.purgeStartedAt}, ${now})`,
+          updatedAt: nextUpdatedAt(),
+        })
+        .where(
+          and(
+            eq(t.id, id),
+            eq(t.status, "deleted"),
+            isNull(t.purgedAt),
+            eq(t.updatedAt, expectedUpdatedAt),
+            lte(t.deletedAt, cutoffMs),
+          ),
+        )
+        .returning({ id: t.id });
+      return rows.length === 1;
+    },
+
+    /** Revoke residual authority and remove runtime metadata, retaining the canvas
+     * identity and administrative history. Repeated cleanup is safe after failure. */
+    async finishPurge(id: string, now: number): Promise<void> {
+      const schema = client.dialect === "sqlite" ? sqliteSchema : pgSchema;
+      for (const table of [
+        schema.guestSessions,
+        schema.guestInvites,
+        schema.uploadSessions,
+        schema.canvasConnections,
+        schema.canvasAllowlist,
+        schema.canvasTeams,
+      ]) {
+        await db.delete(table).where(eq(table.canvasId, id));
+      }
+      await db
+        .delete(schema.invitations)
+        .where(
+          and(eq(schema.invitations.targetType, "canvas"), eq(schema.invitations.targetId, id)),
+        );
+      await db
+        .update(t)
+        .set({
+          purgedAt: now,
+          currentVersionId: null,
+          passwordHash: null,
+          apiKeyHash: `purged:${id}`,
+          ...CLEARED_PUBLICATION_FIELDS,
+          updatedAt: nextUpdatedAt(),
+        })
+        .where(and(eq(t.id, id), eq(t.status, "deleted"), isNotNull(t.purgeStartedAt)));
     },
 
     /**

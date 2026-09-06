@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Json } from "@canvas-drop/shared/db";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuditLog, RecordAuditInput } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
@@ -9,6 +9,7 @@ import { usersRepository } from "../db/repositories/users.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { createSecretCipher } from "./secret-cipher.js";
 import { connectionService } from "./service.js";
+import { type ConnectionFetchInput, ConnectionTransportError } from "./transport.js";
 
 function auditSpy() {
   const events: RecordAuditInput[] = [];
@@ -42,8 +43,71 @@ describe.each(DIALECTS)("connectionService [%s]", (dialect) => {
     const { audit, events } = auditSpy();
     const cipher = createSecretCipher(withKey ? randomBytes(32).toString("base64") : undefined);
     const service = connectionService({ repository, canvases, cipher, audit });
-    return { admin, canvas, repository, service, events };
+    return { admin, canvas, repository, service, events, cipher, audit, canvases };
   }
+
+  it("runs bounded HEAD diagnostics with protected credentials and returns only safe outcomes", async () => {
+    const f = await fixture();
+    const fetch = vi.fn(async (_input: ConnectionFetchInput) => ({
+      status: 401,
+      headers: new Headers({ secret: "response-secret" }),
+      body: new TextEncoder().encode("response-secret"),
+    }));
+    const service = connectionService({ ...f, transport: { fetch } });
+    const profile = await service.create(f.admin.id, {
+      key: "probe",
+      label: "Probe",
+      origin: "https://api.example.com",
+      allowedMethods: ["HEAD"],
+      protectedHeaders: [{ name: "Authorization", value: "Bearer secret" }],
+    });
+    const result = await service.diagnose(f.admin.id, profile.id, "/health");
+    expect(fetch.mock.calls[0]?.[0]).toMatchObject({
+      method: "HEAD",
+      path: "/health",
+      allowedMethods: ["HEAD"],
+      maxRedirects: 0,
+      timeoutMs: 5000,
+      maxResponseBytes: 32768,
+      protectedHeaders: [["authorization", "Bearer secret"]],
+    });
+    expect(result).toMatchObject({ outcome: "upstream_status", upstreamStatus: 401 });
+    expect(JSON.stringify([result, f.events])).not.toContain("secret");
+    await expect(service.diagnose(f.admin.id, profile.id, "/health")).rejects.toMatchObject({
+      code: "DIAGNOSTIC_BUSY",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses disabled or non-HEAD profiles and sanitizes blocked-destination failures", async () => {
+    const f = await fixture();
+    const fetch = vi.fn(async () => {
+      throw new ConnectionTransportError(
+        "DESTINATION_BLOCKED",
+        "internal address and sensitive diagnostics",
+      );
+    });
+    const service = connectionService({ ...f, transport: { fetch } });
+    const profile = await service.create(f.admin.id, {
+      key: "probe",
+      label: "Probe",
+      origin: "https://api.example.com",
+      allowedMethods: ["GET"],
+    });
+    await expect(service.diagnose(f.admin.id, profile.id, "/")).rejects.toMatchObject({
+      code: "DIAGNOSTIC_UNAVAILABLE",
+    });
+    await service.update(f.admin.id, profile.id, { allowedMethods: ["HEAD"], enabled: false });
+    await expect(service.diagnose(f.admin.id, profile.id, "/")).rejects.toMatchObject({
+      code: "DIAGNOSTIC_UNAVAILABLE",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    await service.update(f.admin.id, profile.id, { enabled: true });
+    expect(await service.diagnose(f.admin.id, profile.id, "/")).toMatchObject({
+      outcome: "destination_blocked",
+      upstreamStatus: null,
+    });
+  });
 
   it("creates a sanitized stock profile and never projects protected values", async () => {
     const { admin, service, events } = await fixture();

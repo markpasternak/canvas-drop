@@ -1,12 +1,4 @@
-import {
-  ArrowRight,
-  CheckCircle,
-  CurrencyDollar,
-  Globe,
-  Prohibit,
-  Trash,
-  TrendUp,
-} from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, Globe, Prohibit, Trash } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
@@ -16,11 +8,8 @@ import { CollapsibleSection } from "../components/CollapsibleSection.js";
 import { EmptyState } from "../components/EmptyState.js";
 import type { AdminOverview as AdminOverviewData } from "../lib/api.js";
 import { daysSince, formatBytes, formatUsd } from "../lib/format.js";
-import { useAdminAiUsage, useAdminOverview } from "../lib/queries.js";
+import { useAdminAiUsage, useAdminAttention, useAdminOverview } from "../lib/queries.js";
 import type { AdminCanvasesSearch } from "../router.js";
-
-/** Purge-backlog age (days) past which the deleted lane reads as urgent vs routine. */
-const PURGE_URGENT_DAYS = 30;
 
 /**
  * A labelled metric. `strip` (default) is a bordered instrument-panel cell — cells
@@ -107,13 +96,7 @@ function SpendPanel({
   );
 }
 
-/**
- * One operational signal in the "Needs attention" lane. A whole-row link to the
- * matching filtered admin table view. Urgency drives prominence — `urgent` rows
- * carry an amber accent + bolder count so they out-read the routine `info` rows;
- * we don't render every signal as an identical metric tile. Each row is built
- * from already-derivable data (no new backend).
- */
+/** Link an administrative signal to the corresponding filtered canvas list. */
 function AttentionRow({
   icon,
   label,
@@ -166,136 +149,102 @@ function AttentionRow({
   );
 }
 
-/**
- * Operational "needs attention" lane (plan U18). Assembled from derivable
- * signals — each links to the matching filtered admin canvases view. No trend
- * deltas, no screenshot-failure tracking (no backing data). The lane is ALWAYS
- * visible: when nothing is flagged it renders a calm all-clear state (so an admin
- * with a clean instance still sees the lane and learns what it watches), rather
- * than a row of zeroes or vanishing entirely.
- */
-function NeedsAttention({
-  overview,
-  topSpender,
-}: {
-  overview: AdminOverviewData;
-  topSpender: { title: string; ownerEmail: string | null; costUsd: number } | null;
-}) {
-  const byStatus = overview.canvasCountByStatus;
-  const disabled = byStatus.disabled ?? 0;
-  const deleted = byStatus.deleted ?? 0;
-  const oldestDeletedDays =
-    overview.oldestDeletedAt !== null ? daysSince(overview.oldestDeletedAt) : null;
-  const topUsage = overview.topCanvases[0] ?? null;
-
-  // Build only the rows that actually have something to surface.
-  const rows: ReactNode[] = [];
-
-  if (overview.publicLinkCount > 0) {
-    rows.push(
-      <AttentionRow
-        key="public"
-        icon={<Globe size={18} />}
-        label="Public-link canvases"
-        detail="Exposed beyond the org — review access"
-        count={overview.publicLinkCount}
-        urgent
-        search={{ access: "public_link" }}
-      />,
-    );
-  }
-
-  if (deleted > 0) {
-    const purgeUrgent = oldestDeletedDays !== null && oldestDeletedDays >= PURGE_URGENT_DAYS;
-    rows.push(
-      <AttentionRow
-        key="deleted"
-        icon={<Trash size={18} />}
-        label="Awaiting purge"
-        detail={
-          oldestDeletedDays !== null
-            ? `Oldest deleted ${oldestDeletedDays}d ago`
-            : "Soft-deleted canvases"
-        }
-        count={deleted}
-        urgent={purgeUrgent}
-        search={{ status: "deleted" }}
-      />,
-    );
-  }
-
-  if (disabled > 0) {
-    rows.push(
-      <AttentionRow
-        key="disabled"
-        icon={<Prohibit size={18} />}
-        label="Disabled canvases"
-        detail="Taken down — showing a disabled page"
-        count={disabled}
-        search={{ status: "disabled" }}
-      />,
-    );
-  }
-
-  if (topSpender && topSpender.costUsd > 0) {
-    rows.push(
-      <AttentionRow
-        key="spender"
-        icon={<CurrencyDollar size={18} />}
-        label="Top AI spender"
-        detail={`${topSpender.title}${topSpender.ownerEmail ? ` · ${topSpender.ownerEmail}` : ""}`}
-        count={formatUsd(topSpender.costUsd)}
-        // Admins can't open other owners' detail pages (404); jump to the table
-        // row by searching the title instead.
-        search={{ q: topSpender.title }}
-      />,
-    );
-  }
-
-  if (topUsage) {
-    rows.push(
-      <AttentionRow
-        key="usage"
-        icon={<TrendUp size={18} />}
-        label="Most active canvas"
-        detail={topUsage.title || topUsage.slug || topUsage.canvasId}
-        count={`${topUsage.ops.toLocaleString()} ops`}
-        // Search by title/slug so the click lands on this canvas's table row.
-        search={{ q: topUsage.title || topUsage.slug || topUsage.canvasId }}
-      />,
-    );
-  }
-
+/** Exceptions lead; ordinary sharing, disabled canvases and retention reviews are separate. */
+function NeedsAttention({ overview }: { overview: AdminOverviewData }) {
+  const { data, isLoading, isError, refetch } = useAdminAttention();
+  const hasExceptions = !!data && (data.incompletePurgeCount > 0 || data.connections.length > 0);
   return (
-    <CollapsibleSection title="Needs attention" storageKey="admin:section:attention" flush>
-      {rows.length > 0 ? (
-        <div className="divide-y divide-border bg-surface">{rows}</div>
-      ) : (
-        // All-clear: the lane is ALWAYS visible so an admin sees it (and learns what it
-        // watches) even on a clean instance, rather than it vanishing entirely. A calm
-        // confirmation + a one-line explainer of the signals it surfaces.
-        <div className="flex items-start gap-3 bg-surface px-4 py-4">
-          <CheckCircle
-            size={20}
-            weight="fill"
-            className="mt-0.5 shrink-0 text-success"
-            aria-hidden
-          />
-          <div className="min-w-0">
-            <p className="font-medium text-fg">Nothing needs attention right now</p>
-            <p className="mt-0.5 text-xs text-subtle">
-              This lane flags public-link exposure, disabled or deleted canvases, the purge backlog,
-              the top AI spender, and the most-active canvas — so you see them the moment there's
-              something to act on.
-            </p>
+    <div className="space-y-4">
+      <CollapsibleSection title="Needs attention" storageKey="admin:section:attention" flush>
+        {isLoading ? (
+          <p className="p-4 text-sm text-muted">Checking operational exceptions…</p>
+        ) : null}
+        {isError ? (
+          <div className="p-4 text-sm text-danger">
+            Attention checks could not be loaded.{" "}
+            <Button size="sm" variant="ghost" onClick={() => void refetch()}>
+              Retry checks
+            </Button>
           </div>
-        </div>
-      )}
-    </CollapsibleSection>
+        ) : null}
+        {data && !hasExceptions ? (
+          <div className="flex gap-3 p-4">
+            <CheckCircle size={20} className="shrink-0 text-success" aria-hidden />
+            <div>
+              <p className="font-medium text-fg">Nothing needs attention right now</p>
+              <p className="mt-1 text-xs text-muted">
+                No incomplete purges or Connection failures in the checked window. Routine reviews
+                are separate below.
+              </p>
+            </div>
+          </div>
+        ) : null}
+        {data && data.incompletePurgeCount > 0 ? (
+          <AttentionRow
+            icon={<Trash size={18} />}
+            label="Incomplete canvas cleanup"
+            detail="A purge started but did not finish. Review remaining files and retry."
+            count={data.incompletePurgeCount}
+            urgent
+            search={{ status: "deleted", purge: "incomplete" }}
+          />
+        ) : null}
+        {data?.connections.map((connection) => (
+          <Link
+            key={connection.id}
+            to="/admin/connections"
+            hash={`connection-${connection.id}`}
+            className="flex items-center justify-between gap-3 border-l-2 border-warning/40 bg-warning-subtle/30 px-4 py-3"
+          >
+            <span>
+              <span className="block font-medium text-fg">{connection.label}</span>
+              <span className="block text-xs text-muted">{connection.detail}</span>
+            </span>
+            <span className="shrink-0 text-xs text-warning">
+              {connection.affectedCanvasCount} affected canvases →
+            </span>
+          </Link>
+        ))}
+      </CollapsibleSection>
+      <CollapsibleSection title="Routine reviews" storageKey="admin:section:routine" flush>
+        <p className="px-4 py-3 text-xs text-muted">
+          These are ordinary administrative states, not evidence of a fault. Public-link exposure is
+          intentional when sharing is approved.
+        </p>
+        {overview.publicLinkCount > 0 ? (
+          <AttentionRow
+            icon={<Globe size={18} />}
+            label="Public-link canvases"
+            detail="Review configured public sharing and protection"
+            count={overview.publicLinkCount}
+            search={{ status: "active", access: "public_link" }}
+          />
+        ) : null}
+        {data && data.purgeEligibleCount > 0 ? (
+          <AttentionRow
+            icon={<Trash size={18} />}
+            label="Retention elapsed"
+            detail="Deleted at least 30 days ago. Review before permanently removing files."
+            count={data.purgeEligibleCount}
+            search={{ status: "deleted", purge: "eligible" }}
+          />
+        ) : null}
+        {(overview.canvasCountByStatus.disabled ?? 0) > 0 ? (
+          <AttentionRow
+            icon={<Prohibit size={18} />}
+            label="Disabled canvases"
+            detail="Review the recorded reason and decide whether to re-enable"
+            count={overview.canvasCountByStatus.disabled}
+            search={{ status: "disabled" }}
+          />
+        ) : null}
+      </CollapsibleSection>
+    </div>
   );
 }
 
 const CANVAS_SEARCH_KEYS: Array<keyof AdminCanvasesSearch> = [
+  "purge",
   "owner",
   "status",
   "access",
@@ -323,27 +272,7 @@ function AdminOverview() {
         description="Platform-wide visibility and governance health at a glance."
       />
 
-      {/* Needs attention (plan U18) — operational lane from derivable signals,
-          each linking to its filtered canvases view. Above the overview so the
-          actionable things lead; always visible (all-clear state when nothing
-          is flagged) so the lane's purpose is always discoverable. */}
-      {ov && (
-        <NeedsAttention
-          overview={ov}
-          topSpender={
-            aiUsage.data?.byCanvas[0]
-              ? {
-                  title:
-                    aiUsage.data.byCanvas[0].title ||
-                    aiUsage.data.byCanvas[0].slug ||
-                    aiUsage.data.byCanvas[0].canvasId,
-                  ownerEmail: aiUsage.data.byCanvas[0].ownerEmail,
-                  costUsd: aiUsage.data.byCanvas[0].costUsd,
-                }
-              : null
-          }
-        />
-      )}
+      {ov && <NeedsAttention overview={ov} />}
 
       {/* Platform overview (§6.10.6) — collapsible, state remembered in localStorage.
           All aggregates (no per-user behavioral data): scale + engagement (row 1),
@@ -477,14 +406,16 @@ function AdminOverview() {
         </CollapsibleSection>
       )}
 
-      {/* Audit log (placeholder, plan 006) — recorded today, browser unbuilt. When
-          built it will show governance MUTATIONS (deploy/disable/block/settings),
-          never consumption — accountability without surveillance. */}
       <CollapsibleSection title="Audit log" storageKey="admin:section:audit" defaultOpen={false}>
-        <EmptyState
-          title="Audit log — coming soon"
-          description="Governance actions (takedowns, restores, blocks, settings changes) are already recorded. A browsable trail will land here; it will show who changed what, never who viewed what."
-        />
+        <p className="text-sm text-muted">
+          Search who changed a canvas or account, when it changed, and the recorded reason.
+        </p>
+        <Link
+          to="/admin/activity"
+          className="mt-3 inline-block text-sm text-accent hover:underline"
+        >
+          Browse administrative activity
+        </Link>
       </CollapsibleSection>
     </div>
   );

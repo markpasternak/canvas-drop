@@ -15,11 +15,13 @@ import {
   isNotNull,
   isNull,
   ne,
+  not,
   notExists,
   or,
   type SQL,
   sql,
 } from "drizzle-orm";
+import { ADMIN_PURGE_RETENTION_DAYS } from "../../canvas/purge.js";
 import type { DbClient } from "../factory.js";
 
 /** Window for the "new in the last N days" growth stats (§6.10.6). */
@@ -31,7 +33,7 @@ export type AdminCanvasStatus = "active" | "disabled" | "archived" | "deleted";
 
 /** Sort axes for the admin all-canvases list (member-parity, plan 006). */
 export type AdminCanvasSort = "recent" | "created" | "title";
-export type AdminCanvasExpiryFilter = "none" | "active" | "expired";
+export type AdminCanvasExpiryFilter = "none" | "active" | "expired" | "not_expired";
 export type AdminCanvasContextFilter = "personal" | "org" | "team";
 
 export interface AdminCanvasExposure {
@@ -46,6 +48,7 @@ export interface AdminCanvasExposure {
 }
 
 export interface ListAllCanvasesQuery {
+  purge?: "eligible" | "retained" | "incomplete" | "complete";
   /** Narrow to one status; default returns all non-deleted canvases. */
   status?: AdminCanvasStatus;
   /** Substring match over title / slug / owner email (case-insensitive). */
@@ -311,18 +314,6 @@ export function adminRepository(client: DbClient) {
     return map;
   }
 
-  async function allCanvasIdsByExposure(): Promise<{
-    rows: Array<{ id: string }>;
-    exposure: Map<string, AdminCanvasExposure>;
-  }> {
-    const rows = (await db
-      .select({ id: canvasesT.id })
-      .from(canvasesT)
-      .where(ne(canvasesT.status, "deleted"))) as Array<{ id: string }>;
-    const exposure = await exposureByCanvasIds(rows.map((r) => r.id));
-    return { rows, exposure };
-  }
-
   return {
     /**
      * Cross-owner canvas list with member-parity filter/search/sort + offset
@@ -338,15 +329,44 @@ export function adminRepository(client: DbClient) {
       q: ListAllCanvasesQuery,
     ): Promise<{ items: Canvas[]; total: number }> {
       const filters: Array<SQL | undefined> = [];
+      const now = Date.now();
       if (q.status) filters.push(eq(canvasesT.status, q.status));
-      else filters.push(ne(canvasesT.status, "deleted"));
-      if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
-      if (q.publicLink) {
-        filters.push(eq(canvasesT.access, "public_link"));
-        filters.push(eq(usersT.canPublishPublic, true));
-        if (q.publicLinksEnabled === false) filters.push(sql`1 = 0`);
+      else if (!q.purge) filters.push(ne(canvasesT.status, "deleted"));
+      if (q.purge) {
+        filters.push(eq(canvasesT.status, "deleted"));
+        const cutoff = now - ADMIN_PURGE_RETENTION_DAYS * DAY_MS;
+        if (q.purge === "complete") filters.push(isNotNull(canvasesT.purgedAt));
+        else {
+          filters.push(isNull(canvasesT.purgedAt));
+          if (q.purge === "incomplete") filters.push(isNotNull(canvasesT.purgeStartedAt));
+          else {
+            filters.push(isNull(canvasesT.purgeStartedAt));
+            filters.push(
+              q.purge === "eligible"
+                ? sql`${canvasesT.deletedAt} <= ${cutoff}`
+                : sql`${canvasesT.deletedAt} > ${cutoff}`,
+            );
+          }
+        }
       }
-      if (q.password) filters.push(isNotNull(canvasesT.passwordHash));
+      if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
+      if (q.publicLink !== undefined) {
+        const enabled =
+          q.publicLinksEnabled === false
+            ? sql`1 = 0`
+            : and(
+                eq(canvasesT.access, "public_link"),
+                eq(canvasesT.status, "active"),
+                isNotNull(canvasesT.currentVersionId),
+                or(isNull(canvasesT.sharedExpiresAt), sql`${canvasesT.sharedExpiresAt} > ${now}`),
+                sql`coalesce(${usersT.canPublishPublic}, false) = true`,
+              );
+        filters.push(q.publicLink ? enabled : not(enabled as SQL));
+      }
+      if (q.password !== undefined)
+        filters.push(
+          q.password ? isNotNull(canvasesT.passwordHash) : isNull(canvasesT.passwordHash),
+        );
       if (q.expiry === "none") filters.push(isNull(canvasesT.sharedExpiresAt));
       else if (q.expiry === "active") {
         filters.push(sql`${canvasesT.sharedExpiresAt} is not null`);
@@ -354,6 +374,10 @@ export function adminRepository(client: DbClient) {
       } else if (q.expiry === "expired") {
         filters.push(sql`${canvasesT.sharedExpiresAt} is not null`);
         filters.push(sql`${canvasesT.sharedExpiresAt} <= ${Date.now()}`);
+      } else if (q.expiry === "not_expired") {
+        filters.push(
+          or(isNull(canvasesT.sharedExpiresAt), sql`${canvasesT.sharedExpiresAt} > ${Date.now()}`),
+        );
       }
       // Context (restricted access model): a team grant on the list is what makes a canvas
       // "team" — the legacy `team` rung is just a Restricted alias. Personal / org cover the
@@ -367,20 +391,49 @@ export function adminRepository(client: DbClient) {
       } else if (q.context === "org") {
         filters.push(and(isNotNull(canvasesT.orgId), notExists(teamGrant)));
       } else if (q.context === "team") filters.push(exists(teamGrant));
-      if (q.external || q.pending) {
-        const { rows, exposure } = await allCanvasIdsByExposure();
-        const matchingIds = new Set(
-          rows
-            .map((r) => r.id)
-            .filter((id) => {
-              const e = exposure.get(id) ?? blankExposure();
-              return (
-                (!q.external || e.externalPeopleCount > 0) &&
-                (!q.pending || e.pendingInviteCount > 0)
-              );
-            }),
-        );
-        filters.push(matchingIds.size > 0 ? inArray(canvasesT.id, [...matchingIds]) : sql`1 = 0`);
+      if (q.external !== undefined || q.pending !== undefined) {
+        // Correlated predicates apply before LIMIT/count, including deleted canvases.
+        // Avoid materializing every canvas ID into a parameter-limited IN clause.
+        const pendingCanvas = db
+          .select({ one: sql`1` })
+          .from(invitationsT)
+          .where(
+            and(
+              eq(invitationsT.targetType, "canvas"),
+              eq(invitationsT.targetId, canvasesT.id),
+              isNull(invitationsT.consumedAt),
+            ),
+          );
+        const pendingTeam = db
+          .select({ one: sql`1` })
+          .from(invitationsT)
+          .innerJoin(canvasTeamsT, eq(canvasTeamsT.teamId, invitationsT.targetId))
+          .where(
+            and(
+              eq(invitationsT.targetType, "team"),
+              eq(canvasTeamsT.canvasId, canvasesT.id),
+              isNull(invitationsT.consumedAt),
+            ),
+          );
+        const hasPending = or(exists(pendingCanvas), exists(pendingTeam)) as SQL;
+        if (q.pending !== undefined) filters.push(q.pending ? hasPending : not(hasPending));
+        if (q.external !== undefined) {
+          const member = db
+            .select({ one: sql`1` })
+            .from(orgMembersT)
+            .where(eq(orgMembersT.userId, canvasAllowlistT.userId));
+          const directExternal = db
+            .select({ one: sql`1` })
+            .from(canvasAllowlistT)
+            .where(
+              and(
+                eq(canvasAllowlistT.canvasId, canvasesT.id),
+                or(isNotNull(canvasAllowlistT.email), notExists(member)),
+              ),
+            );
+          const hasExternal = or(exists(directExternal), hasPending) as SQL;
+          filters.push(q.external ? hasExternal : not(hasExternal));
+        }
       }
       const person = q.person?.trim().toLowerCase();
       if (person) {
@@ -462,8 +515,9 @@ export function adminRepository(client: DbClient) {
       // Gallery facets — each maps to one boolean canvas column. `templatable`
       // implies listed at the data level, but they filter independently here so an
       // admin can isolate either set.
-      if (q.templatable) filters.push(eq(canvasesT.galleryTemplatable, true));
-      if (q.listed) filters.push(eq(canvasesT.galleryListed, true));
+      if (q.templatable !== undefined)
+        filters.push(eq(canvasesT.galleryTemplatable, q.templatable));
+      if (q.listed !== undefined) filters.push(eq(canvasesT.galleryListed, q.listed));
 
       const search = q.q?.trim().toLowerCase();
       if (search) {
@@ -651,10 +705,10 @@ export function adminRepository(client: DbClient) {
         );
       }
       if (q.kind) rows = rows.filter((row) => row.kind === q.kind);
-      if (q.pending) rows = rows.filter((row) => row.pendingCount > 0);
-      if (q.blocked) rows = rows.filter((row) => row.isBlocked);
-      if (q.admin) rows = rows.filter((row) => row.isAdmin);
-      if (q.permit) rows = rows.filter((row) => row.permitId !== null);
+      if (q.pending !== undefined) rows = rows.filter((row) => row.pendingCount > 0 === q.pending);
+      if (q.blocked !== undefined) rows = rows.filter((row) => row.isBlocked === q.blocked);
+      if (q.admin !== undefined) rows = rows.filter((row) => row.isAdmin === q.admin);
+      if (q.permit !== undefined) rows = rows.filter((row) => (row.permitId !== null) === q.permit);
       if (q.publicCapability === "allowed") {
         rows = rows.filter((row) => row.userId !== null && row.canPublishPublic === true);
       } else if (q.publicCapability === "revoked") {
@@ -788,6 +842,7 @@ export function adminRepository(client: DbClient) {
         db
           .select({ status: canvasesT.status, count: sql<number>`count(*)` })
           .from(canvasesT)
+          .where(isNull(canvasesT.purgedAt))
           .groupBy(canvasesT.status),
         // Active public-link canvases (governance: what's exposed beyond the org).
         // Scoped to `active` so it aligns with the live-canvas overview signals.
@@ -809,7 +864,7 @@ export function adminRepository(client: DbClient) {
         db
           .select({ oldest: sql<number | null>`min(${canvasesT.deletedAt})` })
           .from(canvasesT)
-          .where(eq(canvasesT.status, "deleted")),
+          .where(and(eq(canvasesT.status, "deleted"), isNull(canvasesT.purgedAt))),
         db
           .select({ canvasId: usageT.canvasId, ops: sql<number>`count(*)` })
           .from(usageT)

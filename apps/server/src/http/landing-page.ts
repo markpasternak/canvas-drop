@@ -194,7 +194,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "tour-admin",
     label: "Admin & control",
     caption:
-      "Set AI quotas, manage members, disable a canvas with a stated reason, and choose who may publish public links.",
+      "Find public canvases without passwords, inspect access, and act on an explicit selection. Real interface, shown with a local example canvas.",
   },
   {
     img: "tour-usage",
@@ -220,19 +220,23 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Admin console",
-    body: "Set AI spend quotas and defaults, switch public links on or off instance-wide, and choose which members may publish them. Disable any canvas with a stated reason and re-enable it later.",
+    body: "Find public canvases without passwords, combine positive and negative filters, and save the views you use. Inspect ownership and access without leaving the list or gaining access to private content.",
   },
   {
     title: "Your brand, your look",
     body: "Switch the whole instance, dashboard, editor, and this page included, to one of four design skins from the admin console. No restart, no code.",
   },
   {
-    title: "Member management",
-    body: "See who's in, grant or revoke admin, and block access in a click.",
+    title: "A clear handover",
+    body: "Preview a departing person's canvases and access. Reassign ownership, block the account, revoke sessions and agent tokens, and see exactly what still needs follow-up.",
   },
   {
-    title: "Audit log",
-    body: "Sign-ins, deploys, publishes, sharing changes, and admin actions are recorded in an audit table in your database. Query it with the tools you already have.",
+    title: "Investigate and act",
+    body: "Explain why a person can access a canvas. Search administrative activity and recorded reasons. Preview selected bulk actions, restore deleted work, or permanently purge its files and app data after the retention window. Backups follow their own policy.",
+  },
+  {
+    title: "Connections you can operate",
+    body: "See recent failures, latency, and affected canvases. Run a bounded diagnostic and rotate protected credentials while their values stay on the server.",
   },
 ];
 

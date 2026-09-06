@@ -105,7 +105,7 @@ async function resolveShots(page) {
     },
     { path: "/shared?sort=owner", name: "tour-shared.webp" },
     { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
-    { path: "/admin/settings", name: "tour-admin.webp" },
+    { path: "/admin/canvases?public=true&password=false", name: "tour-admin.webp" },
     // Teams & invites (plan 003): expand the personal "Family" team's roster so the shot
     // tells the invite story — a member plus a not-yet-signed-in Pending row. Seed a team
     // first (seed-canvases creates a personal + org team with a pending invite).

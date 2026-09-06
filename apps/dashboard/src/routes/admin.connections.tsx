@@ -1,4 +1,9 @@
-import { useState } from "react";
+import { Link, useLocation } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import {
+  AdminConnectionDiagnostics,
+  AdminConnectionHealthSummary,
+} from "../components/AdminConnectionOperations.js";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
@@ -319,8 +324,17 @@ function GrantEditor({ profile }: { profile: AdminConnection }) {
 
 function RecentEvents({ profileId }: { profileId: string }) {
   const [offset, setOffset] = useState(0);
-  const { data, isLoading } = useAdminConnectionEvents(profileId, offset);
+  const { data, isLoading, isError, refetch } = useAdminConnectionEvents(profileId, offset);
   if (isLoading) return <p className="text-xs text-muted">Loading recent outcomes…</p>;
+  if (isError)
+    return (
+      <InlineNotice tone="warning">
+        Recent outcomes could not be loaded.{" "}
+        <Button size="sm" variant="ghost" onClick={() => void refetch()}>
+          Retry outcomes
+        </Button>
+      </InlineNotice>
+    );
   const events = data?.events ?? [];
   return (
     <div className="space-y-3 border-t border-border pt-4">
@@ -348,10 +362,21 @@ function RecentEvents({ profileId }: { profileId: string }) {
                   <td className="py-2 pr-3 whitespace-nowrap">
                     {new Date(event.createdAt).toLocaleString()}
                   </td>
-                  <td className="py-2 pr-3 font-mono">{event.canvasId}</td>
+                  <td className="py-2 pr-3">
+                    <Link
+                      to="/admin/canvases"
+                      search={{ inspect: event.canvasId }}
+                      className="text-accent underline"
+                    >
+                      {event.canvasTitle || event.canvasSlug || event.canvasId}
+                    </Link>
+                  </td>
                   <td className="py-2 pr-3 font-mono">{event.origin ?? "—"}</td>
                   <td className="py-2 pr-3">{event.method ?? "—"}</td>
-                  <td className="py-2 pr-3">{event.outcome ?? "—"}</td>
+                  <td className="py-2 pr-3">
+                    {event.outcome?.replaceAll("_", " ") ?? "—"}
+                    {event.upstreamStatus ? ` · HTTP ${event.upstreamStatus}` : ""}
+                  </td>
                   <td className="py-2 pr-3 whitespace-nowrap">
                     {event.requestBytes ?? 0} → {event.responseBytes ?? 0}
                   </td>
@@ -387,7 +412,13 @@ function RecentEvents({ profileId }: { profileId: string }) {
 }
 
 function ProfileCard({ profile }: { profile: AdminConnection }) {
+  const hash = useLocation({ select: (location) => location.hash });
   const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (hash !== `connection-${profile.id}`) return;
+    setExpanded(true);
+    document.getElementById(`connection-${profile.id}`)?.scrollIntoView?.({ block: "start" });
+  }, [hash, profile.id]);
   const [editing, setEditing] = useState(false);
   const [replaceHeaders, setReplaceHeaders] = useState(false);
   const [draft, setDraft] = useState<ProfileDraft>({
@@ -453,7 +484,7 @@ function ProfileCard({ profile }: { profile: AdminConnection }) {
   }
 
   return (
-    <Panel className="space-y-4">
+    <Panel id={`connection-${profile.id}`} className="space-y-4 scroll-mt-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -491,10 +522,11 @@ function ProfileCard({ profile }: { profile: AdminConnection }) {
             ? "None"
             : profile.protectedHeaders.map((header) => `${header.name} configured`).join(", ")}
         </MetaItem>
-        <MetaItem label="Blast radius">
+        <MetaItem label="Granted canvases">
           {profile.affectedCanvasCount} canvas{profile.affectedCanvasCount === 1 ? "" : "es"}
         </MetaItem>
       </MetaGrid>
+      <AdminConnectionHealthSummary profile={profile} />
       {!profile.encryptionKeyAvailable && profile.protectedHeaders.length > 0 ? (
         <InlineNotice tone="danger">
           The encryption key is unavailable. Requests fail closed until the key is restored or these
@@ -527,6 +559,7 @@ function ProfileCard({ profile }: { profile: AdminConnection }) {
       ) : null}
       {expanded ? (
         <>
+          <AdminConnectionDiagnostics key={profile.updatedAt} profile={profile} />
           <GrantEditor profile={profile} />
           <RecentEvents profileId={profile.id} />
         </>
