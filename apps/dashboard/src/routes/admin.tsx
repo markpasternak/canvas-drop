@@ -96,13 +96,7 @@ function SpendPanel({
   );
 }
 
-/**
- * One operational signal in the "Needs attention" lane. A whole-row link to the
- * matching filtered admin table view. Urgency drives prominence — `urgent` rows
- * carry an amber accent + bolder count so they out-read the routine `info` rows;
- * we don't render every signal as an identical metric tile. Each row is built
- * from already-derivable data (no new backend).
- */
+/** Link an administrative signal to the corresponding filtered canvas list. */
 function AttentionRow({
   icon,
   label,
@@ -278,10 +272,6 @@ function AdminOverview() {
         description="Platform-wide visibility and governance health at a glance."
       />
 
-      {/* Needs attention (plan U18) — operational lane from derivable signals,
-          each linking to its filtered canvases view. Above the overview so the
-          actionable things lead; always visible (all-clear state when nothing
-          is flagged) so the lane's purpose is always discoverable. */}
       {ov && <NeedsAttention overview={ov} />}
 
       {/* Platform overview (§6.10.6) — collapsible, state remembered in localStorage.

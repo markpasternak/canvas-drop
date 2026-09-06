@@ -121,7 +121,15 @@ You operate the instance and choose where its data lives. Use your existing iden
 
 For a team deployment, use **subdomain mode with HTTPS** so every canvas has its own browser origin. Local path mode shares an origin and is intended for development or trusted single-user hosting. The [deployment guide](https://canvas-drop.com/docs/self-hosting/deploy) covers DNS, authentication, storage, and startup; [`.env.production.example`](.env.production.example) provides an annotated starting configuration.
 
-Admins manage people, public-link availability, usage, quotas, AI providers, and appearance from the dashboard. Configured AI providers and outbound Connections can send data to the services you choose.
+Admins can find public canvases without passwords, explain a person's access, search
+administrative activity, and hand over canvases during offboarding. Selected bulk actions
+include permanent file/data purge after the admin retention window; backups follow their
+own policy. Connections show observed failures and latency, with bounded diagnostics and
+credential-rotation guidance. See [Administration](https://canvas-drop.com/docs/self-hosting/administration).
+
+People, public-link availability, usage, quotas, AI providers, and appearance remain
+manageable from the dashboard. Configured AI providers and outbound Connections can send
+data to the services you choose.
 
 A canvas can contain up to **100 MB**, **2,000 files**, and **25 MB per file**. The last **10 published versions** are retained. Version recovery restores the published files; live backend data has its own lifecycle. Use the instance backup tools to protect the full database and stored files.
 

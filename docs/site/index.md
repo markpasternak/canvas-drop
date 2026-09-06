@@ -57,6 +57,10 @@ provider (Dex), Postgres, and the app in real `proxy` auth mode at
 
 ## What ships today
 
+The [administration guide](/docs/self-hosting/administration) covers composed sharing
+filters, access explanations, activity, offboarding, selected bulk actions, permanent
+file/data purge, and observed Connections health.
+
 | Area | What you get | Read more |
 |---|---|---|
 | Publish | Paste a single `index.html`, drag files or a folder, upload a `.zip`, or `PUT` a ZIP to the Deploy API with a per-canvas `cd_...` key. A staged upload sends only the files the server does not already have. Limits: 100 MB per canvas, 25 MB per file, 2 000 files. | [Create & publish](/docs/authoring/create-and-publish), [Deploy API](/docs/api/deploy-api) |

@@ -229,25 +229,28 @@ afterEach(() => {
 
 describe("admin dashboard", () => {
   it("previews only selected canvases and requires explicit confirmation before a bulk action", async () => {
+    let previewUnavailable = false;
     mockFetch({
       "GET /api/me": () => json(ADMIN_ME),
       "GET /api/admin/canvases": () =>
         canvasPage([ROW, { ...ROW, id: "c2", title: "Other canvas" }], 150),
       "POST /api/admin/canvases/operations/preview": () =>
-        json({
-          action: "delete",
-          retentionDays: 30,
-          items: [
-            {
-              id: "c1",
-              title: ROW.title,
-              updatedAt: 123,
-              eligible: true,
-              explanation: null,
-              resources: null,
-            },
-          ],
-        }),
+        previewUnavailable
+          ? json({ error: "unavailable" }, 503)
+          : json({
+              action: "delete",
+              retentionDays: 30,
+              items: [
+                {
+                  id: "c1",
+                  title: ROW.title,
+                  updatedAt: 123,
+                  eligible: true,
+                  explanation: null,
+                  resources: null,
+                },
+              ],
+            }),
       "POST /api/admin/canvases/operations/execute": () =>
         json({
           outcomes: [
@@ -279,6 +282,13 @@ describe("admin dashboard", () => {
       reason: "Retired",
       confirmation: "DELETE 1",
     });
+    previewUnavailable = true;
+    await user.click(
+      within(dialog).getByRole("button", { name: "Refresh preview for another attempt" }),
+    );
+    await within(dialog).findByText(/Could not prepare the preview/);
+    await user.type(within(dialog).getByLabelText("Type DELETE 1 to confirm"), "DELETE 1");
+    expect(within(dialog).getByRole("button", { name: "Delete 1 selected" })).toBeDisabled();
   });
 
   it("shows purge in deleted row actions and explains real-file removal and retention", async () => {

@@ -240,6 +240,7 @@ export function AdminOffboardingDialog({
               disabled={
                 data.self ||
                 preview.isFetching ||
+                preview.isError ||
                 execute.isError ||
                 !reason.trim() ||
                 confirmation !== phrase ||

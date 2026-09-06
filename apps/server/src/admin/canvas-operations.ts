@@ -194,7 +194,7 @@ export function canvasOperations(deps: CanvasOperationDeps) {
                 result.status === "purged"
                   ? "Permanently purged; audit record retained"
                   : result.status === "failed"
-                    ? "Cleanup may be partial. Restore is unavailable. Preview and retry cleanup."
+                    ? "Cleanup may be partial. Once cleanup starts, restoration is unavailable. Preview and retry cleanup."
                     : "Canvas changed or is ineligible. Preview again.",
             });
             continue;

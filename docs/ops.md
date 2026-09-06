@@ -120,10 +120,27 @@ node --conditions=node-dist apps/server/dist/index.js purge 30         # only de
 node --conditions=node-dist apps/server/dist/index.js purge 30 dry-run # report only, delete nothing
 ```
 
-What `purge` does: hard-deletes each soft-deleted canvas's storage objects + version rows
-(keeping the row as a tombstone), and prunes `usage_events` / `ai_usage` older than 90 days.
+What `purge` does: removes each eligible soft-deleted canvas's actual blob, uploaded-file,
+and preview objects, versions, drafts, screenshot jobs, file/KV records, upload sessions,
+access grants, and invitations. It retains the canvas identity and audit history as a
+permanent tombstone. The CLI also prunes `usage_events` / `ai_usage` older than 90 days.
 Per-canvas blob GC (orphaned draft-churn blobs) runs inline after each publish/deploy, so
 `purge` is the periodic backstop, not the only reclaimer.
+
+Admins can also preview and confirm individual or selected bulk purges in
+**Admin → Canvases**. The UI requires 30 days after deletion; the CLI uses its explicit
+`days` argument (zero if omitted). Choose the operator policy deliberately. Both paths
+refuse recent pending deployments and mark permanent cleanup before removing storage.
+Restore and new publication cannot revive a claimed canvas. A partial failure remains
+unavailable and can be retried; filter **Purge state → Cleanup incomplete** to find it.
+Completed tombstones are excluded from subsequent maintenance sweeps.
+
+Storage keys are namespaced per canvas, including content-addressed blobs. Cleanup does
+not delete another canvas's objects with the same hash. It does not remove separate
+backup archives or provider-level object versions. Restoring an old backup can restore
+previously purged data; enforce retention on backups and provider versioning separately.
+See [Administration](site/self-hosting/administration.md) for preview, confirmation,
+offboarding, and Connections procedures.
 
 ---
 

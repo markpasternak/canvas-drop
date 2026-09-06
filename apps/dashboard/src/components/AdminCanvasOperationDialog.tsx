@@ -24,7 +24,7 @@ const EFFECTS: Record<AdminCanvasOperation, string> = {
   unarchive:
     "Return archived canvases to active status. Owners must deliberately share them again.",
   delete:
-    "Remove canvases from normal lists and take them offline. An admin can restore them until permanent purge starts. Data is retained for at least 30 days.",
+    "Remove canvases from normal lists and take them offline. An admin can restore them until permanent purge starts. Admin purge becomes available after 30 days; operator maintenance may use a different retention policy.",
   restore: "Return deleted canvases to active status. Their existing sharing rules apply again.",
   purge:
     "Permanently remove all deployed versions, draft files, previews, uploaded files, stored app data, invitations and access grants. Keep the canvas identity and audit history. Other canvases remain intact. This cannot be undone or restored through the app.",
@@ -66,7 +66,7 @@ export function AdminCanvasOperationDialog({
       <div className="space-y-4">
         <p className="text-sm text-muted">{EFFECTS[action]}</p>
         <p className="text-sm font-medium">
-          Only the {ids.length} explicitly selected canvas{ids.length === 1 ? "" : "es"} are
+          Only the {ids.length} explicitly selected canvas{ids.length === 1 ? " is" : "es are"}{" "}
           included.
         </p>
         {action === "purge" && (
@@ -136,7 +136,11 @@ export function AdminCanvasOperationDialog({
               variant="danger"
               loading={execute.isPending}
               disabled={
-                !reason.trim() || confirmation !== phrase || preview.isFetching || execute.isError
+                !reason.trim() ||
+                confirmation !== phrase ||
+                preview.isFetching ||
+                preview.isError ||
+                execute.isError
               }
               onClick={async () => {
                 try {

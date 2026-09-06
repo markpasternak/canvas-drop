@@ -60,8 +60,8 @@ This is an implementation evidence ledger, not a completed-release claim.
 
 ## Remaining delivery evidence
 
-U4–U6, review, final integrated verification, merge, deployment, and cleanup are still
-required. Production has not been changed by this round.
+U1–U5 and local review are complete. Final checks, PR CI, merge, deployment, and cleanup
+are delivery gates; the tracking issue records their runtime receipts.
 
 ## U3 — selected lifecycle operations and permanent purge
 
@@ -143,3 +143,34 @@ screenshots, and explain deletion versus purge, retention, and backup boundaries
   returned HTTP 200 in 104 ms, retained `No recent traffic`, and showed no response body.
   Confirmed the overview's distinct exception and routine sections. Screenshots are
   task-local `admin-connections-diagnostic.png` and `admin-overview-operations.png`.
+
+## U6 — integration, review, and release preparation
+
+- Added the Administration guide, navigation and README links, operations details,
+  authorized spec extension, and marketing descriptions after feature verification.
+  The 1440×900 admin screenshot shows the actual running public/no-password filter
+  and a locally published example guide; the animated README tour uses that frame.
+- Simplification reviewed reuse, quality, and efficiency; removed obsolete overview
+  comments. Integration found that failed preview refreshes could leave cached data
+  available to confirmation. Both bulk and offboarding dialogs now block confirmation
+  on preview errors; the bulk retry regression exercises this failure.
+- Code review receipt: `20260906-221303-f33abb38`, status complete, Ready with fixes.
+  The repository's tool mapping required sequential main-thread persona passes; they
+  are not independent reviewers. Claude was requested for a separate adversarial pass
+  but exhausted its turn limit without usable findings. A local adversarial fallback
+  covered the same risk divisions. No independent corroboration is claimed.
+- Review #1 reproduced a false access explanation for an existing out-of-domain owner
+  whose sign-in permit was absent: the gateway denied access while the explanation
+  returned allowed. Investigation now reuses `isEmailAllowed`, denies the explanation,
+  and states the restriction. Both database engines cover absent, added, and revoked
+  permits. The isolated runtime reproduction also changes from allowed to denied.
+- Review considered auth/content boundaries, stale confirmations, purge/restore and
+  offboarding races, partial retries, pinned diagnostics, SQL filtering, safe audit
+  projection, and paired additive migrations. Required real PostgreSQL/MinIO checks
+  remain part of PR CI. Shorter CLI purge windows still require operator coordination
+  with active writers, as documented; online purge retains its 30-day window.
+- Final local checks after the review fix passed: lint, typecheck, 3,084 server tests
+  across both engines (four external-infrastructure tests skipped), 745 dashboard
+  tests, and production build. Generated docs and the bundled Mermaid check passed.
+  The locally served tour image matched the committed asset's SHA-256. CI and
+  deployment receipts are recorded on issue #114.

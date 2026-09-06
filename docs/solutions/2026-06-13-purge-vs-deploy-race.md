@@ -5,6 +5,19 @@ area: deploy
 date: 2026-06-13
 ---
 
+## Update — admin purge hardening, 2026-09-06
+
+The admin operations round addresses the revisit trigger below. Online purge requires
+30 days after deletion and skips pending deployments from the last hour. Permanent
+cleanup atomically claims the canvas before storage deletion; restore, version creation,
+readiness, and publication cannot revive that tombstone. `markReady` now requires one
+updated row. KV-only canvases and interrupted cleanup are retried, even with no version
+rows remaining. The CLI uses the same cleanup but retains its operator-selected age
+window; coordinate shorter maintenance windows with active writers. See the
+[verification ledger](2026-09-06-admin-operations-verification.md) and [operations runbook](../ops.md).
+
+The remaining text records the original finding and the decision at that time.
+
 A code review of `chore/polish-dashboard` surfaced a concurrency hazard between the
 soft-delete **purge** sweep and an **in-flight deploy**. We deliberately **accepted**
 it rather than hardening, given the trust model. This note records the race, why it's

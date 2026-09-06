@@ -1,10 +1,12 @@
 import type { Config } from "@canvas-drop/shared";
 import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
+import { isEmailAllowed } from "../auth/identity-mapping.js";
 import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { decideCanvasAccess, resolveAccessContext } from "../canvas/authorization.js";
 import { resolveManagementRole } from "../canvas/role.js";
 import type { ConnectionService } from "../connections/service.js";
 import type { AdminRepository } from "../db/repositories/admin.js";
+import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { AuditRepository } from "../db/repositories/audit.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
@@ -20,6 +22,7 @@ export interface InvestigationDeps {
   config: Config;
   canvases: CanvasesRepository;
   users: UsersRepository;
+  allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">;
   teams: TeamsRepository;
   invitations: InvitationsRepository;
   versions: VersionsRepository;
@@ -154,6 +157,9 @@ export function adminInvestigation(deps: InvestigationDeps) {
       const canvas = await deps.canvases.findById(id);
       if (!canvas) return null;
       const user = email ? await deps.users.findByEmail(email) : null;
+      const signInAllowed = user
+        ? await isEmailAllowed(user.email, deps.config, deps.allowedEmails)
+        : true;
       const orgIds = user
         ? await (deps.orgMembership?.(user) ?? Promise.resolve(new Set<string>()))
         : new Set<string>();
@@ -180,6 +186,10 @@ export function adminInvestigation(deps: InvestigationDeps) {
       const matchingTeams = userTeams.filter((grant) => grant.canvasId === id);
       const decision = decideCanvasAccess(canvas, principal, Date.now(), { ...ctx, tenancyActive });
       const reasons: string[] = [];
+      if (!signInAllowed)
+        reasons.push(
+          "This account is not permitted to sign in by the instance's email policy. Public content may still be available when signed out.",
+        );
       if (user?.isBlocked)
         reasons.push(
           "This account is blocked and cannot sign in. Public content may still be available when signed out.",
@@ -237,7 +247,10 @@ export function adminInvestigation(deps: InvestigationDeps) {
       )
         reasons.push("There is no direct or team grant for this restricted canvas.");
       const result =
-        user?.isBlocked || decision.action === "deny" || canvas.currentVersionId === null
+        !signInAllowed ||
+        user?.isBlocked ||
+        decision.action === "deny" ||
+        canvas.currentVersionId === null
           ? "denied"
           : decision.needsPasswordGate
             ? "password_required"
@@ -246,7 +259,8 @@ export function adminInvestigation(deps: InvestigationDeps) {
         email: email ?? null,
         userId: user?.id ?? null,
         subject: user ? "account" : "anonymous",
-        managementRole: user?.isBlocked || canvas.status === "deleted" ? "none" : role,
+        managementRole:
+          !signInAllowed || user?.isBlocked || canvas.status === "deleted" ? "none" : role,
         result,
         reasons,
         checkedAt: Date.now(),

@@ -431,6 +431,31 @@ describe("admin routes", () => {
       });
     });
 
+    it("explains revoked sign-in permission even for an existing canvas owner", async () => {
+      client = await makeTestDb(dialect);
+      const user = await usersRepository(client).upsert({
+        providerSub: "external-owner",
+        email: "owner@outside.test",
+        name: "External owner",
+        isAdmin: false,
+      });
+      const id = await seedPublishedCanvas(client, user.id);
+      const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+      const explain = async () =>
+        (await (
+          await app.request(
+            `/api/admin/canvases/${id}/access-explanation?email=owner%40outside.test`,
+          )
+        ).json()) as { result: string; managementRole: string; reasons: string[] };
+      expect(await explain()).toMatchObject({ result: "denied", managementRole: "none" });
+      expect((await explain()).reasons.join(" ")).toContain("not permitted to sign in");
+      const permits = allowedEmailsRepository(client);
+      const permit = await permits.add(user.email, null);
+      expect(await explain()).toMatchObject({ result: "allowed", managementRole: "owner" });
+      await permits.remove(permit.id);
+      expect(await explain()).toMatchObject({ result: "denied", managementRole: "none" });
+    });
+
     it("uses live organization membership for whole-org and team editor explanations", async () => {
       client = await makeTestDb(dialect);
       const owner = await seedUser(client, "org-owner");

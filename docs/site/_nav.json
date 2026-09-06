@@ -54,6 +54,11 @@
     "pages": [
       { "path": "self-hosting/install", "file": "self-hosting/install.md", "title": "Install" },
       {
+        "path": "self-hosting/administration",
+        "file": "self-hosting/administration.md",
+        "title": "Administration"
+      },
+      {
         "path": "self-hosting/configuration",
         "file": "self-hosting/configuration.md",
         "title": "Configuration"
