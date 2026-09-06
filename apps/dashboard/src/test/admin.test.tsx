@@ -228,6 +228,89 @@ afterEach(() => {
 });
 
 describe("admin dashboard", () => {
+  it.each([false, true])(
+    "keeps archive results separate from refreshed eligibility (excluded selection: %s)",
+    async (hasExcludedCanvas) => {
+      let archived = false;
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () =>
+          canvasPage([
+            { ...ROW, status: archived ? "archived" : "active" },
+            { ...ROW, id: "c2", title: "Other canvas", status: "archived" },
+          ]),
+        "POST /api/admin/canvases/operations/preview": () =>
+          json({
+            action: "archive",
+            retentionDays: 30,
+            items: [
+              {
+                id: "c1",
+                title: ROW.title,
+                updatedAt: 123,
+                eligible: !archived,
+                explanation: archived ? "Requires active status" : null,
+                resources: null,
+              },
+              ...(hasExcludedCanvas
+                ? [
+                    {
+                      id: "c2",
+                      title: "Other canvas",
+                      updatedAt: 123,
+                      eligible: false,
+                      explanation: "Requires active status",
+                      resources: null,
+                    },
+                  ]
+                : []),
+            ],
+          }),
+        "POST /api/admin/canvases/operations/execute": () => {
+          archived = true;
+          return json({ outcomes: [{ id: "c1", status: "done", message: "Completed" }] });
+        },
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("checkbox", { name: "Select Happy Otter" }));
+      if (hasExcludedCanvas)
+        await user.click(screen.getByRole("checkbox", { name: "Select Other canvas" }));
+      await user.click(screen.getByRole("button", { name: "Archive selected" }));
+      const dialog = await screen.findByRole("dialog", { name: "Archive canvases" });
+      await within(dialog).findByText("Ready");
+      await user.type(within(dialog).getByLabelText("Reason for this operation"), "Retired");
+      await user.type(within(dialog).getByLabelText("Type ARCHIVE 1 to confirm"), "ARCHIVE 1");
+      await user.click(within(dialog).getByRole("button", { name: "Archive 1 selected" }));
+      await within(dialog).findByRole("region", { name: "Operation results" });
+      await waitFor(() =>
+        expect(calls.filter((call) => call.path.endsWith("operations/preview"))).toHaveLength(2),
+      );
+      expect(within(dialog).queryByText(/Skipped:/)).not.toBeInTheDocument();
+      expect(within(dialog).queryByText("Ready")).not.toBeInTheDocument();
+      expect(within(dialog).getByText(/: Archived/)).toBeInTheDocument();
+      expect(within(dialog).queryByText(/Completed/)).not.toBeInTheDocument();
+      if (hasExcludedCanvas) {
+        expect(
+          within(dialog).getByText(/Not included: Requires active status/),
+        ).toBeInTheDocument();
+        expect(
+          within(dialog).getByRole("button", { name: "Refresh preview for another attempt" }),
+        ).toBeInTheDocument();
+      } else {
+        expect(
+          within(dialog).getByRole("heading", { name: "1 canvas archived" }),
+        ).toBeInTheDocument();
+        expect(within(dialog).queryByText(/Requires active status/)).not.toBeInTheDocument();
+        expect(
+          within(dialog).queryByRole("button", { name: /another attempt/ }),
+        ).not.toBeInTheDocument();
+      }
+      await user.click(within(dialog).getByRole("button", { name: "Done" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    },
+  );
+
   it("previews only selected canvases and requires explicit confirmation before a bulk action", async () => {
     let previewUnavailable = false;
     mockFetch({

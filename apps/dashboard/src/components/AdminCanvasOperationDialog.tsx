@@ -15,6 +15,15 @@ export const ADMIN_OPERATION_LABELS: Record<AdminCanvasOperation, string> = {
   restore: "Restore",
   purge: "Permanently purge",
 };
+const COMPLETED_LABELS: Record<AdminCanvasOperation, string> = {
+  disable: "Disabled",
+  enable: "Enabled",
+  archive: "Archived",
+  unarchive: "Unarchived",
+  delete: "Deleted",
+  restore: "Restored",
+  purge: "Permanently purged",
+};
 const EFFECTS: Record<AdminCanvasOperation, string> = {
   disable:
     "Take these canvases offline. Owners can see the recorded reason. Their data is retained.",
@@ -55,6 +64,9 @@ export function AdminCanvasOperationDialog({
       item.eligible && item.updatedAt !== null ? [{ id: item.id, updatedAt: item.updatedAt }] : [],
     ) ?? [];
   const phrase = `${action.toUpperCase()} ${eligible.length}`;
+  const allSucceeded = results?.outcomes.every(
+    (outcome) => outcome.status === "done" || outcome.status === "purged",
+  );
   return (
     <Dialog
       placement="side"
@@ -75,8 +87,8 @@ export function AdminCanvasOperationDialog({
             unavailable; review and retry the remaining cleanup.
           </p>
         )}
-        {preview.isLoading && <p role="status">Preparing impact preview…</p>}
-        {preview.isError && (
+        {!results && preview.isLoading && <p role="status">Preparing impact preview…</p>}
+        {!results && preview.isError && (
           <p role="alert">
             Could not prepare the preview.{" "}
             <Button variant="ghost" onClick={() => preview.refetch()}>
@@ -84,7 +96,7 @@ export function AdminCanvasOperationDialog({
             </Button>
           </p>
         )}
-        {preview.data && (
+        {!results && preview.data && (
           <ul className="divide-y divide-border rounded-lg border border-border">
             {preview.data.items.map((item) => (
               <li key={item.id} className="space-y-1 p-3 text-sm">
@@ -150,7 +162,18 @@ export function AdminCanvasOperationDialog({
                     reason: reason.trim(),
                     confirmation,
                   });
-                  setResults(result);
+                  setResults({
+                    outcomes: [
+                      ...result.outcomes,
+                      ...(preview.data?.items
+                        .filter((item) => !item.eligible)
+                        .map((item) => ({
+                          id: item.id,
+                          status: "skipped",
+                          message: `Not included: ${item.explanation}`,
+                        })) ?? []),
+                    ],
+                  });
                   void qc.invalidateQueries({ queryKey: ["admin"] });
                 } catch {
                   /* The error state requires a fresh preview before retry. */
@@ -162,8 +185,12 @@ export function AdminCanvasOperationDialog({
           </>
         )}
         {results && (
-          <section aria-label="Operation results" className="space-y-2">
-            <h3 className="font-semibold">Results</h3>
+          <section aria-label="Operation results" aria-live="polite" className="space-y-2">
+            <h3 className="font-semibold">
+              {allSucceeded
+                ? `${results.outcomes.length} canvas${results.outcomes.length === 1 ? "" : "es"} ${COMPLETED_LABELS[action].toLowerCase()}`
+                : "Results"}
+            </h3>
             <ul className="space-y-2 text-sm">
               {results.outcomes.map((outcome) => (
                 <li key={outcome.id}>
@@ -171,13 +198,13 @@ export function AdminCanvasOperationDialog({
                     {preview.data?.items.find((item) => item.id === outcome.id)?.title ??
                       outcome.id}
                   </strong>
-                  : {outcome.message}
+                  : {outcome.status === "done" ? COMPLETED_LABELS[action] : outcome.message}
                 </li>
               ))}
             </ul>
           </section>
         )}
-        {(results || execute.isError) && (
+        {((results && !allSucceeded) || execute.isError) && (
           <Button
             variant="secondary"
             onClick={async () => {
