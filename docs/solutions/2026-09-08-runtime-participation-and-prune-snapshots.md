@@ -7,8 +7,9 @@ category: security-and-data-integrity
 # Runtime participation and immutable prune selections
 
 The implementation under issue #116 separates canvas editing from participant
-input. It remains unmerged and undeployed in this round; production impact
-inventory belongs to deployment preparation.
+input. It shipped in PR #117; see
+[rollout verification](2026-09-08-runtime-permissions-rollout.md) for the subsequent
+production migration and checks.
 
 ## Bound the action to the resource that was reviewed
 

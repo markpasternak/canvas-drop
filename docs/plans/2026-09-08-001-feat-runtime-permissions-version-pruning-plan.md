@@ -3,6 +3,12 @@ title: Participant permissions and version cleanup
 execution: code
 ---
 
+> Completed in PR #117 (`048f1ed`). On 8 September 2026 the user explicitly
+> authorized merge, deployment and canvas migration, including the admin merge
+> override. This supersedes the original no-merge/no-deploy boundary below.
+> See [rollout verification](../solutions/2026-09-08-runtime-permissions-rollout.md).
+
+
 # Goal
 
 Ship one unmerged PR containing bulk version cleanup, canvas-scoped identity and

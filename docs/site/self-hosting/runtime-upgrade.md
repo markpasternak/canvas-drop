@@ -2,8 +2,8 @@
 
 This release changes what existing canvas viewers can do. It preserves stored
 canvases, versions, KV and files. Prepare affected canvases before deploying it.
-Live inventory and deployment are separate operator steps; the implementation PR
-does not modify or deploy production canvases.
+The server migrations do not adapt deployed canvas code or infer record authors.
+Operators must prepare and apply those changes explicitly.
 
 There is one permission model. Upgrade each affected canvas to preserve its
 intended interactions; do not grant participants editor access to work around
@@ -67,7 +67,9 @@ or roll back live backend data.
 The SDK URL remains `/sdk/v1.js` and is normally cached for one hour. During
 rollout purge its CDN cache if present and reload clients with a fresh SDK before
 publishing canvases that call `kv.collection`, use bound attachments, or inspect
-resource permissions. An already open page keeps its loaded
+resource permissions. Give affected script URLs a new release query, for example
+`/sdk/v1.js?v=permissions-20260908`, so a normal reload avoids an old browser cache.
+A CDN purge alone cannot invalidate a copy already cached in a browser. An already open page keeps its loaded
 code until reload; changing server permissions takes effect immediately.
 
 Before deployment, inventory enabled-backend canvases and inspect their authored
