@@ -179,8 +179,19 @@ export function RuntimePolicySettings({
     <Section
       id="primitive-policies"
       title="Participation and permissions"
-      description="Choose a default, then add the collections, file groups or channels your canvas uses. Customize only when needed."
+      description="Each named collection, file group or channel has its own permissions. Choose a default for new resources, then customize only when needed."
     >
+      <p className="mb-4 text-sm text-muted">
+        Collections group data records in Key-value storage. File groups organize uploads in File
+        storage. Channels carry messages and presence in Realtime. Attachments follow their parent
+        record's permissions.{" "}
+        <a
+          href="/docs/sdk/permissions#features-resources-and-permissions"
+          className="text-accent underline"
+        >
+          How features and resources fit together
+        </a>
+      </p>
       <fieldset
         disabled={pending || !canvas.backendEnabled || canvas.status === "disabled"}
         className="min-w-0 space-y-4"
@@ -222,6 +233,7 @@ export function RuntimePolicySettings({
             Resource name
             <input
               className={control}
+              aria-describedby="resource-name-help"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="comments"
@@ -231,6 +243,10 @@ export function RuntimePolicySettings({
             Add resource
           </Button>
         </div>
+        <p id="resource-name-help" className="text-sm text-muted">
+          Use the same name in your canvas code. Adding a resource configures its permissions; your
+          app still creates the records, uploads files or sends messages.
+        </p>
         <details>
           <summary className="cursor-pointer font-medium text-accent">Advanced permissions</summary>
           <div className="mt-4 space-y-4">

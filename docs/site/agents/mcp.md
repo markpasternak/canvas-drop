@@ -401,6 +401,11 @@ revisions fail with `POLICY_CONFLICT`; reload and reconcile. Policies support
 collection/file presets and overrides, channel rights, and per-Connection audiences
 and methods. Defaults initialize new resources; they do not change existing ones.
 See [Permissions and defaults](/docs/sdk/permissions) for the complete schema.
+Collections group authored records inside KV, file groups organize standalone
+uploads inside Files, and channels carry messages/presence inside Realtime. Each
+name identifies a resource with its own policy. Match configured names in canvas
+code; settings do not generate application features or migrate raw keys. The
+[Data storage guide](/docs/sdk/kv) explains the storage choices and collection API.
 
 Viewers use configured authored collections, private preferences or the
 [`submissions`](/docs/sdk/submissions) convenience API. Raw shared KV mutations

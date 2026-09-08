@@ -91,7 +91,14 @@ Create the canvas first and copy its deploy key from the dashboard. Each key pub
 
 ## Give a canvas a backend
 
-In the canvas's **Backend** tab, enable the capabilities it needs. Load the SDK from the canvas page:
+In the canvas's **Backend** tab, enable the capabilities it needs.
+
+The backend features (primitives) provide different kinds of named resources:
+**Data storage (KV) → collections** of authored records, **Files → file groups**
+of uploads, and **Realtime → channels** for messages and presence. Each resource
+has its own permission settings. A collection groups data; a policy controls access
+to that data. Two collections can have the same or different policies. See
+[Data storage](docs/site/sdk/kv.md) to choose shared values, private preferences or collections.
 
 Choose Read only, Participation or Collaboration as the default for new resources.
 Collections and file groups have five presets; advanced controls customize individual
@@ -103,6 +110,8 @@ The Backend tab manages these policies; the admin inspector shows their configur
 canvases need their code, data and policies adapted before rollout so comments,
 forms and live signals keep their intended behavior. There is one permission model;
 see the [upgrade guide](docs/site/self-hosting/runtime-upgrade.md).
+
+Load the SDK from the canvas page:
 
 ```html
 <script src="/sdk/v1.js"></script>

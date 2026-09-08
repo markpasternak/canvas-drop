@@ -40,7 +40,7 @@ Two legacy values, `specific_people` and `team`, are still accepted and stored b
 
 Editors are admitted at every choice, never see the password prompt, and are unaffected by expiry. Everyone else is evaluated per request, with nothing cached: a change to General access, the list, or the locks applies on the very next request. Anyone with no route in gets an opaque **404**, never a "forbidden" that confirms the canvas exists.
 
-**When an org boundary is configured** (the operator set `CANVAS_DROP_ORG_NAME`; off by default), **Whole org** means *members of this canvas's home org*, not "anyone signed in". Members pick **Personal** or the workspace when they create a canvas (a [fixed choice](/docs/authoring/create-and-publish#personal-vs-workspace)). A Personal canvas cannot be shared org-wide: the choice is shown disabled, and the server refuses with `ORG_REQUIRED` (HTTP 409). A **guest** (a signed-in user in no org) never sees Whole-org canvases, only the ones they are added to. With no org configured, Whole org is "any signed-in user".
+**When an org boundary is configured** (the operator set `CANVAS_DROP_ORG_NAME`; off by default), **Whole org** means *members of this canvas's home org*, not "anyone signed in". Members pick **Personal** or the workspace when they create a canvas (a [fixed choice](/docs/authoring/create-and-publish#options-at-create-time)). A Personal canvas cannot be shared org-wide: the choice is shown disabled, and the server refuses with `ORG_REQUIRED` (HTTP 409). A **guest** (a signed-in user in no org) never sees Whole-org canvases, only the ones they are added to. With no org configured, Whole org is "any signed-in user".
 
 Which choices you see depends on your account: **Whole org** is hidden for guests, and **Public link** appears only while your own account may publish publicly. A choice the canvas is already on stays visible either way.
 
@@ -126,7 +126,7 @@ You can grant only teams you belong to, and an org team must match the canvas's 
 
 Members find a team-shared canvas under **Shared** right away (or through `list_shared_canvases` over MCP); a canvas shared only with people and teams never appears in the gallery. Changing General access never touches team grants: only removing the team from the list does.
 
-> Unlike **Whole org**, sharing with a team does not need an org workspace: any signed-in user can create a personal team and share even a [Personal](/docs/authoring/create-and-publish#personal-vs-workspace) canvas with it. Manage teams on the **Teams** page.
+> Unlike **Whole org**, sharing with a team does not need an org workspace: any signed-in user can create a personal team and share even a [Personal](/docs/authoring/create-and-publish#options-at-create-time) canvas with it. Manage teams on the **Teams** page.
 
 ## Protection: password & expiry
 

@@ -66,3 +66,12 @@ through an owner's runtime session would incorrectly attribute them to that owne
 Preserve record references and attachment associations during the coordinated
 cutover. Admin inspection shows the same parsed policies as the management surface
 without granting access to private records.
+
+Documentation must introduce the feature/resource/policy distinction before
+permission presets. Collections belong to data storage and group authored records;
+their policies are independent settings. Put the collection SDK reference alongside
+shared/personal KV, with a decision table for storage choices. File groups and
+channels need the same explicit mapping to Files and Realtime. A form that asks for
+a resource name should explain that the app must use that name; configuration does
+not generate a commenting feature or migrate existing raw keys. Keep generated
+docs, agent-skill exports and quickstart examples aligned with that explanation.

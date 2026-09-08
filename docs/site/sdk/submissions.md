@@ -2,8 +2,12 @@
 
 This convenience API stores one private response per person. For multiple records
 per author, shared comments or configurable participation rules, use
-[`kv.collection(name)`](/docs/sdk/permissions). These are separate reserved KV
+[`kv.collection(name)`](/docs/sdk/kv#collection-api). These are separate reserved KV
 namespaces; changing a collection policy does not change this convenience API.
+Here the `collection` argument names a group of one-response-per-person
+submissions. It does not refer to a collection configured in resource settings,
+even when both use the same name. This API has fixed access rules and does not
+require adding that name under Participation and permissions.
 
 Collect votes, forms and feedback without granting viewers control over shared
 content. Submissions use the KV capability: enable Backend and Key-value storage.

@@ -55,7 +55,7 @@
       {
         "path": "sdk/kv",
         "file": "sdk/kv.md",
-        "title": "Key\u2013value storage"
+        "title": "Data storage (KV)"
       },
       {
         "path": "sdk/submissions",

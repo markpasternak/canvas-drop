@@ -97,12 +97,18 @@ The [Capabilities](/docs/authoring/capabilities) page covers the tab.
 
 ## The surface
 
+Features and their named resources are separate: Data storage provides collections,
+Files provides file groups, and Realtime provides channels. Each named resource
+has its own permissions. A collection groups records; a policy controls who can
+use those records. See [the model and resource mapping](/docs/sdk/permissions#features-resources-and-permissions)
+before choosing presets, or [choose how to store your data](/docs/sdk/kv#choose-how-to-store-your-data).
+
 | Namespace | What it does | Reference |
 | --- | --- | --- |
 | `canvasdrop.me()` | The signed-in viewer: `{ id, email, name, avatarUrl, kind, canvasRole, permissions }`. `kind` is `"member"`, or `"guest"` for a retained legacy guest session. | [Identity](/docs/sdk/identity) |
-| `canvasdrop.kv` | `get`, `set`, `delete`, `list`, `increment`. The same five on `canvasdrop.kv.user` store per viewer. `get` resolves `null` for a missing key. | [KV](/docs/sdk/kv) |
+| `canvasdrop.kv` | Shared values, private preferences through `kv.user`, and named authored records through `kv.collection(name)`. | [Data storage](/docs/sdk/kv) |
 | `canvasdrop.submissions` | Own `get/set/delete`; owner/editor `list/remove/clear` for reviewable participant input. | [Submissions](/docs/sdk/submissions) |
-| `canvasdrop.files` | `upload(file)`, `list()`, `delete(id)`, and the synchronous `url(id)`. | [Files](/docs/sdk/files) |
+| `canvasdrop.files` | Upload to a configured file group, attach to a collection record, or use a built-in scope. List, rename, delete and serve permitted files. | [Files](/docs/sdk/files) |
 | `canvasdrop.ai` | `chat(messages, { model })` resolves `{ text, usage, cost }`; `stream(messages, { model })` yields text chunks. `model` is required; `system` and `maxTokens` are optional. | [AI](/docs/sdk/ai) |
 | `canvasdrop.realtime` | `channel(name)` returns a channel with `publish`, `subscribe`, `unsubscribe`, `presence`, `onPresence`, `onJoin`, `onLeave`, `onError`, `close`, over one shared WebSocket that reconnects on its own. | [Realtime](/docs/sdk/realtime) |
 | `canvasdrop.connections` | `fetch(profile, relativePath, init?)` returns a native upstream `Response` through one exact origin an admin granted to the canvas. Protected headers stay server-side. | [Connections](/docs/sdk/connections) |

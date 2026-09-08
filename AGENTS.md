@@ -165,3 +165,8 @@ The follow-up plan `docs/plans/2026-09-08-003-feat-permission-admin-and-rollout-
 covers admin inspection, marketing and rollout readiness. There is one permission
 model, with explicit app/data adaptations before rollout. See
 `docs/site/self-hosting/runtime-upgrade.md` for cutover requirements.
+The explanation plan `docs/plans/2026-09-08-004-docs-resource-model-explanation-plan.md`
+keeps resource terminology consistent: collections group authored KV records;
+file groups organize Files uploads; channels group Realtime messages/presence.
+Policies are settings attached to these named resources. The SDK collection API
+lives in `docs/site/sdk/kv.md`; configuration belongs in the permissions guide.

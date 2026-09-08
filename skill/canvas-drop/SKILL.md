@@ -58,7 +58,8 @@ No shell? `deploy_canvas(id, files: [{path, content}])` over MCP publishes in on
   kept; you can roll back to any of them.
 - **Public link is static-only.** On a `public_link` canvas the primitives are refused
   for every viewer except the owner and editors (`STATIC_ONLY`, 403). Every other rung
-  requires sign-in, and the primitives work for anyone who can open the canvas.
+  requires sign-in; each operation additionally checks its feature and resource
+  permissions. Opening a canvas does not grant every backend operation.
 - **Roles.** A canvas has one owner; editors are owner-equivalent except delete,
   transfer, and the guest-AI fields. Viewers can open it but not manage it. A canvas
   you hold no role on reads as not found on every management surface.
@@ -378,6 +379,13 @@ on those channels. Role refusals use `PERMISSION_DENIED` / `PermissionDeniedErro
 See `{base}/docs/sdk/submissions` and `{base}/docs/sdk/identity` for the contracts.
 
 For multiple authored items, configure a collection and use `kv.collection(name)`.
+A collection is a named group of records inside the KV primitive; its policy is
+a separate setting. Collections can use identical presets while storing separate
+records, or different presets for different audiences. Files has file groups for
+standalone uploads; Realtime has channels for messages and presence. Match resource
+names between settings and code. Adding a resource does not build application UI
+or migrate raw shared keys. Shared `kv` values and private `kv.user` preferences
+remain separate storage choices; see `{base}/docs/sdk/kv` for the model and API.
 Five presets: personal, submissions, contributions, managed, collaborative. Shared
 contributions let everyone read/create, with author or owner/editor update/delete.
 The server generates ids and immutable authorId. Attach files with `{collection,
@@ -389,7 +397,8 @@ MCP `set_capabilities` accepts the complete `runtimePolicy` plus
 Preserve existing entries; reconcile POLICY_CONFLICT rather than overwriting blindly.
 Per-channel subscribe/publish/seePresence/participatePresence and per-Connection
 audience/method rules override legacy defaults. `me().resources` exposes effective
-operation rights. See `{base}/docs/sdk/permissions` for the schema and SDK methods.
+operation rights. See `{base}/docs/sdk/permissions` for the policy schema and
+`{base}/docs/sdk/kv#collection-api` for collection SDK methods.
 
 For version cleanup, `preview_version_prune(id, versions)` accepts `"previous"` or
 an explicit list. Review `versions`, `expectedVersionIds`, `skipped` and

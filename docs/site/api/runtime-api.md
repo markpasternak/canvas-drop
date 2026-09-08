@@ -513,6 +513,13 @@ the SDK delivers it through `channel.onError`.
 
 ## Authored collections and resource permissions
 
+A collection is a named group of authored JSON records within the KV primitive.
+Its name identifies the group, while its policy controls access to the records.
+Different collections can have different policies or share a preset without
+sharing data. Changing a policy preserves record membership and authorship.
+The [Data storage guide](/docs/sdk/kv#what-a-collection-is) explains the model and
+when to use collections instead of shared or personal key-value pairs.
+
 The [complete policy guide](/docs/sdk/permissions) defines the five presets,
 defaults, overrides and management/MCP configuration. Runtime routes require a
 configured collection, effective KV and the live caller's resource rights. All

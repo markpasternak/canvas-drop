@@ -50,7 +50,7 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
     name: "Key-value",
     tag: "kv",
     blurb:
-      "Store shared content, private preferences and authored contributions. Choose a preset, then refine who can read or change each resource.",
+      "Store shared values, private preferences and collections of authored records. Each collection has its own permissions.",
     glyph: "M4 7h16M4 12h16M4 17h10",
   },
   {

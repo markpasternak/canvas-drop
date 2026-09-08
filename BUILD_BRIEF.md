@@ -224,13 +224,21 @@ managers mutate), Managed content (everyone reads; managers mutate), and Collabo
 content (everyone reads/creates/mutates). Bounded operation overrides control
 read/create/update/delete/increment; mutations also require read permission.
 
+A collection is a named group of related records within one canvas, provided by
+the KV primitive. Its policy is a separate setting: collections with identical
+policies still have separate data, and changing a policy changes access without
+changing record membership or authorship. File groups similarly group standalone
+uploads under Files; Realtime channels group ephemeral messages and presence.
+AI, Connections and identity retain their own controls. Resource configuration
+does not implement application UI or migrate existing raw keys into collections.
+
 `kv.collection(name)` uses reserved KV scopes and server-generated record ids with
 immutable server-derived authorship, supports multiple records per author, bounded
 pagination filtered before retrieval, atomic increment and author-filtered bulk
 deletion. Values are JSON up to 64 KiB; limits across collections default to 10,000
 records per canvas and 1,000 per author. An explicit aggregateCount audience permits
 only total count; private fields are never exposed through aggregation. No arbitrary
-query or permission expression language. Existing shared KV and the compatibility
+query or permission expression language. Existing shared KV and the one-response
 submissions namespace retain their contracts below.
 
 File groups use the same presets; attachments inherit their parent record's access.

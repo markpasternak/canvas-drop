@@ -12,6 +12,25 @@ stored; put anything that must survive a reload in [KV](/docs/sdk/kv).
 URL. The `from` on every message and every entry in the presence list come from
 the viewer's server-side session, never from the page, so names are trustworthy.
 
+## Channels and their permissions
+
+A **channel** is a named stream of messages and presence within one canvas. It is
+the resource type inside the Realtime primitive. Each configured channel has its
+own receive, publish, see-presence and appear-in-presence permissions.
+
+For example, `activity` can allow all participants to send and receive editing
+signals, while `presentation-navigation` allows everyone to receive and only
+owners/editors to publish. Both use Realtime with independent policies. Changing
+a channel's settings changes access to that channel; it does not rename it or move
+subscribers to another channel. Messages are ephemeral, so a channel is not a
+collection of stored records. Data writes do not automatically publish messages.
+
+Configure exact channel names in **Backend → Participation and permissions** and
+use those names in `realtime.channel(name)`. See
+[Permissions and defaults](/docs/sdk/permissions) for configuration and defaults
+for unconfigured channels. The example below uses the built-in `participants:`
+prefix, which permits participant publishing unless an explicit policy overrides it.
+
 ```js
 const room = canvasdrop.realtime.channel("participants:room");
 

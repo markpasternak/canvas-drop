@@ -44,6 +44,9 @@ manage these in the canvas's Backend tab. Admin inspection exposes configuration
 not private participant records, and admin status does not grant a canvas role.
 Existing interactive canvases need deliberate code/data/policy adaptation before
 rollout; see [Upgrading runtime permissions](/docs/self-hosting/runtime-upgrade).
+Collections belong to data storage, file groups to Files, and channels to Realtime.
+Each named resource has independent settings; identical presets do not combine
+their data. See [Features, resources and permissions](/docs/sdk/permissions#features-resources-and-permissions).
 
 Enter a person's email in the access explanation to check their current account,
 ownership/editor role, direct grants, teams, live organization membership, and pending

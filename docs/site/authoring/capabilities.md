@@ -9,6 +9,26 @@ Outbound Connections also has no owner-controlled feature toggle: each reusable
 profile is granted to the canvas by an instance administrator and remains gated
 by the same Backend master switch.
 
+## How features and resources fit together
+
+The six runtime **primitives** are backend features. Three support named resources
+with their own settings: **Key-value storage → collections** of authored records,
+**File storage → file groups** of standalone uploads, and **Realtime → channels**
+for messages and presence. Each collection, group or channel can have different
+permissions. A policy controls access to a resource; it does not define which
+records belong to it. Attachments inherit their parent record's permissions.
+
+AI uses audience and budget settings, Connections uses per-profile audience/method
+rules within administrator grants, and Identity reports the caller's role and
+rights. Authoring is a separate capability for creating other canvases.
+
+Enable the feature first, then configure the resources your app uses and reference
+their names in its code. Adding a `comments` collection configures its access;
+the app still implements commenting and creates the records. For simple settings
+or private preferences, the data feature also provides fixed shared and personal
+key-value scopes. Start with [Data storage](/docs/sdk/kv) and
+[Permissions and defaults](/docs/sdk/permissions).
+
 ## Turn on the backend
 
 1. Open the canvas and go to the **Backend** tab.
@@ -20,8 +40,8 @@ by the same Backend master switch.
    on (where the instance supports them). **Authoring** starts off and stays off
    until you turn it on.
 
-Then call the features from the page through `window.canvasdrop`. No keys, no
-setup:
+Then call the features from the page through `window.canvasdrop`, without browser
+secrets. The simple personal-storage example needs no named resource:
 
 ```html
 <script src="/sdk/v1.js"></script>
@@ -58,7 +78,7 @@ live realtime sockets. A canvas an admin has disabled refuses the change with
 |---|---|---|---|---|
 | Enable backend | `backendEnabled` | off | The master switch; nothing below runs without it | |
 | Identity (no toggle) | `identity` | follows the backend | The signed-in viewer: id, email, name, avatar | [`me()`](/docs/sdk/identity) |
-| Key-value storage | `kv` | on | Shared and per-viewer JSON storage, atomic increment | [`kv`](/docs/sdk/kv) |
+| Key-value storage | `kv` | on | Shared values, private preferences and authored collections | [`kv`](/docs/sdk/kv) |
 | File storage | `files` | on | Upload, list, delete, and serve files | [`files`](/docs/sdk/files) |
 | AI | `ai` | on | Server-side model calls; no provider key in the page | [`ai`](/docs/sdk/ai) |
 | Realtime | `realtime` | on | Ephemeral pub/sub and presence over WebSockets | [`realtime`](/docs/sdk/realtime) |

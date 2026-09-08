@@ -21,6 +21,9 @@ The [rollout-readiness follow-up](plans/2026-09-08-003-feat-permission-admin-and
 adds read-only permission details to the admin inspector and updates marketing,
 README and administration guidance. There is one permission model; affected apps
 must be adapted to preserve their intended interactions before rollout.
+The [resource-model documentation follow-up](plans/2026-09-08-004-docs-resource-model-explanation-plan.md)
+introduces the feature/resource/policy distinction, storage choices and per-resource
+settings across the docs, agent skill, examples and Backend help text.
 
 **M10 ops/packaging is the one open milestone.**
 

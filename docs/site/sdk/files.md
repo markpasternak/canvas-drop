@@ -9,7 +9,35 @@ list, serve, and delete files, and handle every error the primitive returns.
 The canvas needs **Enable backend** on and the **File storage** toggle on (it is
 pre-enabled) in its **Backend** tab; see
 [Capabilities](/docs/authoring/capabilities). There is nothing to configure in
-the page and no key to hold.
+the page for the built-in shared/submission scopes and no key to hold. File groups
+and record attachments use the resource configuration described below.
+
+## File groups and attachments
+
+A **file group** is a named group of standalone uploads within one canvas, such
+as `documents` or `images`. It belongs to the Files primitive. Each group has its
+own permission policy: two groups can have different access rules, or use the
+same preset while containing separate files. Configure the group in **Backend →
+Participation and permissions**, then use the same name in your canvas code:
+
+```js
+await canvasdrop.files.upload(file, { group: "documents" });
+```
+
+A file attached to a collection record follows that record's permissions instead.
+Create the parent record first, then upload with its collection name and record
+ID. No separate file group is needed. Uploading requires read/update access to the
+parent, even if a different person originally created that record:
+
+```js
+await canvasdrop.files.upload(file, { collection: "comments", recordId: comment.id });
+```
+
+Changing a group or parent collection's policy changes access to existing files;
+it does not move them into another group. Content URLs enforce the same rights.
+See [Permissions and defaults](/docs/sdk/permissions) for presets and operation rules.
+
+## Built-in shared and submission scopes
 
 ```html
 <script src="/sdk/v1.js"></script>
@@ -24,7 +52,7 @@ the page and no key to hold.
 </script>
 ```
 
-Legacy files have two scopes. **Shared** (the default) files are readable by admitted
+The built-in scopes have fixed rules. **Shared** (the default) files are readable by admitted
 viewers; only owners/editors upload or delete them. **Submission** files are
 visible to their authenticated uploader and owners/editors. The uploader can
 delete their own submission file; owners/editors can manage all submission files.
@@ -81,14 +109,15 @@ replaces it with the absolute content URL before resolving, so `f.url` is
 correct in both URL modes. The result carries no `mime` or `createdAt`; call
 `list()` when you need them.
 
-Pass `{ scope: "submission" }` for participant attachments; the SDK sends a
+Pass `{ scope: "submission" }` for standalone private submissions; the SDK sends a
 multipart field `scope`. An omitted scope is `shared`. There is no progress callback. For a large file, show your
 own pending state around the `await`. Ids are server-assigned UUIDs.
 
 ### list
 
-For legacy scopes, `list()` resolves to shared files plus your own submission files; owners/editors
-receive all files, with metadata, in one array.
+For the built-in scopes, `list()` resolves to shared files plus your own submission files;
+owners/editors receive all shared/submission files. Group files and record attachments
+are included only when their policies allow the caller to read them.
 There is no paging and no filter.
 
 ### delete

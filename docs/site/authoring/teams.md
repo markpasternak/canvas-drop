@@ -54,7 +54,7 @@ for the full picture.
 > brand-new *external* email (one that can't already sign in) is **admin-only** unless
 > the operator turns on `invites.allowMemberNewEmails`. Adds are also
 > rate-limited per person. See
-> [Sign-in permits & access emails](/docs/self-hosting/configuration#sign-in-permits--access-emails).
+> [Sign-in permits & access emails](/docs/self-hosting/configuration#sign-in-permits-and-access-emails).
 
 ## The roster
 

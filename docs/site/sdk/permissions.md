@@ -4,6 +4,33 @@ Canvas roles are **owner**, **editor** and **viewer**. A viewer can participate
 without permission to change the canvas's code or manage its versions. Identity,
 authorship and authorization come from the server. Hiding a button is only UI.
 
+## Features, resources and permissions
+
+A **primitive** is a backend feature, such as data storage, files or realtime.
+A **resource** is a named group inside one of those features. A **policy** is the
+set of permissions attached to that resource.
+
+| Resource type | Backend feature | What it groups | Example |
+|---|---|---|---|
+| Collection | [Data storage (KV)](/docs/sdk/kv#what-a-collection-is) | Authored JSON records | `comments`, `answers` |
+| File group | [File storage](/docs/sdk/files#file-groups-and-attachments) | Standalone uploaded files | `documents` |
+| Channel | [Realtime](/docs/sdk/realtime#channels-and-their-permissions) | Live messages and presence | `activity`, `presentation-navigation` |
+
+Each named resource has its own settings. Two collections can share a preset
+while containing separate records; changing a collection's policy changes access
+to its records, not their membership or authorship. For example, use Shared
+contributions for comments visible to all participants and Private submissions for
+answers only their author and owners/editors can read.
+
+Attachments inherit their parent record's permissions, so they do not need a
+separate file group. AI has audience and budget controls, Connections has
+per-profile audience/method rules, and Identity reports the caller's role and
+effective rights. Those features do not use the three resource types above.
+
+The canvas's code must use the configured resource names. Adding `comments` here
+does not build a comment form or migrate existing shared keys. An owner/editor
+configures the collection; the app creates its records through the runtime API.
+
 ## Start with a default
 
 In **Backend → Participation and permissions**, choose **Read only**,
@@ -93,43 +120,10 @@ they cannot declare its policy or choose their author identity in a request.
 
 ## Authored collection records
 
-Collections are part of KV, using reserved internal scopes. First configure the
-collection, then use `kv.collection(name)`:
-
-```js
-const comments = canvasdrop.kv.collection("comments");
-const comment = await comments.create({ text: "Clarify the chart", status: "open" });
-// { id, authorId, value, updatedAt } — authorId is immutable, assigned by the server.
-await comments.update(comment.id, { ...comment.value, status: "fixed" });
-const page = await comments.list({ limit: 100 });
-const rights = await comments.permissions();
-// rights.update.own / rights.update.any; inspect me().id against record.authorId.
-await canvasdrop.files.upload(file, { collection: "comments", recordId: comment.id });
-```
-
-| Method | Result |
-|---|---|
-| `create(value)` | New record; multiple records per author |
-| `get(id)` | Record or null if absent/inaccessible |
-| `update(id, value)` | Updated record; author unchanged |
-| `delete(id)` | Delete a permitted record and clean up its attachments |
-| `list({limit?, cursor?})` | `{entries, nextCursor}` filtered before pagination |
-| `clear()` | `{deleted, attachmentCleanupFailed}` for permitted records only |
-| `increment(id, by = 1)` | Updated numeric record; atomic, requires increment permission |
-| `permissions()` | Effective read/create/update/delete/increment rights, each `{own, any}` |
-| `count()` | Total record count, only if `aggregateCount` explicitly permits it |
-
-Values are JSON including null, with a 64 KiB request limit. Pagination defaults
-to 100, accepts 1–1000 and uses the opaque returned cursor. The existing admin KV
-limits apply separately across authored collections: 10,000 records per canvas
-and 1,000 per author by default. Creation limits are best-effort under concurrent
-requests, like existing KV quotas. Updates at the limit remain available.
-
-Count is opt-in and reveals only the collection size. It does not publish private
-answers or arbitrary field aggregates. For votes, store authored responses and
-publish a validated result through managed data; allowing a shared counter
-increment is not a one-vote-per-person rule. The existing `submissions` convenience
-API remains useful for one private response per person per collection.
+A collection groups records with server-assigned IDs and immutable authorship.
+Configure its policy here, then use `kv.collection(name)` in your canvas code.
+See the [Data storage guide](/docs/sdk/kv#what-a-collection-is) for the model,
+when to use collections, and the [complete collection API](/docs/sdk/kv#collection-api).
 
 ## Files and realtime
 
@@ -143,7 +137,7 @@ best-effort and logged, never a measured-space guarantee.
 
 Channel rights independently control receiving, publishing, seeing presence and
 appearing in presence. All use `none`, `editors`, or `viewers`. Every operation
-revalidates live roles and receiver policies. For unconfigured legacy channels,
+revalidates live roles and receiver policies. For unconfigured channels,
 everyone admitted can subscribe and use presence; only owners/editors publish,
 except `participants:` channels, which allow participant publishing. A configured
 channel's policy takes precedence over that prefix. KV changes do not automatically
