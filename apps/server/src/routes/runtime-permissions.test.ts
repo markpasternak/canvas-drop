@@ -30,7 +30,7 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => client?.close());
 
-  async function setup() {
+  async function setup(keyLimit?: number) {
     client = await makeTestDb(dialect);
     const users = usersRepository(client);
     const identities = await Promise.all(
@@ -71,6 +71,7 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
         "/v1/c/:slug",
         canvasApiRoutes({
           config,
+          quota: keyLimit === undefined ? undefined : async () => keyLimit,
           canvases,
           files,
           kv: kvRepository(client),
@@ -168,5 +169,93 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
     await canvases.updateCapabilities(canvas.id, { ai: false });
     const denied = await as(viewer).request("/v1/c/app/ai/chat", request);
     expect(await denied.json()).toMatchObject({ code: "CAPABILITY_DISABLED" });
+  });
+  it("isolates submissions by authenticated author and canvas, with editor review and withdrawal", async () => {
+    const { owner, editor, viewer, other, canvas, canvases, as } = await setup();
+    const path = "/v1/c/app/submissions/vote";
+    const forged = { userId: other.id, updatedAt: 1, choice: "blue" };
+    const saved = await as(viewer).request(`${path}/mine`, put(forged));
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      userId: viewer.id,
+      value: forged,
+      updatedAt: expect.any(Number),
+    });
+    expect((await as(other).request(`${path}/mine`)).status).toBe(404);
+    expect((await as(other).request(path)).status).toBe(403);
+    expect((await as(other).request(`${path}/${viewer.id}`, { method: "DELETE" })).status).toBe(
+      403,
+    );
+    expect((await as(other).request(path, { method: "DELETE" })).status).toBe(403);
+    expect((await as(viewer).request(`/v1/c/app/kv/user/vote`)).status).toBe(404);
+    await as(viewer).request(`${path}/mine`, put(null));
+    expect(await (await as(viewer).request(`${path}/mine`)).json()).toMatchObject({ value: null });
+    await as(other).request(`${path}/mine`, put("red"));
+    const page = (await (await as(editor).request(`${path}?limit=1`)).json()) as {
+      entries: Array<{ userId: string }>;
+      nextCursor: string;
+    };
+    expect(page.entries).toHaveLength(1);
+    const next = (await (
+      await as(owner).request(`${path}?limit=1&cursor=${page.nextCursor}`)
+    ).json()) as { entries: Array<{ userId: string }>; nextCursor: null };
+    expect(next.entries).toHaveLength(1);
+    expect(next.nextCursor).toBeNull();
+    expect(new Set([...page.entries, ...next.entries].map((row) => row.userId))).toEqual(
+      new Set([viewer.id, other.id]),
+    );
+    const second = await canvases.create({
+      ownerId: owner.id,
+      slug: "second",
+      apiKeyHash: "key2",
+      backendEnabled: true,
+    });
+    await canvases.updateSettings(second.id, { access: "whole_org" });
+    expect(await (await as(owner).request("/v1/c/second/submissions/vote")).json()).toEqual({
+      entries: [],
+      nextCursor: null,
+    });
+    await as(editor).request(`${path}/${other.id}`, { method: "DELETE" });
+    expect((await as(other).request(`${path}/mine`)).status).toBe(404);
+    await as(viewer).request(`${path}/mine`, { method: "DELETE" });
+    expect((await as(viewer).request(`${path}/mine`)).status).toBe(404);
+    await as(viewer).request(`${path}/mine`, put("green"));
+    const grant = await canvases.findMemberEntry(canvas.id, editor.id);
+    if (!grant) throw new Error("missing grant");
+    await canvases.setAllowlistRole(canvas.id, grant.id, "viewer");
+    expect((await as(editor).request(path)).status).toBe(403);
+    await as(owner).request(path, { method: "DELETE" });
+    expect(await (await as(owner).request(path)).json()).toEqual({ entries: [], nextCursor: null });
+    await canvases.updateCapabilities(canvas.id, { kv: false });
+    expect(await (await as(viewer).request(`${path}/mine`, put("denied"))).json()).toMatchObject({
+      code: "CAPABILITY_DISABLED",
+    });
+  });
+
+  it("bounds submissions across collections and rejects malformed input while allowing updates at quota", async () => {
+    const { owner, viewer, as } = await setup(1);
+    const app = as(viewer);
+    expect((await app.request("/v1/c/app/submissions/first/mine", put("one"))).status).toBe(200);
+    expect((await app.request("/v1/c/app/submissions/first/mine", put("updated"))).status).toBe(
+      200,
+    );
+    expect((await app.request("/v1/c/app/submissions/second/mine", put("two"))).status).toBe(409);
+    expect(
+      (await as(owner).request("/v1/c/app/submissions/first/mine", put("too many"))).status,
+    ).toBe(409);
+    for (const collection of ["bad%3Aname", "a".repeat(81)]) {
+      expect((await app.request(`/v1/c/app/submissions/${collection}/mine`, put("x"))).status).toBe(
+        400,
+      );
+    }
+    expect(
+      (await app.request("/v1/c/app/submissions/first/mine", { method: "PUT", body: "{" })).status,
+    ).toBe(400);
+    expect(
+      (await app.request("/v1/c/app/submissions/first/mine", put("x".repeat(65536)))).status,
+    ).toBe(413);
+    for (const query of ["limit=NaN", "limit=1.5", "limit=1001", "cursor=%25", "cursor="]) {
+      expect((await as(owner).request(`/v1/c/app/submissions/first?${query}`)).status).toBe(400);
+    }
   });
 });

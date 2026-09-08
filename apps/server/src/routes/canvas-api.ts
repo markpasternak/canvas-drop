@@ -37,6 +37,7 @@ import { type CanvasConnectionsDeps, canvasConnectionsRoutes } from "./canvas-co
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
 import { canvasRealtimeRoutes } from "./canvas-realtime.js";
+import { canvasSubmissionRoutes } from "./canvas-submissions.js";
 
 export interface CanvasApiDeps {
   config: Config;
@@ -213,6 +214,7 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
 
   // KV primitive (U6) and Files primitive (U7).
   app.route("/kv", canvasKvRoutes(deps));
+  app.route("/submissions", canvasSubmissionRoutes(deps));
   app.route("/files", canvasFilesRoutes(deps));
 
   if (deps.connections) {

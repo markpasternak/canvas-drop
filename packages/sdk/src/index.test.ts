@@ -835,3 +835,52 @@ it("surfaces a realtime role denial through the channel error callback", () => {
   );
   channel.close();
 });
+
+describe("submissions", () => {
+  it("uses caller-scoped endpoints and preserves attribution and null values", async () => {
+    const fetch = fetchMock(async () =>
+      res(200, { userId: "server-user", value: null, updatedAt: 42 }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    expect(await client.submissions.set("poll", null)).toEqual({
+      userId: "server-user",
+      value: null,
+      updatedAt: 42,
+    });
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll/mine"),
+      expect.objectContaining({ method: "PUT", body: "null", credentials: "include" }),
+    );
+    expect((await client.submissions.get("poll"))?.userId).toBe("server-user");
+    await client.submissions.delete("poll");
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll/mine"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    fetch.mockResolvedValueOnce(res(404, { code: "NOT_FOUND" }));
+    expect(await client.submissions.get("missing")).toBeNull();
+    fetch.mockResolvedValueOnce(res(403, { code: "PERMISSION_DENIED" }));
+    await expect(client.submissions.list("poll")).rejects.toMatchObject({
+      name: "PermissionDeniedError",
+    });
+  });
+  it("encodes review pagination and targeted removal separately from withdrawal", async () => {
+    const fetch = fetchMock();
+    const client = createClient({ context: ctx, fetch });
+    await client.submissions.list("poll", { cursor: "author-id", limit: 3 });
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll?cursor=author-id&limit=3"),
+      expect.objectContaining({ method: "GET" }),
+    );
+    await client.submissions.remove("poll", "author/id");
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll/author%2Fid"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    await client.submissions.clear("poll");
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringMatching(/\/submissions\/poll$/),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});

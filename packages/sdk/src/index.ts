@@ -388,6 +388,23 @@ export interface KvList {
   nextCursor: string | null;
 }
 
+export interface Submission<T = unknown> {
+  userId: string;
+  value: T;
+  updatedAt: number;
+}
+export interface SubmissionsNamespace {
+  get<T = unknown>(collection: string): Promise<Submission<T> | null>;
+  set<T>(collection: string, value: T): Promise<Submission<T>>;
+  delete(collection: string): Promise<void>;
+  list<T = unknown>(
+    collection: string,
+    options?: { cursor?: string; limit?: number },
+  ): Promise<{ entries: Submission<T>[]; nextCursor: string | null }>;
+  remove(collection: string, userId: string): Promise<void>;
+  clear(collection: string): Promise<void>;
+}
+
 export interface KvNamespace {
   get<T = unknown>(key: string): Promise<T | null>;
   set(key: string, value: unknown): Promise<void>;
@@ -589,6 +606,7 @@ export interface CanvasesNamespace {
 export interface CanvasdropClient {
   me(): Promise<Me>;
   kv: KvNamespace & { readonly user: KvNamespace };
+  submissions: SubmissionsNamespace;
   files: {
     upload(
       file: File,
@@ -602,6 +620,41 @@ export interface CanvasdropClient {
   realtime: RealtimeNamespace;
   connections: ConnectionsNamespace;
   canvases: CanvasesNamespace;
+}
+
+function submissionsNamespace(opts: Required<ClientOptions>): SubmissionsNamespace {
+  const path = (collection: string) => `/submissions/${encodeURIComponent(collection)}`;
+  return {
+    async get<T>(collection: string) {
+      try {
+        return await request<Submission<T>>(opts, "GET", `${path(collection)}/mine`);
+      } catch (err) {
+        if (err instanceof NotFoundError) return null;
+        throw err;
+      }
+    },
+    set: <T>(collection: string, value: T) =>
+      request<Submission<T>>(opts, "PUT", `${path(collection)}/mine`, value),
+    async delete(collection) {
+      await request(opts, "DELETE", `${path(collection)}/mine`);
+    },
+    list: <T>(collection: string, options: { cursor?: string; limit?: number } = {}) => {
+      const query = new URLSearchParams();
+      if (options.cursor !== undefined) query.set("cursor", options.cursor);
+      if (options.limit !== undefined) query.set("limit", String(options.limit));
+      return request<{ entries: Submission<T>[]; nextCursor: string | null }>(
+        opts,
+        "GET",
+        `${path(collection)}?${query}`,
+      );
+    },
+    async remove(collection, userId) {
+      await request(opts, "DELETE", `${path(collection)}/${encodeURIComponent(userId)}`);
+    },
+    async clear(collection) {
+      await request(opts, "DELETE", path(collection));
+    },
+  };
 }
 
 function kvNamespace(opts: Required<ClientOptions>, base: string): KvNamespace {
@@ -1075,6 +1128,7 @@ export function createClient(options: ClientOptions): CanvasdropClient {
   return {
     me: () => request<Me>(opts, "GET", "/me"),
     kv: { ...shared, user: kvNamespace(opts, "/kv/user") },
+    submissions: submissionsNamespace(opts),
     ai: aiNamespace(opts, base),
     realtime: createRealtime(opts),
     connections,

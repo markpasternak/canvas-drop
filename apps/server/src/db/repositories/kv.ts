@@ -42,6 +42,27 @@ export function kvRepository(client: DbClient) {
         .where(eq(t.canvasId, canvasId));
       return Number(rows[0]?.count ?? 0);
     },
+
+    /** Reserved submissions scopes are unreachable through shared or personal KV. */
+    async countSubmissions(canvasId: string, userId?: string): Promise<number> {
+      const rows = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(t)
+        .where(
+          and(
+            eq(t.canvasId, canvasId),
+            sql`${t.scope} like 'submissions:%'`,
+            userId === undefined ? undefined : eq(t.key, userId),
+          ),
+        );
+      return Number(rows[0]?.count ?? 0);
+    },
+
+    async clearSubmissions(canvasId: string, collection: string): Promise<void> {
+      await db
+        .delete(t)
+        .where(and(eq(t.canvasId, canvasId), eq(t.scope, `submissions:${collection}`)));
+    },
     /**
      * Row-aware lookup: `null` means the key is absent; `{ value }` means it exists
      * (the value itself may be JSON `null`). Use this wherever existence matters —
