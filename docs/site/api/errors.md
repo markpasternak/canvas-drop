@@ -235,10 +235,11 @@ calls on the same client throw it.
 | `4429` | `QuotaExceededError` (`code: "CONNECTION_LIMIT"`, status 429; 30 connections per canvas) |
 
 An in-band `{ "type": "error", "code": "CAPABILITY_DISABLED" }` frame is terminal
-in the same way. The hub's other error frames (`MESSAGE_TOO_LARGE`,
-`INVALID_FRAME`, `CHANNEL_NAME_TOO_LARGE`, `CHANNEL_LIMIT`, `RATE_LIMITED`,
-`UNKNOWN_FRAME`) are dropped by the SDK; there is no hook to observe them, so a
-rejected publish is silent. Stay inside the limits on the
+in the same way. Register `channel.onError(handler)` to observe errors attributed
+to that channel, including `PERMISSION_DENIED` when publishing or presence is
+denied. The handler receives a typed SDK error; permission failures have status
+403. Other channel errors have status 400. Errors without a matching channel
+are not delivered to these handlers. Stay inside the limits on the
 [Runtime API](/docs/api/runtime-api#realtime) page.
 
 Any other close is transient: the SDK reconnects with exponential backoff (500 ms

@@ -17,6 +17,10 @@ supersedes the initial narrow submissions model. Its two pruning tools bring the
 proposed MCP surface to 49. This round is **not merged or deployed**. A read-only
 production impact audit was completed; app adaptations and production validation
 remain deployment preparation. See the [upgrade guide](site/self-hosting/runtime-upgrade.md).
+The [rollout-readiness follow-up](plans/2026-09-08-003-feat-permission-admin-and-rollout-readiness-plan.md)
+adds read-only permission details to the admin inspector and updates marketing,
+README and administration guidance. There is one permission model; affected apps
+must be adapted to preserve their intended interactions before rollout.
 
 **M10 ops/packaging is the one open milestone.**
 

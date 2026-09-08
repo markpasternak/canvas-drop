@@ -1033,6 +1033,9 @@ export interface AdminInspection {
     updatedAt: number;
     backendEnabled: boolean;
     publicLinkEffective: boolean;
+    runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
+    aiAudience?: "editors" | "viewers";
+    connectionsAudience?: "editors" | "viewers";
   };
   owner: {
     id: string;

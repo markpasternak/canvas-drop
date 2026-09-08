@@ -161,4 +161,7 @@ default modes and advanced controls. The extension plan is
 Per-channel realtime policies and per-Connection policies complement AI audiences.
 The user requested one PR with **no merge or deployment**. A read-only production
 impact audit is complete; live adaptations remain deployment preparation.
-See `docs/site/self-hosting/runtime-upgrade.md` for the compatibility contract.
+The follow-up plan `docs/plans/2026-09-08-003-feat-permission-admin-and-rollout-readiness-plan.md`
+covers admin inspection, marketing and rollout readiness. There is one permission
+model, with explicit app/data adaptations before rollout. See
+`docs/site/self-hosting/runtime-upgrade.md` for cutover requirements.

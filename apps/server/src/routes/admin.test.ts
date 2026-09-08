@@ -328,6 +328,13 @@ describe("admin routes", () => {
         expect((await denied.request(`/api/admin${path}`)).status).toBe(404);
       const app = buildAdminApp(client, { id: "admin", isAdmin: true }).app;
       const result = await app.request(`/api/admin/canvases/${id}/inspect`);
+      expect(await result.clone().json()).toMatchObject({
+        canvas: {
+          runtimePolicy: { defaultMode: "participation" },
+          aiAudience: "editors",
+          connectionsAudience: "editors",
+        },
+      });
       expect(result.status).toBe(200);
       const body = await result.json();
       expect(body).toMatchObject({

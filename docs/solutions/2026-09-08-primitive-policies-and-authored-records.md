@@ -56,3 +56,13 @@ MCP conditional saves and dashboard default/revision behavior on both databases.
 Review is sequential in the main task per the repository tool mapping; no
 independent reviewer is claimed. Existing production canvases require deliberate
 adaptation before an approved deployment. This work does not migrate their content.
+
+Keep one runtime permission model. Preserve old applications' intent by adapting
+their resources, not by retaining a second authorization path or promoting their
+viewers to editors. Policy configuration can preserve an existing realtime channel
+name, but cannot add per-author enforcement inside a shared KV blob. Migrate those
+values into authored records with verified original identities; replaying them
+through an owner's runtime session would incorrectly attribute them to that owner.
+Preserve record references and attachment associations during the coordinated
+cutover. Admin inspection shows the same parsed policies as the management surface
+without granting access to private records.

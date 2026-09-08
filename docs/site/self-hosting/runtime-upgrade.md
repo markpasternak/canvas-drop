@@ -5,14 +5,51 @@ canvases, versions, KV and files. Prepare affected canvases before deploying it.
 Live inventory and deployment are separate operator steps; the implementation PR
 does not modify or deploy production canvases.
 
+There is one permission model. Upgrade each affected canvas to preserve its
+intended interactions; do not grant participants editor access to work around
+denied requests. Prepare the updated apps and data migration before the server
+cutover, then apply their policies and validate them as part of the same rollout.
+
 | Existing pattern | New behavior | Preparation |
 |---|---|---|
 | Viewers write shared KV or increment a vote counter | Raw shared mutations require owner/editor; viewers receive `PERMISSION_DENIED`. | Configure authored collections with Shared contributions or Private submissions. Keep preferences in `kv.user`; the one-response `submissions` convenience API remains available. |
-| Viewers upload shared files or delete any file | Legacy shared mutations require owner/editor. | Bind attachments using `{collection, recordId}` or configure a file group. Record authorship controls deletion. Existing file rows remain shared with their original bytes. |
+| Viewers upload shared files or delete any file | Raw shared mutations require owner/editor. | Bind attachments using `{collection, recordId}` or configure a file group. Record authorship controls deletion. Existing file rows remain shared with their original bytes. |
 | Viewers call AI | `aiAudience` defaults to `editors`. | Deliberately set `aiAudience: "viewers"` where participation requires AI. Legacy guest opt-in/caps still apply. |
 | Viewers call Connections | `connectionsAudience` defaults to `editors`. | Prefer a per-profile policy permitting the required audience and methods. Existing admin grants remain required. |
 | Viewers publish on ordinary realtime channels | Without explicit policy, only owner/editor can publish there. | Configure existing activity channels for participant publishing. Keep authoritative channels editor-published while everyone receives; never broadcast private answers. |
 | Canvas code hides editing buttons using local state | UI state grants no authority. | Render controls from `me().canvasRole` / `permissions` and handle `PERMISSION_DENIED`. |
+
+## Preserve application intent
+
+For shared comments, use a Shared contributions collection: participants can
+read and create; the author and owners/editors can update status or delete.
+Export reads the same collection. Keep review-round settings in managed storage.
+Create a comment record before uploading its attachments so each file can inherit
+the parent record's rights. A policy alone cannot enforce author-only changes
+inside an existing shared KV blob.
+
+When migrating existing comments, preserve identifiers and references used by
+review rounds, exports and attachments. Verify each original author's identity
+against a trustworthy source; a display name or last updater is not proof of
+authorship. The runtime create API always attributes records to its caller, so an
+owner replaying other people's comments would assign the wrong author. Use a
+controlled server-side migration with a reviewed mapping, preserve timestamps
+and attachment associations, and verify counts and content against a backup.
+Unresolved authorship must be reviewed before cutover rather than guessed.
+
+For live activity, allow everyone with backend access to receive the relevant
+channel. Decide publishing and presence independently: an activity channel may
+allow participant publishing, while a presentation-control channel can reserve
+publishing for owners/editors. Existing channel names can remain when explicitly
+configured. Channel policies match exact names, not wildcard patterns. For
+dynamic participant channels, use the `participants:` namespace or redesign them
+around a fixed configured channel. Do not trust a local “presenter” switch as
+authorization to control other viewers.
+
+Version pruning is unrelated to the permission cutover. It only runs when
+explicitly requested; upgrading does not remove history or reclaim storage.
+
+## Data and rollout
 
 The additive migrations add `canvases.ai_audience`,
 `canvases.connections_audience` (both default `editors`) and `files.scope`

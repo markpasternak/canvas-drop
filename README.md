@@ -98,6 +98,12 @@ Collections and file groups have five presets; advanced controls customize indiv
 operations, realtime channels and Connections. Viewers can contribute and manage their
 own items without becoming canvas editors. See [Permissions and defaults](docs/site/sdk/permissions.md).
 
+The Backend tab manages these policies; the admin inspector shows their configuration.
+`me()` exposes the caller's role and effective permissions. Existing interactive
+canvases need their code, data and policies adapted before rollout so comments,
+forms and live signals keep their intended behavior. There is one permission model;
+see the [upgrade guide](docs/site/self-hosting/runtime-upgrade.md).
+
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">
@@ -150,10 +156,3 @@ A canvas can contain up to **100 MB**, **2,000 files**, and **25 MB per file**. 
 To work on the project, start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and the contribution workflow.
 
 Inspired by Shopify's [Quick](https://shopify.engineering/quick), created by Daniel Beauchamp and Alex Pilon. Not affiliated with Shopify. Released under the [MIT license](LICENSE).
-
-Runtime roles separate shared content from participation: owners and editors edit
-shared KV/files, while viewers can save private preferences and submit their own
-votes, forms and attachments. `canvasdrop.me()` returns `canvasRole` and
-`permissions`. AI and Connections audiences default to owners/editors and can be
-opened to signed-in viewers in the Backend tab. See the [runtime upgrade guide](docs/site/self-hosting/runtime-upgrade.md)
-for existing installations and [participant example](examples/participant-input/).
