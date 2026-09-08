@@ -3,6 +3,12 @@ title: Permission admin visibility, marketing and rollout readiness
 execution: code
 ---
 
+> Completed in PR #117 (`048f1ed`). On 8 September 2026 the user explicitly
+> authorized merge, deployment and canvas migration, including the admin merge
+> override. This supersedes the original no-merge/no-deploy boundary below.
+> See [rollout verification](../solutions/2026-09-08-runtime-permissions-rollout.md).
+
+
 Keep one permission model. Complete PR #117 with admin inspection of resource
 policies and audience settings, accurate marketing and README copy, and rollout
 guidance that preserves application intent through deliberate canvas adaptation.

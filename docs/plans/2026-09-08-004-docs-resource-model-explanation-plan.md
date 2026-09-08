@@ -3,6 +3,12 @@ title: Explain primitives, resources and permissions before deployment
 execution: code
 ---
 
+> Completed in PR #117 (`048f1ed`). On 8 September 2026 the user explicitly
+> authorized merge, deployment and canvas migration, including the admin merge
+> override. This supersedes the original no-merge/no-deploy boundary below.
+> See [rollout verification](../solutions/2026-09-08-runtime-permissions-rollout.md).
+
+
 Update the existing PR #117 without merging or deploying. Explain that a primitive
 is a backend feature, a resource is a named group within it, and permissions are
 settings attached to that resource. A collection groups authored records; its name

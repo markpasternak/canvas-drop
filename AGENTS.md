@@ -150,17 +150,19 @@ Institutional learnings live in `docs/solutions/` — skim the index, and especi
 - **Anything touching the DB / dual-dialect schema** → `…dual-dialect-drizzle-seam.md`.
 - **CI / test infra changes** → `…ci-and-test-infra-gotchas.md`.
 
-## Current unmerged work
+## Runtime permissions release (8 September 2026)
 
 Issue #116 and `docs/plans/2026-09-08-001-feat-runtime-permissions-version-pruning-plan.md`
-cover version cleanup and runtime roles/participation. The branch adds two MCP
+cover version cleanup and runtime roles/participation. The release adds two MCP
 pruning tools (49 total), `me().canvasRole` / permissions / resource rights, authored
 KV collections with immutable authorship, inherited attachments, five policy presets,
 default modes and advanced controls. The extension plan is
 `docs/plans/2026-09-08-002-feat-primitive-policy-defaults-plan.md`.
 Per-channel realtime policies and per-Connection policies complement AI audiences.
-The user requested one PR with **no merge or deployment**. A read-only production
-impact audit is complete; live adaptations remain deployment preparation.
+PR #117 merged as `048f1ed` after green CI and the user explicitly authorized
+the admin merge override, deployment and canvas migration. Production was
+upgraded after a backup and rehearsal; see
+`docs/solutions/2026-09-08-runtime-permissions-rollout.md` for verification.
 The follow-up plan `docs/plans/2026-09-08-003-feat-permission-admin-and-rollout-readiness-plan.md`
 covers admin inspection, marketing and rollout readiness. There is one permission
 model, with explicit app/data adaptations before rollout. See

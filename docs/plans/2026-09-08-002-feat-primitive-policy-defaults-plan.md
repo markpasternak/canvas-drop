@@ -3,6 +3,12 @@ title: Primitive policies with easy defaults
 execution: code
 ---
 
+> Completed in PR #117 (`048f1ed`). On 8 September 2026 the user explicitly
+> authorized merge, deployment and canvas migration, including the admin merge
+> override. This supersedes the original no-merge/no-deploy boundary below.
+> See [rollout verification](../solutions/2026-09-08-runtime-permissions-rollout.md).
+
+
 # Goal
 
 Extend issue #116 / PR #117 in the existing isolated worktree. Preserve version
