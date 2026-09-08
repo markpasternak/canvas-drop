@@ -605,6 +605,53 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   );
 
   server.registerTool(
+    "preview_version_prune",
+    {
+      description:
+        "Preview deleting selected historical versions, or all previous versions. Returns explicit version numbers and deduplicated estimated reclaimable bytes, protecting the live version, draft and active uploads. Pass the returned numbers to prune_versions after reviewing; this tool changes nothing.",
+      inputSchema: {
+        id: z.string(),
+        versions: z.union([
+          z.literal("previous"),
+          z.array(z.number().int().positive()).min(1).max(100),
+        ]),
+      },
+    },
+    async ({ id, versions }) => {
+      const gate = await requireRole("preview_version_prune", id);
+      if ("error" in gate) return gate.error;
+      return ok(await deps.versionHistory.previewPrune(gate.canvas, versions));
+    },
+  );
+
+  server.registerTool(
+    "prune_versions",
+    {
+      description:
+        "Permanently delete an explicit selection of historical versions after preview_version_prune. Current versions are protected even after a concurrent rollback. Returns deleted and skipped numbers; storage cleanup is best-effort and no reclaimed byte count is claimed.",
+      inputSchema: {
+        id: z.string(),
+        versions: z.array(z.number().int().positive()).min(1).max(100),
+        expectedVersionIds: z
+          .record(z.string(), z.string().uuid())
+          .describe("Copy from the preview; protects against reused version numbers."),
+      },
+    },
+    async ({ id, versions, expectedVersionIds }) => {
+      const gate = await requireMutable("prune_versions", id);
+      if ("error" in gate) return gate.error;
+      return ok(
+        await deps.versionHistory.prune(
+          gate.canvas.id,
+          versions,
+          caller.userId,
+          expectedVersionIds,
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
     "delete_version",
     {
       description:

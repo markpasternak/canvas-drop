@@ -213,6 +213,17 @@ export type RootEntry =
   | { path: string; reason: "index" | "single" }
   | { path: null; reason: "ambiguous" | "none" };
 
+export interface VersionPrunePreview {
+  versions: number[];
+  expectedVersionIds: Record<string, string>;
+  estimatedReclaimableBytes: number;
+  skipped: Array<{ version: number; reason: string }>;
+}
+export interface VersionPruneResult {
+  deleted: number[];
+  skipped: Array<{ version: number; reason: string }>;
+}
+
 export interface VersionInfo {
   number: number;
   source: string;
@@ -1536,6 +1547,20 @@ export const api = {
 
   listVersions: (id: string) =>
     request<{ versions: VersionInfo[] }>(`/api/canvases/${id}/versions`).then((r) => r.versions),
+
+  previewVersionPrune: (id: string, versions: number[]) =>
+    request<VersionPrunePreview>(`/api/canvases/${id}/versions/prune-preview`, {
+      method: "POST",
+      body: JSON.stringify({ versions }),
+    }),
+  pruneVersions: (id: string, preview: VersionPrunePreview) =>
+    request<VersionPruneResult>(`/api/canvases/${id}/versions/prune`, {
+      method: "POST",
+      body: JSON.stringify({
+        versions: preview.versions,
+        expectedVersionIds: preview.expectedVersionIds,
+      }),
+    }),
 
   deleteVersion: (id: string, version: number) =>
     request<{ ok: true; version: number }>(`/api/canvases/${id}/versions/${version}`, {

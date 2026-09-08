@@ -41,6 +41,8 @@ export const TOOL_MIN_ROLE = {
   get_canvas_usage: "editor",
   list_versions: "editor",
   delete_version: "editor",
+  preview_version_prune: "editor",
+  prune_versions: "editor",
   rollback_canvas: "editor",
   get_canvas_file: "editor",
   deploy_canvas: "editor",

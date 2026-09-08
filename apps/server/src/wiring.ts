@@ -109,6 +109,8 @@ export function composeServices(deps: ServiceGraphDeps): ServiceGraph {
     }),
 
     versionHistory: versionHistoryService({
+      drafts: deps.draftsRepo,
+      uploadSessions: uploadSessionsRepository(deps.db),
       versions: deps.versions,
       storage: deps.storage,
       engine: deps.engine,

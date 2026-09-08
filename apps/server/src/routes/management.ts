@@ -1354,6 +1354,43 @@ export function managementRoutes(deps: ManagementDeps) {
     }
   });
 
+  app.post("/:id/versions/prune-preview", sameOrigin, async (c) => {
+    const cv = await managedCanvas(c);
+    if (!cv) return c.json({ code: "NOT_FOUND" }, 404);
+    const body = z
+      .object({
+        versions: z.union([
+          z.literal("previous"),
+          z.array(z.number().int().positive()).min(1).max(100),
+        ]),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "INVALID_BODY" }, 400);
+    return c.json(await deps.versionHistory.previewPrune(cv, body.data.versions));
+  });
+
+  app.post("/:id/versions/prune", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const body = z
+      .object({
+        versions: z.array(z.number().int().positive()).min(1).max(100),
+        expectedVersionIds: z.record(z.string(), z.string().uuid()),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "INVALID_BODY" }, 400);
+    return c.json(
+      await deps.versionHistory.prune(
+        cv.id,
+        body.data.versions,
+        c.get("user").id,
+        body.data.expectedVersionIds,
+      ),
+    );
+  });
+
   // Delete one historical ready version. The service's repository operation
   // atomically excludes the live pointer; mark-sweep reclaims only unreferenced
   // content-addressed blobs. Mutation → same-origin + owner/mutable gates.

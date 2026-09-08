@@ -332,6 +332,8 @@ export async function connectMcp(
       versions: repos.versions,
       engine,
       versionHistory: versionHistoryService({
+        drafts: repos.drafts,
+        uploadSessions: repos.uploadSessions,
         versions: repos.versions,
         storage,
         engine,

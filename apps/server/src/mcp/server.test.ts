@@ -142,7 +142,13 @@ async function connect(
       canvases,
       versions,
       engine,
-      versionHistory: versionHistoryService({ versions, storage, engine, audit }),
+      versionHistory: versionHistoryService({
+        versions,
+        drafts: draftsRepository(client),
+        storage,
+        engine,
+        audit,
+      }),
       upload: uploadService({
         config,
         canvases,
@@ -3246,6 +3252,8 @@ describe.each(DIALECTS)(
       get_canvas_usage: ({ id }) => ({ id }),
       list_versions: ({ id }) => ({ id }),
       delete_version: ({ id }) => ({ id, version: 99 }),
+      preview_version_prune: ({ id }) => ({ id, versions: "previous" }),
+      prune_versions: ({ id }) => ({ id, versions: [99], expectedVersionIds: {} }),
       rollback_canvas: ({ id }) => ({ id, version: 99 }),
       get_canvas_file: ({ id }) => ({ id }),
       deploy_canvas: ({ id }) => ({ id, zipBase64: zip({ "index.html": "<h1>m</h1>" }) }),

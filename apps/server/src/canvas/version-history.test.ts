@@ -62,8 +62,8 @@ describe.each(DIALECTS)("versionHistoryService [%s]", (dialect) => {
     });
     const recordAudit = vi.fn();
     const audit = { recordAudit, record() {}, async flush() {} } as AuditLog;
-    const service = versionHistoryService({ versions, storage, engine, audit });
-    return { owner, canvas, canvases, versions, drafts, storage, recordAudit, service };
+    const service = versionHistoryService({ versions, drafts, storage, engine, audit });
+    return { owner, canvas, canvases, versions, drafts, storage, recordAudit, service, engine };
   }
 
   async function ready(
@@ -180,5 +180,70 @@ describe.each(DIALECTS)("versionHistoryService [%s]", (dialect) => {
 
     expect(await service.deleteHistorical(canvas.id, 1, owner.id)).toEqual({ kind: "current" });
     expect(await service.deleteHistorical(canvas.id, 99, owner.id)).toEqual({ kind: "not_found" });
+  });
+
+  it("previews a selection as a union of unique blobs, protecting history and the draft", async () => {
+    const { owner, canvas, canvases, versions, drafts, service } = await setup();
+    await ready(versions, canvas.id, owner.id, 1, manifest({ a: "unique", b: "both", c: "draft" }));
+    await ready(versions, canvas.id, owner.id, 2, manifest({ a: "both", b: "retained" }));
+    const live = await ready(versions, canvas.id, owner.id, 3, manifest({ a: "retained" }));
+    await canvases.setCurrentVersion(canvas.id, live.id);
+    await drafts.create({
+      canvasId: canvas.id,
+      manifest: manifest({ a: "draft" }),
+      baseVersionId: live.id,
+    });
+    const cv = { ...canvas, currentVersionId: live.id };
+    expect(await service.previewPrune(cv, [1, 2, 2, 3, 99])).toMatchObject({
+      versions: [1, 2],
+      estimatedReclaimableBytes: "unique".length + "both".length,
+      skipped: [
+        { version: 3, reason: "current" },
+        { version: 99, reason: "not_found" },
+      ],
+    });
+    expect((await service.previewPrune(cv, "previous")).versions).toEqual([2, 1]);
+  });
+
+  it("prunes an explicit snapshot, skips a newly current version and sweeps once", async () => {
+    const { owner, canvas, canvases, versions, service, engine } = await setup();
+    const sweep = vi.spyOn(engine, "collectGarbage");
+    const old = await ready(versions, canvas.id, owner.id, 1, manifest({ a: "one" }));
+    const live = await ready(versions, canvas.id, owner.id, 2, manifest({ a: "two" }));
+    await canvases.setCurrentVersion(canvas.id, live.id);
+    const preview = await service.previewPrune(
+      { ...canvas, currentVersionId: live.id },
+      "previous",
+    );
+    await canvases.setCurrentVersion(canvas.id, old.id);
+    expect(
+      await service.prune(canvas.id, preview.versions, owner.id, preview.expectedVersionIds),
+    ).toEqual({
+      deleted: [],
+      skipped: [{ version: 1, reason: "current" }],
+    });
+    expect(
+      await service.prune(canvas.id, [1, 2, 2, 99], owner.id, { "1": old.id, "2": live.id }),
+    ).toEqual({
+      deleted: [2],
+      skipped: [
+        { version: 1, reason: "current" },
+        { version: 99, reason: "not_found" },
+      ],
+    });
+    expect(await versions.findById(old.id)).not.toBeNull();
+    expect(sweep).toHaveBeenCalledTimes(1);
+  });
+  it("never deletes a replacement that reused a previewed version number", async () => {
+    const { owner, canvas, versions, service } = await setup();
+    const old = await ready(versions, canvas.id, owner.id, 1, manifest({ a: "old" }));
+    const preview = await service.previewPrune(canvas, [1]);
+    await versions.deleteReadyNonCurrent(canvas.id, 1);
+    const replacement = await ready(versions, canvas.id, owner.id, 1, manifest({ a: "new" }));
+    expect(replacement.id).not.toBe(old.id);
+    expect(
+      await service.prune(canvas.id, preview.versions, owner.id, preview.expectedVersionIds),
+    ).toEqual({ deleted: [], skipped: [{ version: 1, reason: "unavailable" }] });
+    expect(await versions.findById(replacement.id)).not.toBeNull();
   });
 });

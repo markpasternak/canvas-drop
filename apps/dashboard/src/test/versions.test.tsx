@@ -225,7 +225,14 @@ describe("Versions route — direct download and safe delete", () => {
       "GET /api/canvases/c1": () => json({ ...CANVAS, currentVersionId: "v2" }),
       "GET /api/canvases/c1/versions": () => json({ versions: [current, historical] }),
       "GET /api/canvases/c1/draft": () => json(draftView()),
-      "DELETE /api/canvases/c1/versions/1": () => json({ ok: true, version: 1 }),
+      "POST /api/canvases/c1/versions/prune-preview": () =>
+        json({
+          versions: [1],
+          expectedVersionIds: { "1": "v1" },
+          skipped: [],
+          estimatedReclaimableBytes: 10,
+        }),
+      "POST /api/canvases/c1/versions/prune": () => json({ deleted: [1], skipped: [] }),
     });
     renderVersions();
 
@@ -243,12 +250,17 @@ describe("Versions route — direct download and safe delete", () => {
 
     await userEvent.click(within(historicalRow).getByRole("button", { name: "Delete" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/permanently removes version 1/i)).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/permanently removes the selected versions/i),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Delete version" })).toBeEnabled(),
+    );
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete version" }));
     await waitFor(() =>
       expect(
         calls.some(
-          (call) => call.method === "DELETE" && call.url === "/api/canvases/c1/versions/1",
+          (call) => call.method === "POST" && call.url === "/api/canvases/c1/versions/prune",
         ),
       ).toBe(true),
     );
@@ -287,5 +299,60 @@ describe("Versions route — direct download and safe delete", () => {
     expect(within(row).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Make current" })).toBeNull();
     expect(within(row).getByText("Read-only while disabled")).toBeInTheDocument();
+  });
+});
+
+describe("Version cleanup selection", () => {
+  it("confirms the previewed IDs, excludes current history and reports a skipped version", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/versions": () =>
+        json({
+          versions: [
+            { ...VERSION, number: 3 },
+            { ...VERSION, number: 2, current: false },
+            { ...VERSION, number: 1, current: false },
+          ],
+        }),
+      "POST /api/canvases/c1/versions/prune-preview": () =>
+        json({
+          versions: [2, 1],
+          expectedVersionIds: { "2": "two", "1": "one" },
+          skipped: [],
+          estimatedReclaimableBytes: 1024,
+        }),
+      "POST /api/canvases/c1/versions/prune": () =>
+        json({ deleted: [1], skipped: [{ version: 2, reason: "current" }] }),
+    });
+    renderVersions();
+    await screen.findByText("v3");
+    expect(screen.queryByRole("checkbox", { name: "Select version 3" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Delete all previous versions" }));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Delete versions" })).toBeEnabled(),
+    );
+    expect(within(dialog).getByText(/estimated recoverable space/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete versions" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith("/prune"))?.body).toBe(
+        JSON.stringify({ versions: [2, 1], expectedVersionIds: { "2": "two", "1": "one" } }),
+      ),
+    );
+    expect(await screen.findByText(/Kept v2 \(current\)/)).toBeInTheDocument();
+  });
+
+  it("keeps deletion disabled when its preview fails", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/versions": () => json({ versions: [{ ...VERSION, current: false }] }),
+      "POST /api/canvases/c1/versions/prune-preview": () => json({ error: "unavailable" }, 503),
+    });
+    renderVersions();
+    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("alert");
+    expect(within(dialog).getByRole("button", { name: "Delete version" })).toBeDisabled();
+    expect(calls.some((c) => c.url.endsWith("/prune"))).toBe(false);
   });
 });

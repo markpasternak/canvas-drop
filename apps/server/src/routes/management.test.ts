@@ -85,7 +85,7 @@ function buildApp(
   const audit = createAuditLog(auditRepository(client), silent);
   const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
   const clone = cloneService({ canvases, versions, drafts, storage });
-  const versionHistory = versionHistoryService({ versions, storage, engine, audit });
+  const versionHistory = versionHistoryService({ versions, drafts, storage, engine, audit });
   const connections = connectionService({
     repository: connectionsRepository(client),
     canvases,
