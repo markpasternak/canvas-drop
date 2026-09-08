@@ -8,6 +8,7 @@ import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { kvRepository } from "../db/repositories/kv.js";
+import { teamsRepository } from "../db/repositories/teams.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
@@ -59,6 +60,7 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
       userId: editor.id,
       role: "editor",
     });
+    const teams = teamsRepository(client);
     const storage = memStorage();
     const files = filesService({ files: filesRepository(client), storage });
     function as(user: NonNullable<typeof owner>) {
@@ -73,6 +75,7 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
           config,
           quota: keyLimit === undefined ? undefined : async () => keyLimit,
           canvases,
+          teams,
           files,
           kv: kvRepository(client),
           usage: usageEventsRepository(client),
@@ -82,7 +85,7 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
       );
       return app;
     }
-    return { owner, editor, viewer, other, canvases, canvas, as };
+    return { owner, editor, viewer, other, canvases, canvas, teams, as };
   }
 
   it("reports effective roles and forbids a viewer, including an admin, from changing shared KV", async () => {
@@ -134,7 +137,9 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
     const shared = (await (await upload(editor, "shared")).json()) as { id: string };
     const response = (await (await upload(viewer, "submission")).json()) as { id: string };
     expect(response.id).toBeTypeOf("string");
-    const list = (await (await as(other).request("/v1/c/app/files")).json()) as {
+    const listed = await as(other).request("/v1/c/app/files");
+    expect(listed.headers.get("cache-control")).toBe("private, no-store");
+    const list = (await listed.json()) as {
       files: Array<{ id: string }>;
     };
     expect(list.files.map((f: { id: string }) => f.id)).toEqual([shared.id]);
@@ -257,5 +262,33 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
     for (const query of ["limit=NaN", "limit=1.5", "limit=1001", "cursor=%25", "cursor="]) {
       expect((await as(owner).request(`/v1/c/app/submissions/first?${query}`)).status).toBe(400);
     }
+  });
+  it("derives team roles live on a restricted canvas and refuses unrelated users", async () => {
+    const { owner, viewer, other, canvases, canvas, teams, as } = await setup();
+    await canvases.updateSettings(canvas.id, { access: "private" });
+    const team = await teams.create({ orgId: null, name: "Reviewers", createdBy: owner.id });
+    await teams.addMember(team.id, viewer.id);
+    await teams.setCanvasTeamRole(canvas.id, team.id, "viewer");
+    expect(await (await as(viewer).request("/v1/c/app/me")).json()).toMatchObject({
+      canvasRole: "viewer",
+    });
+    expect((await as(other).request("/v1/c/app/me")).status).toBe(404);
+    await teams.setCanvasTeamRole(canvas.id, team.id, "editor");
+    expect(await (await as(viewer).request("/v1/c/app/me")).json()).toMatchObject({
+      canvasRole: "editor",
+      permissions: { canManageSubmissions: true },
+    });
+    expect((await as(viewer).request("/v1/c/app/kv/config", put("allowed"))).status).toBe(200);
+    await teams.setCanvasTeamRole(canvas.id, team.id, "viewer");
+    expect((await as(viewer).request("/v1/c/app/kv/config", put("denied"))).status).toBe(403);
+    await canvases.addAllowlistEntry({
+      canvasId: canvas.id,
+      principalKind: "member",
+      userId: other.id,
+      role: "viewer",
+    });
+    expect(await (await as(other).request("/v1/c/app/me")).json()).toMatchObject({
+      canvasRole: "viewer",
+    });
   });
 });

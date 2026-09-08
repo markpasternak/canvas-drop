@@ -7,6 +7,14 @@ Internal status ledger, moved from the README so its entry point stays focused o
 
 Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usage stats, server-side list filters and search, the docs system (`/docs`, `/llms.txt`, `/skill.zip`), clone-as-template, custom slugs, the MCP server (47 tools, dashboard parity), the staged content-addressed upload, the signed-out landing page, preview covers with an optional screenshot pipeline, admin-flippable [design skins](site/self-hosting/configuration.md#design-skins), the org boundary (tenancy) with teams and auth-delegated invites, the [authoring capability](site/sdk/authoring.md) and managed shares, prompt caching for the AI proxy, version download and delete, the org-scoped gallery, popularity sort and bulk actions, **editor roles with ownership transfer**, the simplified **Sharing and permissions** hierarchy with direct/team viewer clone parity, and admin-granted [outbound Connections](site/sdk/connections.md).
 
+The [participant permissions and version cleanup round](plans/2026-09-08-001-feat-runtime-permissions-version-pruning-plan.md)
+is in review under [issue #116](https://github.com/markpasternak/canvas-drop/issues/116).
+It adds selected/all-previous version cleanup, runtime identity roles/permissions,
+private submissions and attachments, backend audiences, and attributed participant
+realtime channels. Its two pruning tools bring the proposed MCP surface to 49.
+This round is **not merged or deployed**. Live canvas impact inventory is deferred
+to deployment preparation; see the [upgrade guide](site/self-hosting/runtime-upgrade.md).
+
 **M10 ops/packaging is the one open milestone.**
 
 The [admin operations round](plans/2026-09-06-001-feat-admin-operations-plan.md), tracked

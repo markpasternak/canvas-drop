@@ -1,4 +1,4 @@
-/* KV — shared (everyone) vs per-user (private) namespaces. */
+/* Shared KV reads for viewers, writes for managers; private KV stays caller-only. */
 import { $, cd, escapeHtml, guard, onAct } from "./lib.js";
 
 const VIEWS_KEY = "showcase:views";
@@ -42,5 +42,11 @@ export function mount() {
     },
   });
 
+  const bump = sec.querySelector('[data-act="kv-bump"]');
+  bump.disabled = true;
+  guard(() => cd().me(), out).then((me) => {
+    bump.disabled = !me?.permissions.canWriteSharedData;
+    if (bump.disabled) bump.textContent = "Owner/editor only";
+  });
   loadCounter();
 }

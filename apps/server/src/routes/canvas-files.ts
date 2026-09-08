@@ -28,6 +28,10 @@ export interface CanvasFilesDeps {
 export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("*", requireCapability("files", deps.config));
+  app.use("*", async (c, next) => {
+    c.header("Cache-Control", "private, no-store");
+    await next();
+  });
 
   const canvas = (c: Context<AppEnv>) => requireCanvas(c);
   const meter = (c: Context<AppEnv>, op: string) => {

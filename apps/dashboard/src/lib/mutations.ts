@@ -243,18 +243,6 @@ export function useRollback(id: string) {
   });
 }
 
-/** Permanently remove a non-current published version. */
-export function useDeleteVersion(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (version: number) => api.deleteVersion(id, version),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.versions(id) });
-      qc.invalidateQueries({ queryKey: keys.draft(id) });
-    },
-  });
-}
-
 // --- In-browser editor / draft (M5) ---
 
 /** Save a draft file (autosaved by the editor). Updates the draft cache in place. */

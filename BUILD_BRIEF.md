@@ -38,7 +38,7 @@ Do not relitigate during build without flagging.
 | D8 | KV scoping | **Both shared and per-user:** `kv.*` (canvas-global) and `kv.user.*` (auto-scoped to current viewer). All writes attributed. |
 | D9 | Stack shape | **Single Node/TypeScript server (Hono) + Vite/React SPA dashboard.** One process, one deploy. Drizzle ORM. |
 | D10 | Database | **Configurable: SQLite or Postgres** behind one Drizzle schema. SQLite = localhost default and viable for small single-instance prods; Postgres = recommended production. Schema written dialect-portable (§10). |
-| D11 | Versioning | **Draft + immutable published versions.** Each canvas has one mutable draft (working copy); the in-browser editor/file-manager edit the draft and autosave, creating no version. An explicit **Publish** snapshots the draft into an immutable version (keep last 10) and swaps the live pointer; one-click rollback restores a prior published version. The deploy API and folder/ZIP re-upload **publish a live version directly** (the "deploy = live" agent contract, §4.5) — the draft loop is editor-only; concurrency is last-publish-wins. Editing an old version = restore it into the draft, then republish. Storage is **content-addressed** (blobs keyed by hash), so versions and the draft are manifests over shared blobs — only changed files are ever written. |
+| D11 | Versioning | **Draft + immutable published versions.** Each canvas has one mutable draft (working copy); the in-browser editor/file-manager edit the draft and autosave, creating no version. An explicit **Publish** snapshots the draft into an immutable version (keep last 10) and swaps the live pointer; one-click rollback restores a prior published version. Owners/editors may delete individual, selected, or all previous versions after an immutable selection preview with a deduplicated reclaim estimate; current/history/draft/active-upload references remain protected. The deploy API and folder/ZIP re-upload **publish a live version directly** (the "deploy = live" agent contract, §4.5) — the draft loop is editor-only; concurrency is last-publish-wins. Editing an old version = restore it into the draft, then republish. Storage is **content-addressed** (blobs keyed by hash), so versions and the draft are manifests over shared blobs — only changed files are ever written. |
 | D12 | LLM proxy (v1) | **Anthropic-first behind a Vercel AI SDK abstraction.** v1 ships one server-side Anthropic proxy; the server boundary is shaped so OpenAI/OpenRouter/Google or another AI-SDK provider can be added later without changing canvas code. Admin-defined model allowlist, **streaming (SSE)**, **per-user + per-canvas quotas**, **usage dashboard**. Structured-output helper and multi-provider support are deferred. |
 | D13 | Scale assumption | **~50–150 users per deployment.** Single instance is plenty; generous quotas; trivial cost. |
 | D14 | Admin scope (v1) | **Minimal admin panel:** all-canvases list with usage, disable/takedown, model allowlist, global quota defaults. Admins bootstrapped via env (`CANVAS_DROP_ADMIN_EMAILS`). |
@@ -197,13 +197,54 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 3. Values: JSON, max 64 KB [v1]
 4. Keys: max 512 bytes; list with prefix + pagination [v1]
 5. Limits: 10,000 keys/canvas; 1,000/user-namespace [v1]
-6. Atomic `kv.increment(key, by)` (polls/votes/leaderboards without races) [v1]
+6. Atomic `kv.increment(key, by)` for owner/editor shared counters [v1]
 7. Write attribution (user id + timestamp on every write) [v1]
 8. Optimistic concurrency (optional `ifRevision`) [v1.1]
 9. Data export (JSON dump, owner-only) [v1.1]
 10. TTL on keys [later]
 11. KV change-subscriptions (auto-notify on writes) [v1.1 — realtime primitive exists in v1, but KV-backed sync is a separate, larger surface; for now canvases combine `kv.*` with the realtime primitive manually]
 12. Collections/documents query API [later — only if KV proves insufficient]
+
+### 6.4a Runtime roles and participant submissions (post-v1)
+
+The effective canvas role is owner, editor (direct or team grant), or viewer
+(admitted by direct/team/general access). It comes from live server-side identity
+and access checks; platform admin status is not a runtime bypass. `me()` exposes
+`canvasRole` and concrete `permissions` for UI decisions. The server enforces the
+same rules on every operation and revalidates realtime publishes.
+
+| Operation | Viewer | Editor / owner |
+|---|---|---|
+| Read shared KV/files | Yes | Yes |
+| Set/delete/increment shared KV; upload/delete shared files | No | Yes |
+| Read/write private `kv.user` preferences | Own only | Own only |
+| Submit/read/update/withdraw votes/forms | Own only | Own plus review/remove/clear all submissions |
+| Upload/read/delete `scope: "submission"` files | Own only | All |
+| AI / Connections | Only when that audience is `viewers` | Yes when feature and upstream policy permit |
+| Publish ordinary realtime channel | No | Yes |
+| Publish `participants:` channel | Yes, attributed and readable by subscribers | Yes |
+
+`submissions.get/set/delete(collection)` operates only on the authenticated
+caller's response. `list(collection, {cursor?, limit?})`, `remove(collection,
+userId)` and `clear(collection)` require owner/editor. A response is
+`{userId, value, updatedAt}`; author/time are server-assigned. Reserved internal KV
+scopes isolate submissions from both shared and private preferences. One response
+per collection/author, JSON including null, at most 64 KiB; collection names 1–80
+ASCII letters/digits/dots/underscores/hyphens, starting alphanumeric. Pagination is
+1–1000 (default 100). Existing admin KV count limits apply separately across
+submissions: 10,000/canvas and 1,000/author by default. Responses are private to
+their author and canvas managers; editors deliberately publish validated aggregates
+to shared KV. Clearing responses does not delete separately stored attachments.
+
+`aiAudience` and `connectionsAudience` are `editors` (default) or `viewers`, set by
+owners/editors through Backend settings, management API or MCP `set_capabilities`.
+Feature flags, provider availability, admin grants, quotas, legacy guest gates,
+password/lifecycle and public static-only rules still apply. Denied operations
+return `PERMISSION_DENIED` (403). No canvas-supplied server code is introduced.
+
+Existing files default to shared; data is preserved by additive migrations on both
+dialects. See [runtime upgrade guidance](docs/site/self-hosting/runtime-upgrade.md)
+for the behavior changes to inventory before an approved deployment.
 
 ### 6.5 File storage primitive
 1. `canvasdrop.files.upload(file)` (size/type checked server-side) [v1]
@@ -248,7 +289,7 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 12. Message history / replay, KV-backed sync, server-authoritative rooms [later — explicit non-goal for v1, keeps the surface thin (D22)]
 
 ### 6.8 Identity primitive
-1. `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }` (`kind`: `member` | `guest`) [v1]
+1. `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind, canvasRole, permissions }` (`kind`: `member` | `guest`) [v1]
 2. Served from resolved identity/user row — no provider calls per request [v1]
 3. Shape versioned for later directory fields [v1]
 4. Group membership checks [later]
@@ -567,16 +608,22 @@ Indexes: `canvases(owner_id)`, `canvases(slug)`, `kv_entries(canvas_id, scope)`,
 Zero-config: global `canvasdrop`; no init call needed — mode and slug auto-detected from location.
 
 ```ts
-canvasdrop.me(): Promise<{ id, email, name, avatarUrl, kind }>   // kind: 'member' | 'guest'
+canvasdrop.me(): Promise<{ id, email, name, avatarUrl, kind, canvasRole, permissions }>   // kind: 'member' | 'guest'
 
 canvasdrop.kv.get(key): Promise<Json | null>
 canvasdrop.kv.set(key, value): Promise<void>
 canvasdrop.kv.delete(key): Promise<void>
 canvasdrop.kv.list({ prefix?, cursor?, limit? }): Promise<{ entries, cursor? }>
 canvasdrop.kv.increment(key, by = 1): Promise<number>
-canvasdrop.kv.user.*            // same shape, scoped to current viewer
+canvasdrop.kv.user.*            // same shape, private to current viewer
+canvasdrop.submissions.get(collection): Promise<Submission | null>
+canvasdrop.submissions.set(collection, value): Promise<Submission>
+canvasdrop.submissions.delete(collection): Promise<void>
+canvasdrop.submissions.list(collection, {cursor?, limit?}): Promise<{entries, nextCursor}>
+canvasdrop.submissions.remove(collection, userId): Promise<void>
+canvasdrop.submissions.clear(collection): Promise<void>
 
-canvasdrop.files.upload(file: File): Promise<{ id, name, size, url }>
+canvasdrop.files.upload(file: File, options?: { scope?: "shared" | "submission" }): Promise<{ id, name, size, url }>
 canvasdrop.files.list(): Promise<FileMeta[]>
 canvasdrop.files.delete(id): Promise<void>
 canvasdrop.files.url(id): string
@@ -588,16 +635,17 @@ canvasdrop.connections.fetch(profile, relativePath, { method?, headers?, body?, 
 
 canvasdrop.realtime.channel(name): Channel               // WebSocket under the hood, auto-reconnect
   channel.publish(event, data): void                    // ephemeral broadcast to this canvas's channel
-  channel.subscribe((msg) => void): void                // msg: { event, data, from: { id, name } }
+  channel.subscribe((msg) => void): void                // msg: { event, data, from: { id, name, canvasRole } }
   channel.unsubscribe(): void                           // stop receiving on this channel
   channel.presence(): Promise<{ id, name }[]>           // who's connected now (deduped per user)
   channel.onJoin((user) => void): void                  // user: { id, name }
   channel.onLeave((user) => void): void
   channel.onPresence((users) => void): void             // full roster on every change
+  channel.onError((err) => void): void                 // channel-specific permission failures
   channel.close(): void
 ```
 
-Errors: typed `CanvasdropError { code, status, message }` base, with `CapabilityDisabledError` / `QuotaExceededError` / `NotFoundError` / `NotAuthenticatedError` subclasses — each catchable by `instanceof` and carrying a stable `code` (M6, plan 007; name aligned to the `canvasdrop` global).
+Errors: typed `CanvasdropError { code, status, message }` base, with `PermissionDeniedError` / `CapabilityDisabledError` / `QuotaExceededError` / `NotFoundError` / `NotAuthenticatedError` subclasses — each catchable by `instanceof` and carrying a stable `code` (M6, plan 007; name aligned to the `canvasdrop` global).
 
 ### 11.2 Platform API (session-authenticated from canvases)
 `GET /v1/c/:slug/me` · `GET|PUT|DELETE /v1/c/:slug/kv/:key` (+ list, `:key/increment`, `kv/user/...`) · `POST|GET /v1/c/:slug/files` · `DELETE /v1/c/:slug/files/:id` · `GET /v1/c/:slug/files/:id/content` · `POST /v1/c/:slug/ai/chat` (SSE-capable) · `GET /v1/c/:slug/realtime` (WebSocket upgrade; authenticated at handshake, §9.7) · `GET|HEAD|POST|PUT|PATCH|DELETE /v1/c/:slug/connections/:profile/*` (only methods selected by the admin for that profile).

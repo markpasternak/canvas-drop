@@ -15,7 +15,7 @@ the page and no key to hold.
 <script src="/sdk/v1.js"></script>
 <script type="module">
   // <input type="file" id="picker"> and <img id="img"> are on the page
-  const f = await canvasdrop.files.upload(picker.files[0]); // { id, name, size, url }
+  const f = await canvasdrop.files.upload(picker.files[0], { scope: "submission" }); // { id, name, size, url }
   img.src = f.url;                                           // absolute content URL
 
   const all = await canvasdrop.files.list();                 // FileMeta[]
@@ -24,11 +24,12 @@ the page and no key to hold.
 </script>
 ```
 
-Files belong to the canvas, not to the viewer who uploaded them: every viewer
-who can open the canvas can list, read, and delete every file in it. There is no
-per-viewer scope for files (KV has `kv.user`; files has no equivalent). The
-server records who uploaded each file for its audit trail, but the API does not
-expose or filter by uploader.
+Files have two scopes. **Shared** (the default) files are readable by admitted
+viewers; only owners/editors upload or delete them. **Submission** files are
+visible to their authenticated uploader and owners/editors. The uploader can
+delete their own submission file; owners/editors can manage all submission files.
+Other viewers receive `404 NOT_FOUND` for private files, including content URLs.
+Existing files remain shared. List metadata includes `scope` and `uploadedBy`.
 
 ## Methods
 
@@ -37,13 +38,15 @@ API call each one makes:
 
 | Method | Signature | HTTP call |
 | --- | --- | --- |
-| `upload` | `upload(file: File): Promise<{ id: string; name: string; size: number; url: string }>` | `POST {base}/v1/c/{slug}/files` |
+| `upload` | `upload(file: File, options?: { scope?: "shared" | "submission" }): Promise<{ id: string; name: string; size: number; url: string }>` | `POST {base}/v1/c/{slug}/files` |
 | `list` | `list(): Promise<FileMeta[]>` | `GET {base}/v1/c/{slug}/files` |
 | `delete` | `delete(id: string): Promise<void>` | `DELETE {base}/v1/c/{slug}/files/{id}` |
 | `url` | `url(id: string): string` | none (builds `{base}/v1/c/{slug}/files/{id}/content`) |
 
 ```ts
 interface FileMeta {
+  scope?: "shared" | "submission"; // always sent by the current server
+  uploadedBy?: string; // server-resolved author
   id: string;
   name: string;
   size: number;      // bytes
@@ -62,17 +65,20 @@ replaces it with the absolute content URL before resolving, so `f.url` is
 correct in both URL modes. The result carries no `mime` or `createdAt`; call
 `list()` when you need them.
 
-There is no progress callback and no upload option. For a large file, show your
+Pass `{ scope: "submission" }` for participant attachments; the SDK sends a
+multipart field `scope`. An omitted scope is `shared`. There is no progress callback. For a large file, show your
 own pending state around the `await`. Ids are server-assigned UUIDs.
 
 ### list
 
-`list()` resolves to every file in the canvas, with its metadata, in one array.
+`list()` resolves to shared files plus your own submission files; owners/editors
+receive all files, with metadata, in one array.
 There is no paging and no filter.
 
 ### delete
 
-`delete(id)` removes the file row and its bytes. It rejects with `NotFoundError`
+`delete(id)` removes the file row and its bytes when your role permits it.
+A viewer deleting a shared file receives `403 PERMISSION_DENIED`. It rejects with `NotFoundError`
 when `id` is not a file of this canvas, so deleting the same id twice rejects
 the second call. After a delete, the file's content URL returns `404`.
 
@@ -108,7 +114,9 @@ const res = await fetch(canvasdrop.files.url(id), { credentials: "include" });
 const blob = await res.blob();
 ```
 
-A content URL for an id that does not exist returns `404` with
+Content responses use `Cache-Control: private, no-store`. A URL is not an access
+grant: the same file visibility rule is checked on each request. A content URL
+for an id that does not exist or a private file hidden from you returns `404` with
 `{ "code": "NOT_FOUND" }`.
 
 Content requests count toward the same per-viewer runtime rate limit as every

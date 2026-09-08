@@ -6,11 +6,6 @@ import {
 
 export type RuntimeRole = "owner" | "editor" | "viewer";
 export type RuntimeAudience = "editors" | "viewers";
-export interface RuntimePolicy {
-  aiAudience: RuntimeAudience;
-  connectionsAudience: RuntimeAudience;
-}
-
 /** Unknown stored audience values fail closed. Role labels are server-derived. */
 export function audienceAllows(audience: string, role: RuntimeRole): boolean {
   return role === "owner" || role === "editor" || audience === "viewers";

@@ -87,7 +87,8 @@ export default function Capabilities() {
         {publicBackendInert && (
           <InlineNotice tone="warning" className="py-2 text-xs">
             This canvas is shared as a public link, which serves static files only. The backend
-            primitives below won't run for public visitors — only for you and signed-in org members.
+            primitives below run only for the canvas owner and editors. Public-link viewers have
+            static access.
           </InlineNotice>
         )}
         <Toggle

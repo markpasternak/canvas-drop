@@ -365,3 +365,10 @@ Switching a driver changes where new data goes; to carry existing data across, t
 backup on the old drivers and restore it on the new ones.
 
 See [Configuration](/docs/self-hosting/configuration) for the full env surface.
+
+## Runtime permission upgrades
+
+Before deploying the participant permission model, follow the [upgrade guide](/docs/self-hosting/runtime-upgrade).
+Its additive migrations preserve data but default AI/Connections audiences to
+owners/editors and change shared KV/files/realtime mutation rules. Inventory
+existing interactive canvases as part of deployment preparation.

@@ -97,8 +97,8 @@ In the canvas's **Backend** tab, enable the capabilities it needs. Load the SDK 
 <script src="/sdk/v1.js"></script>
 <script type="module">
   const viewer = await canvasdrop.me();
-  const votes = await canvasdrop.kv.increment("votes", 1);
-  document.body.textContent = `${viewer.name}: ${votes} votes so far`;
+  const response = await canvasdrop.submissions.set("poll", { choice: "blue" });
+  document.body.textContent = `${viewer.name}: your ${response.value.choice} vote is saved`;
 </script>
 ```
 
@@ -131,7 +131,7 @@ People, public-link availability, usage, quotas, AI providers, and appearance re
 manageable from the dashboard. Configured AI providers and outbound Connections can send
 data to the services you choose.
 
-A canvas can contain up to **100 MB**, **2,000 files**, and **25 MB per file**. The last **10 published versions** are retained. Version recovery restores the published files; live backend data has its own lifecycle. Use the instance backup tools to protect the full database and stored files.
+A canvas can contain up to **100 MB**, **2,000 files**, and **25 MB per file**. The last **10 published versions** are retained. Owners and editors can delete selected history or all previous versions after reviewing a deduplicated space estimate. The current version and retained file references are protected. Version recovery restores the published files; live backend data has its own lifecycle. Use the instance backup tools to protect the full database and stored files.
 
 - [Configuration reference](https://canvas-drop.com/docs/self-hosting/configuration)
 - [Sharing and access](https://canvas-drop.com/docs/authoring/sharing)
@@ -145,3 +145,10 @@ A canvas can contain up to **100 MB**, **2,000 files**, and **25 MB per file**. 
 To work on the project, start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and the contribution workflow.
 
 Inspired by Shopify's [Quick](https://shopify.engineering/quick), created by Daniel Beauchamp and Alex Pilon. Not affiliated with Shopify. Released under the [MIT license](LICENSE).
+
+Runtime roles separate shared content from participation: owners and editors edit
+shared KV/files, while viewers can save private preferences and submit their own
+votes, forms and attachments. `canvasdrop.me()` returns `canvasRole` and
+`permissions`. AI and Connections audiences default to owners/editors and can be
+opened to signed-in viewers in the Backend tab. See the [runtime upgrade guide](docs/site/self-hosting/runtime-upgrade.md)
+for existing installations and [participant example](examples/participant-input/).

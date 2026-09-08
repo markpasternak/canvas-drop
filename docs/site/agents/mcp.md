@@ -104,7 +104,7 @@ Refusal codes you will meet across tools:
 
 ## Tools
 
-47 tools: 13 open to any signed-in account, 32 at minimum role editor, 2 owner-only.
+49 tools: 13 open to any signed-in account, 32 at minimum role editor, 2 owner-only.
 Optional inputs are marked `?`. "View" is the canvas projection described under Return
 shapes below.
 
@@ -380,3 +380,19 @@ and [Deploy](/docs/self-hosting/deploy).
   for the bytes of any large deploy, even from an MCP session.
 - The packaged **[Agent skill](/docs/agents/skill)** documents both for a coding agent,
   and **[`/llms.txt`](/llms.txt)** is the single-file quick reference.
+
+## Version cleanup and runtime audiences
+
+`preview_version_prune(id, versions)` accepts `"previous"` or an explicit numeric
+selection. Review its `{ versions, expectedVersionIds, skipped,
+estimatedReclaimableBytes }` with the user. `prune_versions(id, versions,
+expectedVersionIds)` deletes only the explicit immutable selection and returns
+`{ deleted, skipped }`. Both require owner/editor, as does single `delete_version`.
+The estimate excludes references retained by current/history/draft/active uploads;
+it does not promise recovered bytes. See [version cleanup](/docs/authoring/editor).
+
+`set_capabilities` additionally accepts `aiAudience` and `connectionsAudience`,
+each `"editors"` (default) or `"viewers"`. Canvas views expose both. Runtime canvas
+code reads its own role and permissions from [`me()`](/docs/sdk/identity).
+Viewers write [`submissions`](/docs/sdk/submissions), private preferences and
+private attachments; shared content mutations require owner/editor.

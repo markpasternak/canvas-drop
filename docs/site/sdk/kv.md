@@ -1,7 +1,8 @@
 # Key-value storage
 
 Store JSON that outlives a reload, from a static canvas, with no server code:
-counters, settings, form submissions, small documents. This page is the
+counters, settings and small documents. Use
+[`submissions`](/docs/sdk/submissions) for participant votes and forms. This page is the
 reference for `canvasdrop.kv`, the KV primitive on the `canvasdrop` global that
 `<script src="/sdk/v1.js">` defines in every canvas. By the end you can read,
 write, count, and page through keys in both scopes and handle every error KV
@@ -14,6 +15,7 @@ The canvas needs **Enable backend** on and the **Key-value storage** toggle on
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">
+  // These shared mutations require the owner or editor role.
   await canvasdrop.kv.set("votes", 0);                        // any JSON value except null
   const n = await canvasdrop.kv.get("votes");                 // 0 (null if the key is absent)
   const total = await canvasdrop.kv.increment("votes");       // 1, atomic +1
@@ -27,7 +29,7 @@ The canvas needs **Enable backend** on and the **Key-value storage** toggle on
 
 | Scope | Namespace | Who shares the keys | HTTP base |
 | --- | --- | --- | --- |
-| Shared | `canvasdrop.kv` | Every viewer of the canvas reads and writes the same values | `{base}/v1/c/{slug}/kv` |
+| Shared | `canvasdrop.kv` | Admitted viewers read; only owners and editors set, delete or increment | `{base}/v1/c/{slug}/kv` |
 | Per-viewer | `canvasdrop.kv.user` | Only the signed-in viewer; each person sees their own values | `{base}/v1/c/{slug}/kv/user` |
 
 Both namespaces have the same five methods (`KvNamespace`). The server derives
@@ -138,6 +140,7 @@ Every method rejects with a `CanvasdropError` subclass; branch on `err.code`
 
 | What happened | `err.code` | Status | Class |
 | --- | --- | --- | --- |
+| Viewer attempts a shared mutation | `PERMISSION_DENIED` | 403 | `PermissionDeniedError` |
 | Key, value, or key count over a limit | `KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `KEY_LIMIT` | 413, 413, 409 | `QuotaExceededError` |
 | `increment` on a non-number | `NOT_NUMERIC` | 409 | `CanvasdropError` |
 | `set(key, null)` or a non-finite `by` | `INVALID_BODY` | 400 | `CanvasdropError` |

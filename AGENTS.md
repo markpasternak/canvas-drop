@@ -149,3 +149,13 @@ Institutional learnings live in `docs/solutions/` — skim the index, and especi
   before opening a PR on auth/payment/migration-shaped changes.
 - **Anything touching the DB / dual-dialect schema** → `…dual-dialect-drizzle-seam.md`.
 - **CI / test infra changes** → `…ci-and-test-infra-gotchas.md`.
+
+## Current unmerged work
+
+Issue #116 and `docs/plans/2026-09-08-001-feat-runtime-permissions-version-pruning-plan.md`
+cover version cleanup and runtime roles/participation. The branch adds two MCP
+pruning tools (49 total), `me().canvasRole` / permissions, reserved KV submissions,
+shared versus submission files, explicit AI/Connections audiences, and
+`participants:` realtime publishing. The user requested one PR with **no merge or
+deployment**; live impact inventory is deferred until deployment preparation.
+See `docs/site/self-hosting/runtime-upgrade.md` for the compatibility contract.

@@ -2,8 +2,16 @@
   {
     "section": "Getting started",
     "pages": [
-      { "path": "", "file": "index.md", "title": "Overview" },
-      { "path": "quickstart", "file": "quickstart.md", "title": "Quickstart" }
+      {
+        "path": "",
+        "file": "index.md",
+        "title": "Overview"
+      },
+      {
+        "path": "quickstart",
+        "file": "quickstart.md",
+        "title": "Quickstart"
+      }
     ]
   },
   {
@@ -19,40 +27,101 @@
         "file": "authoring/sharing.md",
         "title": "Sharing & access"
       },
-      { "path": "authoring/teams", "file": "authoring/teams.md", "title": "Teams" },
+      {
+        "path": "authoring/teams",
+        "file": "authoring/teams.md",
+        "title": "Teams"
+      },
       {
         "path": "authoring/capabilities",
         "file": "authoring/capabilities.md",
         "title": "Capabilities"
       },
-      { "path": "authoring/editor", "file": "authoring/editor.md", "title": "The editor" }
+      {
+        "path": "authoring/editor",
+        "file": "authoring/editor.md",
+        "title": "The editor"
+      }
     ]
   },
   {
     "section": "Browser SDK",
     "pages": [
-      { "path": "sdk/overview", "file": "sdk/overview.md", "title": "Overview" },
-      { "path": "sdk/kv", "file": "sdk/kv.md", "title": "Key–value storage" },
-      { "path": "sdk/files", "file": "sdk/files.md", "title": "File storage" },
-      { "path": "sdk/identity", "file": "sdk/identity.md", "title": "Identity" },
-      { "path": "sdk/ai", "file": "sdk/ai.md", "title": "AI" },
-      { "path": "sdk/realtime", "file": "sdk/realtime.md", "title": "Realtime" },
-      { "path": "sdk/connections", "file": "sdk/connections.md", "title": "Connections" },
-      { "path": "sdk/authoring", "file": "sdk/authoring.md", "title": "Authoring" }
+      {
+        "path": "sdk/overview",
+        "file": "sdk/overview.md",
+        "title": "Overview"
+      },
+      {
+        "path": "sdk/kv",
+        "file": "sdk/kv.md",
+        "title": "Key\u2013value storage"
+      },
+      {
+        "path": "sdk/submissions",
+        "file": "sdk/submissions.md",
+        "title": "Submissions"
+      },
+      {
+        "path": "sdk/files",
+        "file": "sdk/files.md",
+        "title": "File storage"
+      },
+      {
+        "path": "sdk/identity",
+        "file": "sdk/identity.md",
+        "title": "Identity"
+      },
+      {
+        "path": "sdk/ai",
+        "file": "sdk/ai.md",
+        "title": "AI"
+      },
+      {
+        "path": "sdk/realtime",
+        "file": "sdk/realtime.md",
+        "title": "Realtime"
+      },
+      {
+        "path": "sdk/connections",
+        "file": "sdk/connections.md",
+        "title": "Connections"
+      },
+      {
+        "path": "sdk/authoring",
+        "file": "sdk/authoring.md",
+        "title": "Authoring"
+      }
     ]
   },
   {
     "section": "API reference",
     "pages": [
-      { "path": "api/deploy-api", "file": "api/deploy-api.md", "title": "Deploy API" },
-      { "path": "api/runtime-api", "file": "api/runtime-api.md", "title": "Runtime API" },
-      { "path": "api/errors", "file": "api/errors.md", "title": "Error codes" }
+      {
+        "path": "api/deploy-api",
+        "file": "api/deploy-api.md",
+        "title": "Deploy API"
+      },
+      {
+        "path": "api/runtime-api",
+        "file": "api/runtime-api.md",
+        "title": "Runtime API"
+      },
+      {
+        "path": "api/errors",
+        "file": "api/errors.md",
+        "title": "Error codes"
+      }
     ]
   },
   {
     "section": "Self-hosting",
     "pages": [
-      { "path": "self-hosting/install", "file": "self-hosting/install.md", "title": "Install" },
+      {
+        "path": "self-hosting/install",
+        "file": "self-hosting/install.md",
+        "title": "Install"
+      },
       {
         "path": "self-hosting/administration",
         "file": "self-hosting/administration.md",
@@ -68,21 +137,46 @@
         "file": "self-hosting/security-model.md",
         "title": "Security model"
       },
-      { "path": "self-hosting/deploy", "file": "self-hosting/deploy.md", "title": "Deploy" },
-      { "path": "self-hosting/cdn", "file": "self-hosting/cdn.md", "title": "Behind a CDN" },
+      {
+        "path": "self-hosting/deploy",
+        "file": "self-hosting/deploy.md",
+        "title": "Deploy"
+      },
+      {
+        "path": "self-hosting/cdn",
+        "file": "self-hosting/cdn.md",
+        "title": "Behind a CDN"
+      },
       {
         "path": "self-hosting/screenshots",
         "file": "self-hosting/screenshots.md",
         "title": "Screenshots"
+      },
+      {
+        "path": "self-hosting/runtime-upgrade",
+        "file": "self-hosting/runtime-upgrade.md",
+        "title": "Runtime permission upgrade"
       }
     ]
   },
   {
     "section": "For agents",
     "pages": [
-      { "path": "agents/mcp", "file": "agents/mcp.md", "title": "MCP server" },
-      { "path": "agents/llms", "file": "agents/llms.md", "title": "llms.txt" },
-      { "path": "agents/skill", "file": "agents/skill.md", "title": "Agent skill" }
+      {
+        "path": "agents/mcp",
+        "file": "agents/mcp.md",
+        "title": "MCP server"
+      },
+      {
+        "path": "agents/llms",
+        "file": "agents/llms.md",
+        "title": "llms.txt"
+      },
+      {
+        "path": "agents/skill",
+        "file": "agents/skill.md",
+        "title": "Agent skill"
+      }
     ]
   }
 ]

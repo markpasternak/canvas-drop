@@ -96,3 +96,21 @@ open a single PR and leave it unmerged with CI results.
 All units implemented; targeted rejection/edge tests and full local gates green;
 code review completed and findings resolved; docs generated and fresh; UI inspected;
 one PR with green required CI or a precise external blocker. No merge or deployment.
+
+## Implementation record
+
+U1, U2 and U3 are implemented with separate commits and passing local gates.
+U4 includes the active docs site, generated docs/llms content, skill bundle input,
+operator upgrade guide and updated runnable examples. The sequential review found
+and fixed viewer-specific file-list caching, stale public-backend guidance and
+unused transitional helpers. It added live team-role and active-upload GC tests.
+Browser checks covered 1200px desktop and 390px phone layouts, selected history
+removal/current preservation, and audience settings after reload. The participant
+example saved a question, vote and feedback, then reviewed feedback and published
+the expected vote totals through the SDK against a temporary local instance.
+
+Final local validation: lint, typecheck, 3,111 server tests across SQLite and
+PostgreSQL, 750 dashboard tests, generated-doc freshness and production build.
+The existing four environment-dependent server tests remain skipped locally;
+CI's real PostgreSQL/MinIO leg supplies its normal external-driver coverage.
+The PR remains unmerged and undeployed; production inventory is deferred.

@@ -166,7 +166,7 @@ const createSchema = z.object({
   orgId: z.string().nullable().optional(),
 });
 
-/** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
+/** Capability flags and runtime audiences. Absent fields remain unchanged. */
 const capabilitiesSchema = z.object({
   aiAudience: z.enum(["editors", "viewers"]).optional(),
   connectionsAudience: z.enum(["editors", "viewers"]).optional(),

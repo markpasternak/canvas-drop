@@ -1,6 +1,5 @@
 import { audienceAllows, type RuntimeRole } from "@canvas-drop/shared";
 import type { Context } from "hono";
-import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../http/types.js";
 
 export function canEditRuntime(c: Context<AppEnv>): boolean {
@@ -17,13 +16,6 @@ export function permissionDenied(c: Context<AppEnv>, action: string) {
     },
     403,
   );
-}
-
-export function requireRuntimeEditor(action: string) {
-  return createMiddleware<AppEnv>(async (c, next) => {
-    if (!canEditRuntime(c)) return permissionDenied(c, action);
-    await next();
-  });
 }
 
 export function runtimeAudienceAllows(c: Context<AppEnv>, audience: string): boolean {

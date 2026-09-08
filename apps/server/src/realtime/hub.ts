@@ -481,7 +481,7 @@ export function createHub(deps: HubDeps) {
           }
         }
         // Editors stay connected at any rung (editor-roles plan, KD6/R22) — resolved
-        // through the shared role resolver; a demoted editor is dropped by this sweep.
+        // through the shared role resolver; a demoted editor needs a remaining viewer grant.
         const role = await roleOf(canvas, conn);
         conn.runtimeRole = role === "none" ? "viewer" : role;
         const editorMatch = role === "editor";

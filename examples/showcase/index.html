@@ -30,9 +30,9 @@
 
 const me = await canvasdrop.me();              // who's viewing
 await canvasdrop.kv.increment("views");        // shared state
-await canvasdrop.files.upload(file);           // file storage
+await canvasdrop.files.upload(file, {scope: "submission"});           // file storage
 canvasdrop.ai.stream(messages, { model });     // streamed AI
-canvasdrop.realtime.channel("room").publish(); // live pub/sub</pre>
+canvasdrop.realtime.channel("participants:room"); // live pub/sub</pre>
       </div>
 
       <!-- Identity strip, populated by js/identity.js -->
@@ -74,7 +74,7 @@ greeting.textContent = `Hello, ${me.name}`;</pre>
       </p>
 
       <div class="controls">
-        <span class="metric"><span class="n" id="kv-counter">·</span><span class="muted">shared page views</span></span>
+        <span class="metric"><span class="n" id="kv-counter">·</span><span class="muted">shared counter</span></span>
         <button type="button"data-act="kv-bump" class="ghost">+1 view</button>
       </div>
 
@@ -87,7 +87,7 @@ greeting.textContent = `Hello, ${me.name}`;</pre>
       <div class="out" id="kv-out"></div>
       <details class="code">
         <summary>Show the code</summary>
-        <pre class="snippet">// shared, atomic — returns the new total
+        <pre class="snippet">// owner/editor writes; everyone admitted reads
 const views = await canvasdrop.kv.increment("views");
 
 // per-user namespace, isolated per viewer
@@ -113,7 +113,7 @@ const mine = await canvasdrop.kv.user.get("note");</pre>
       <details class="code">
         <summary>Show the code</summary>
         <pre class="snippet">const f = input.files[0];
-const { id, url } = await canvasdrop.files.upload(f);
+const { id, url } = await canvasdrop.files.upload(f, {scope: "submission"});
 img.src = url;                       // or canvasdrop.files.url(id)
 const all = await canvasdrop.files.list();
 await canvasdrop.files.delete(id);</pre>
@@ -186,7 +186,7 @@ for await (const delta of canvasdrop.ai.stream(messages, { model })) {
       <div id="rt-state"></div>
       <details class="code">
         <summary>Show the code</summary>
-        <pre class="snippet">const room = canvasdrop.realtime.channel("lobby");
+        <pre class="snippet">const room = canvasdrop.realtime.channel("participants:lobby");
 room.onPresence(users =&gt; renderPresence(users));
 room.subscribe(msg =&gt; addMessage(msg.from.name, msg.data));
 room.publish("chat", { text });</pre>

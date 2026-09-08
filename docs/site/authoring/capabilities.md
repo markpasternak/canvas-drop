@@ -27,13 +27,14 @@ setup:
 <script src="/sdk/v1.js"></script>
 <script type="module">
   const me = await canvasdrop.me();                 // on whenever the backend is on
-  await canvasdrop.kv.set("last-viewer", me.name);  // needs Key-value storage on
+  await canvasdrop.kv.user.set("last-visit", Date.now());  // needs Key-value storage on
 </script>
 ```
 
 Agents and scripts flip the same switches. The MCP tool `set_capabilities` and
 `PATCH {base}/api/canvases/{id}/capabilities` take the same body: any subset of
-`backendEnabled`, `kv`, `files`, `ai`, `realtime`, `authoring` as booleans.
+`backendEnabled`, `kv`, `files`, `ai`, `realtime`, `authoring` as booleans,
+and the audience fields described below.
 Omitted fields are unchanged.
 
 ```json
@@ -86,7 +87,8 @@ the outcome, and `effective` in the API is the same answer.
 | Connections | yes | an enabled profile is attached | `CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY` is available when protected headers are configured |
 | Authoring | yes | yes | `CANVAS_DROP_AUTHORING=on` (default `off`), or **Authoring enabled** set by an admin in Admin → Settings |
 
-KV and files have no instance switch: your two toggles are the whole story.
+KV and files have no instance switch. Their toggles enable the feature; the
+caller still needs the role required by the operation.
 When your toggle is on but the instance switch is off, the toggle stays on and
 the row is labelled **Disabled by your administrator for this instance.** The
 AI key and the authoring switch are read per request, so an admin's change
@@ -194,3 +196,29 @@ on is normally a per-canvas choice its owner or an editor makes. Connections is
 the deliberate exception: only an admin defines profiles and attaches or revokes
 their grants, while owners and editors inspect the non-secret authority in the
 Backend tab.
+
+## Who can use the backend
+
+Feature switches control availability; canvas roles control each operation.
+Owners and editors change shared content and review submissions. Viewers can
+read shared data, keep private preferences, submit their own votes/forms and
+upload private attachments. [`me().permissions`](/docs/sdk/identity) reports the
+current caller's allowed operations. A denied role returns `PERMISSION_DENIED`.
+
+The Backend tab also has **AI access** and **Connection access**, each set to
+**Owners and editors** by default. Choose **All signed-in viewers** to permit
+an interactive audience to use that backend. Public links remain static-only
+for viewers. An audience choice cannot enable a disabled feature, supply an AI
+key, grant a Connection profile, or bypass quotas and legacy guest restrictions.
+
+`PATCH /api/canvases/{id}/capabilities` and MCP `set_capabilities` accept
+`aiAudience` and `connectionsAudience`, each `"editors"` or `"viewers"`.
+The management canvas view exposes both alongside `capabilities` and `effective`.
+Omitted values stay unchanged. Only owners and editors can change them.
+
+```json
+{ "backendEnabled": true, "ai": true, "aiAudience": "viewers", "connectionsAudience": "editors" }
+```
+
+For an existing installation, read the [runtime upgrade guide](/docs/self-hosting/runtime-upgrade)
+before deploying these defaults.

@@ -6,6 +6,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
@@ -40,6 +41,7 @@ describe.each(DIALECTS)("versionHistoryService [%s]", (dialect) => {
     const canvases = canvasesRepository(client);
     const versions = versionsRepository(client);
     const drafts = draftsRepository(client);
+    const uploadSessions = uploadSessionsRepository(client);
     const storage = memStorage();
     const owner = await users.upsert({
       providerSub: "owner",
@@ -57,13 +59,32 @@ describe.each(DIALECTS)("versionHistoryService [%s]", (dialect) => {
       canvases,
       versions,
       drafts,
+      uploadSessions,
       storage,
       log,
     });
     const recordAudit = vi.fn();
     const audit = { recordAudit, record() {}, async flush() {} } as AuditLog;
-    const service = versionHistoryService({ versions, drafts, storage, engine, audit });
-    return { owner, canvas, canvases, versions, drafts, storage, recordAudit, service, engine };
+    const service = versionHistoryService({
+      versions,
+      drafts,
+      uploadSessions,
+      storage,
+      engine,
+      audit,
+    });
+    return {
+      owner,
+      canvas,
+      canvases,
+      versions,
+      drafts,
+      uploadSessions,
+      storage,
+      recordAudit,
+      service,
+      engine,
+    };
   }
 
   async function ready(
@@ -245,5 +266,24 @@ describe.each(DIALECTS)("versionHistoryService [%s]", (dialect) => {
       await service.prune(canvas.id, preview.versions, owner.id, preview.expectedVersionIds),
     ).toEqual({ deleted: [], skipped: [{ version: 1, reason: "unavailable" }] });
     expect(await versions.findById(replacement.id)).not.toBeNull();
+  });
+  it("protects active upload references in both the estimate and the actual sweep", async () => {
+    const { owner, canvas, versions, uploadSessions, storage, service } = await setup();
+    await ready(versions, canvas.id, owner.id, 1, manifest({ a: "upload-held", b: "obsolete" }));
+    for (const hash of ["upload-held", "obsolete"])
+      await storage.put(blobKey(canvas.id, hash), enc(hash));
+    await uploadSessions.create({
+      canvasId: canvas.id,
+      actorId: owner.id,
+      handleHash: "active",
+      manifest: manifest({ a: "upload-held" }),
+      stagedHashes: ["upload-held"],
+      expiresAt: Date.now() + 60000,
+    });
+    const preview = await service.previewPrune(canvas, [1]);
+    expect(preview.estimatedReclaimableBytes).toBe("obsolete".length);
+    await service.prune(canvas.id, preview.versions, owner.id, preview.expectedVersionIds);
+    expect(await storage.get(blobKey(canvas.id, "upload-held"))).not.toBeNull();
+    expect(await storage.get(blobKey(canvas.id, "obsolete"))).toBeNull();
   });
 });
