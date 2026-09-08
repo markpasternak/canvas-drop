@@ -340,8 +340,20 @@ Do not use client-supplied author IDs or shared counters for viewer votes.
 Private attachments use `files.upload(file, { scope: "submission" })`.
 AI and Connections default to owner/editor audiences; opt viewers in using
 `set_capabilities` fields `aiAudience` / `connectionsAudience: "viewers"`.
-Realtime shared publishing requires owner/editor; `participants:` channels allow
+Unconfigured realtime shared publishing requires owner/editor; `participants:` channels allow
 attributed viewer messages, visible to all subscribers. Role denials are
 `PERMISSION_DENIED` and never disappear by hiding UI controls.
 For cleanup use `preview_version_prune` then `prune_versions` with the exact
 returned numbers and `expectedVersionIds`; never infer bytes recovered from an estimate.
+
+For multiple authored items use `kv.collection(name)` after configuring the resource
+through `set_capabilities.runtimePolicy`. Five data/file presets: personal,
+submissions, contributions, managed, collaborative. Default modes initialize newly
+added resources; existing policies remain explicit. `expectedRuntimePolicy` must
+match `get_canvas.runtimePolicyRevision` (initially null), or saving fails with
+POLICY_CONFLICT. Author identity is immutable and server-derived. Read/create/update/
+delete/increment can be customized; mutations also require read. File attachments
+use `{collection, recordId}` and inherit the record's rights. Named channels configure
+subscribe/publish/seePresence/participatePresence, and Connections configure audience
+and methods. `me().resources` exposes effective rights. Full schema and examples:
+`/docs/sdk/permissions`.

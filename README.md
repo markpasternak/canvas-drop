@@ -93,6 +93,11 @@ Create the canvas first and copy its deploy key from the dashboard. Each key pub
 
 In the canvas's **Backend** tab, enable the capabilities it needs. Load the SDK from the canvas page:
 
+Choose Read only, Participation or Collaboration as the default for new resources.
+Collections and file groups have five presets; advanced controls customize individual
+operations, realtime channels and Connections. Viewers can contribute and manage their
+own items without becoming canvas editors. See [Permissions and defaults](docs/site/sdk/permissions.md).
+
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">

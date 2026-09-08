@@ -1,5 +1,10 @@
 import type { Config } from "@canvas-drop/shared";
-import { runtimePermissions } from "@canvas-drop/shared";
+import {
+  parseRuntimePolicy,
+  dataPermissions as projectDataPermissions,
+  rightAllows,
+  runtimePermissions,
+} from "@canvas-drop/shared";
 import type { Canvas, User } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -33,6 +38,7 @@ import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { type AiSettings, canvasAiRoutes } from "./canvas-ai.js";
 import { type AuthoringSettings, canvasAuthoringRoutes } from "./canvas-authoring.js";
+import { canvasCollectionRoutes } from "./canvas-collections.js";
 import { type CanvasConnectionsDeps, canvasConnectionsRoutes } from "./canvas-connections.js";
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
@@ -195,6 +201,48 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
     const globals = capabilityGlobals(deps.config);
     if (deps.settings) globals.aiEnabled = await deps.settings.aiEnabled();
     const connections = (await deps.connections?.service.listForCanvas(canvas.id)) ?? [];
+    const policy = parseRuntimePolicy(canvas.runtimePolicy);
+    const permissions = runtimePermissions(
+      canvas,
+      canvasRole,
+      globals,
+      connections.some((connection) => connection.available),
+    );
+    permissions.canCreateCanvas &&= kind === "member";
+    const dataPermissions = (entries: typeof policy.collections, enabled: boolean) =>
+      Object.fromEntries(
+        Object.entries(entries).map(([name, entry]) => [
+          name,
+          projectDataPermissions(entry, canvasRole, u.id, enabled),
+        ]),
+      );
+    const connectionPermissions = Object.fromEntries(
+      connections.map((connection) => {
+        const setting = policy.connections[connection.key];
+        const allowed =
+          connection.available &&
+          rightAllows(
+            setting?.audience ?? (canvas.connectionsAudience as "editors" | "viewers"),
+            canvasRole,
+            u.id,
+          );
+        const methods = allowed
+          ? connection.allowedMethods.filter(
+              (method) => !setting?.methods || setting.methods.includes(method),
+            )
+          : [];
+        return [
+          connection.key,
+          {
+            invoke: allowed && methods.length > 0,
+            methods,
+          },
+        ];
+      }),
+    );
+    permissions.canUseConnections = Object.values(connectionPermissions).some(
+      (value) => value.invoke && value.methods.length > 0,
+    );
     c.header("Cache-Control", "private, no-store");
     return c.json({
       id: u.id,
@@ -203,18 +251,33 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       avatarUrl: u.avatarUrl,
       kind,
       canvasRole,
-      permissions: runtimePermissions(
-        canvas,
-        canvasRole,
-        globals,
-        connections.some((connection) => connection.available),
-      ),
+      permissions,
+      resources: {
+        collections: dataPermissions(policy.collections, permissions.canReadSharedData),
+        fileGroups: dataPermissions(policy.fileGroups, canvas.backendEnabled && canvas.capFiles),
+        channels: Object.fromEntries(
+          Object.entries(policy.channels).map(([name, entry]) => [
+            name,
+            Object.fromEntries(
+              Object.entries(entry).map(([op, audience]) => [
+                op,
+                canvas.backendEnabled &&
+                  canvas.capRealtime &&
+                  globals.realtimeEnabled &&
+                  rightAllows(audience, canvasRole, u.id),
+              ]),
+            ),
+          ]),
+        ),
+        connections: connectionPermissions,
+      },
     });
   });
 
   // KV primitive (U6) and Files primitive (U7).
   app.route("/kv", canvasKvRoutes(deps));
   app.route("/submissions", canvasSubmissionRoutes(deps));
+  app.route("/collections", canvasCollectionRoutes(deps));
   app.route("/files", canvasFilesRoutes(deps));
 
   if (deps.connections) {

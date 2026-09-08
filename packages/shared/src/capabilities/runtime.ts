@@ -27,6 +27,7 @@ export function runtimePermissions(
   return {
     canEditContent: editor && (active || canvas.status === "archived"),
     canManageVersions: editor && (active || canvas.status === "archived"),
+    canCreateCanvas: active && effective.authoring,
     canReadSharedData: active && effective.kv,
     canWriteSharedData: active && effective.kv && editor,
     canSavePreferences: active && effective.kv,

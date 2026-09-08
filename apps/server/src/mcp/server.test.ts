@@ -542,6 +542,55 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     ).toBe(true);
   });
 
+  it("set_capabilities configures resource policies with stale-save protection", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const runtimePolicy = {
+      defaultMode: "participation",
+      collections: { comments: { preset: "contributions" } },
+      fileGroups: {},
+      channels: {},
+      connections: {},
+    };
+    const updated = payload(
+      await mcp.callTool({
+        name: "set_capabilities",
+        arguments: { id: cv.id, runtimePolicy, expectedRuntimePolicy: null },
+      }),
+    );
+    expect(updated.runtimePolicy).toEqual(runtimePolicy);
+    expect(typeof updated.runtimePolicyRevision).toBe("string");
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "set_capabilities",
+          arguments: { id: cv.id, runtimePolicy, expectedRuntimePolicy: null },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isError(
+        await mcp.callTool({ name: "set_capabilities", arguments: { id: cv.id, runtimePolicy } }),
+      ),
+    ).toBe(true);
+    const readback = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }));
+    expect(readback.runtimePolicy).toEqual(runtimePolicy);
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "set_capabilities",
+          arguments: {
+            id: cv.id,
+            runtimePolicy: { ...runtimePolicy, defaultMode: "read_only" },
+            expectedRuntimePolicy: readback.runtimePolicyRevision,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("set_capabilities toggles backend + features (mirrors the Backend tab)", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");

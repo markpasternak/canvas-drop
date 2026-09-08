@@ -149,6 +149,9 @@ export function useUpdateCapabilities(id: string) {
   return useMutation({
     scope: { id: `capabilities-${id}` },
     mutationFn: (patch: CanvasCapabilitiesPatch) => api.updateCapabilities(id, patch),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.canvas(id), data);
+    },
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: keys.canvas(id) });
       const prev = qc.getQueryData<Canvas>(keys.canvas(id));

@@ -8,6 +8,7 @@ a plain folder of static files — no build step.
 | [`hello-static/`](./hello-static/) | The simplest possible canvas: a single `index.html`. Drop the folder in, get a URL out. |
 | [`kv-counter/`](./kv-counter/) | A backend in one `<script>` tag — an atomic shared counter via the KV primitive (`canvasdrop.kv.*`), no secrets in the browser. |
 | [`participant-input/`](./participant-input/) | Private poll votes and feedback, editor review, and deliberately published totals using submissions. |
+| [`shared-contributions/`](./shared-contributions/) | Shared comments, author-controlled status and deletion, inherited attachment rights, live signals, and export. |
 | [`showcase/`](./showcase/) | The full primitives showcase (identity · KV · files · AI · realtime). |
 
 ## Deploy one

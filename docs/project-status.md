@@ -10,10 +10,13 @@ Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usag
 The [participant permissions and version cleanup round](plans/2026-09-08-001-feat-runtime-permissions-version-pruning-plan.md)
 is in review under [issue #116](https://github.com/markpasternak/canvas-drop/issues/116).
 It adds selected/all-previous version cleanup, runtime identity roles/permissions,
-private submissions and attachments, backend audiences, and attributed participant
-realtime channels. Its two pruning tools bring the proposed MCP surface to 49.
-This round is **not merged or deployed**. Live canvas impact inventory is deferred
-to deployment preparation; see the [upgrade guide](site/self-hosting/runtime-upgrade.md).
+authored collections and inherited attachments, five data/file presets, easy defaults,
+advanced operation rights, per-channel realtime rights and per-Connection policies.
+The [policy extension plan](plans/2026-09-08-002-feat-primitive-policy-defaults-plan.md)
+supersedes the initial narrow submissions model. Its two pruning tools bring the
+proposed MCP surface to 49. This round is **not merged or deployed**. A read-only
+production impact audit was completed; app adaptations and production validation
+remain deployment preparation. See the [upgrade guide](site/self-hosting/runtime-upgrade.md).
 
 **M10 ops/packaging is the one open milestone.**
 

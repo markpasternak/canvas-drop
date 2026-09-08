@@ -64,6 +64,8 @@ export type EffectiveCapabilities = Record<FeatureCapability | "identity", boole
 
 /** Capability patch sent to PATCH /:id/capabilities (all optional). */
 export interface CanvasCapabilitiesPatch {
+  runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
+  expectedRuntimePolicy?: string | null;
   aiAudience?: "editors" | "viewers";
   connectionsAudience?: "editors" | "viewers";
   backendEnabled?: boolean;
@@ -111,6 +113,8 @@ export type PreviewMode = "auto" | "off" | "custom";
 export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
 
 export interface Canvas {
+  runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
+  runtimePolicyRevision?: string | null;
   id: string;
   slug: string;
   /** Whose canvas it is (editor-roles plan): the owner's account and display identity.

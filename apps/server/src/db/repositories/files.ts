@@ -10,7 +10,8 @@ export interface NewFileInput {
   sizeBytes: number;
   storageKey: string;
   uploadedBy: string;
-  scope?: "shared" | "submission";
+  scope?: string;
+  recordId?: string;
 }
 
 /**
@@ -25,6 +26,12 @@ export function filesRepository(client: DbClient) {
   const t = client.dialect === "sqlite" ? sqliteSchema.files : pgSchema.files;
 
   return {
+    async rename(canvasId: string, id: string, filename: string): Promise<void> {
+      await db
+        .update(t)
+        .set({ filename })
+        .where(and(eq(t.canvasId, canvasId), eq(t.id, id)));
+    },
     async insert(input: NewFileInput): Promise<FileRow> {
       const rows = await db
         .insert(t)

@@ -32,7 +32,8 @@ export interface CreateFileInput {
   mime: string;
   bytes: Uint8Array;
   userId: string;
-  scope?: "shared" | "submission";
+  scope?: string;
+  recordId?: string;
 }
 
 /** The per-canvas storage key for a file blob (shared with purge via storage-keys). */
@@ -79,6 +80,7 @@ export function filesService(deps: {
           storageKey,
           uploadedBy: input.userId,
           scope: input.scope ?? "shared",
+          recordId: input.recordId,
         });
       } catch (err) {
         // Row insert failed after the blob landed — clean up the orphan blob. The
@@ -120,6 +122,9 @@ export function filesService(deps: {
 
     metadata(canvasId: string, id: string) {
       return files.findById(canvasId, id);
+    },
+    rename(canvasId: string, id: string, filename: string) {
+      return files.rename(canvasId, id, filename);
     },
 
     /** The row + bytes for serving, or null if the id isn't this canvas's. */

@@ -1,5 +1,5 @@
 import type { Config } from "@canvas-drop/shared";
-import { accessModeOf } from "@canvas-drop/shared";
+import { accessModeOf, parseRuntimePolicy } from "@canvas-drop/shared";
 import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
 import { canvasUrl } from "../canvas/url.js";
 import { DeployError } from "../deploy/errors.js";
@@ -55,6 +55,7 @@ export function canvasView(
     spaFallback?: boolean;
     backendEnabled?: boolean;
     aiAudience?: string;
+    runtimePolicy?: string | null;
     connectionsAudience?: string;
     disabledReason?: string | null;
     galleryListed?: boolean;
@@ -104,6 +105,8 @@ export function canvasView(
     spaFallback: cv.spaFallback,
     backendEnabled: cv.backendEnabled,
     aiAudience: cv.aiAudience ?? "editors",
+    runtimePolicy: parseRuntimePolicy(cv.runtimePolicy),
+    runtimePolicyRevision: cv.runtimePolicy ?? null,
     connectionsAudience: cv.connectionsAudience ?? "editors",
     disabledReason: cv.disabledReason ?? null,
     galleryListed: cv.galleryListed,

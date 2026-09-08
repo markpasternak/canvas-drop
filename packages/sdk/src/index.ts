@@ -53,7 +53,10 @@ export const ERROR_CODES = {
   VALUE_TOO_LARGE: { status: 413, summary: "The KV value exceeds the size limit." },
   FILE_TOO_LARGE: { status: 413, summary: "An uploaded file exceeds the per-file size limit." },
   KEY_LIMIT: { status: 409, summary: "The canvas hit its key-count limit." },
-  NOT_NUMERIC: { status: 409, summary: "increment was called on a non-numeric value." },
+  NOT_NUMERIC: {
+    status: 409,
+    summary: "The value is non-numeric or the increment exceeds the finite numeric range.",
+  },
   QUOTA_EXCEEDED: { status: 429, summary: "A spend or rate quota was exceeded." },
   CONNECTION_LIMIT: {
     status: 429,
@@ -134,7 +137,7 @@ export class PermissionDeniedError extends CanvasdropError {
     super(
       "PERMISSION_DENIED",
       403,
-      message ?? "Your canvas role cannot perform this action.",
+      message ?? "Your current permissions do not allow this action.",
       hint,
     );
     this.name = "PermissionDeniedError";
@@ -348,6 +351,7 @@ async function request<T>(
 
 export type CanvasRole = "owner" | "editor" | "viewer";
 export interface RuntimePermissions {
+  canCreateCanvas: boolean;
   canEditContent: boolean;
   canManageVersions: boolean;
   canReadSharedData: boolean;
@@ -363,6 +367,15 @@ export interface RuntimePermissions {
   canPublishParticipantEvents: boolean;
 }
 export interface Me {
+  resources: {
+    collections: Record<string, RecordPermissions>;
+    fileGroups: Record<string, RecordPermissions>;
+    channels: Record<
+      string,
+      { subscribe: boolean; publish: boolean; seePresence: boolean; participatePresence: boolean }
+    >;
+    connections: Record<string, { invoke: boolean; methods: string[] }>;
+  };
   canvasRole: CanvasRole;
   permissions: RuntimePermissions;
   id: string;
@@ -374,7 +387,8 @@ export interface Me {
 }
 
 export interface FileMeta {
-  scope?: "shared" | "submission";
+  scope?: string;
+  recordId?: string | null;
   uploadedBy?: string;
   id: string;
   name: string;
@@ -387,6 +401,34 @@ export interface KvList {
   entries: Array<{ key: string; value: unknown }>;
   nextCursor: string | null;
 }
+export interface CollectionRecord<T = unknown> {
+  id: string;
+  authorId: string;
+  value: T;
+  updatedAt: number;
+}
+export type RecordPermissions = Record<
+  "read" | "create" | "update" | "delete" | "increment",
+  { own: boolean; any: boolean }
+>;
+export interface CollectionNamespace {
+  create<T>(value: T): Promise<CollectionRecord<T>>;
+  get<T = unknown>(id: string): Promise<CollectionRecord<T> | null>;
+  update<T>(id: string, value: T): Promise<CollectionRecord<T>>;
+  delete(id: string): Promise<void>;
+  list<T = unknown>(options?: {
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ entries: CollectionRecord<T>[]; nextCursor: string | null }>;
+  clear(): Promise<{ deleted: number; attachmentCleanupFailed: number }>;
+  increment(id: string, by?: number): Promise<CollectionRecord<number>>;
+  count(): Promise<number>;
+  permissions(): Promise<RecordPermissions>;
+}
+export type FileUploadOptions =
+  | { scope?: "shared" | "submission"; group?: never; collection?: never; recordId?: never }
+  | { group: string; scope?: never; collection?: never; recordId?: never }
+  | { collection: string; recordId: string; scope?: never; group?: never };
 
 export interface Submission<T = unknown> {
   userId: string;
@@ -605,15 +647,16 @@ export interface CanvasesNamespace {
 
 export interface CanvasdropClient {
   me(): Promise<Me>;
-  kv: KvNamespace & { readonly user: KvNamespace };
+  kv: KvNamespace & { readonly user: KvNamespace; collection(name: string): CollectionNamespace };
   submissions: SubmissionsNamespace;
   files: {
     upload(
       file: File,
-      options?: { scope?: "shared" | "submission" },
+      options?: FileUploadOptions,
     ): Promise<{ id: string; name: string; size: number; url: string }>;
     list(): Promise<FileMeta[]>;
     delete(id: string): Promise<void>;
+    rename(id: string, name: string): Promise<void>;
     url(id: string): string;
   };
   ai: AiNamespace;
@@ -654,6 +697,42 @@ function submissionsNamespace(opts: Required<ClientOptions>): SubmissionsNamespa
     async clear(collection) {
       await request(opts, "DELETE", path(collection));
     },
+  };
+}
+
+function collectionNamespace(opts: Required<ClientOptions>, name: string): CollectionNamespace {
+  const path = `/collections/${encodeURIComponent(name)}`;
+  const item = (id: string) => `${path}/${encodeURIComponent(id)}`;
+  return {
+    create: <T>(value: T) => request<CollectionRecord<T>>(opts, "POST", path, value),
+    get: async <T>(id: string) => {
+      try {
+        return await request<CollectionRecord<T>>(opts, "GET", item(id));
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
+      }
+    },
+    update: <T>(id: string, value: T) => request<CollectionRecord<T>>(opts, "PUT", item(id), value),
+    delete: async (id) => {
+      await request(opts, "DELETE", item(id));
+    },
+    list: <T>(options: { cursor?: string; limit?: number } = {}) => {
+      const query = new URLSearchParams();
+      if (options.cursor !== undefined) query.set("cursor", options.cursor);
+      if (options.limit !== undefined) query.set("limit", String(options.limit));
+      return request<{ entries: CollectionRecord<T>[]; nextCursor: string | null }>(
+        opts,
+        "GET",
+        `${path}?${query}`,
+      );
+    },
+    clear: () =>
+      request<{ deleted: number; attachmentCleanupFailed: number }>(opts, "DELETE", path),
+    increment: (id, by = 1) =>
+      request<CollectionRecord<number>>(opts, "POST", `${item(id)}/increment`, { by }),
+    count: async () => (await request<{ count: number }>(opts, "GET", `${path}/count`)).count,
+    permissions: () => request<RecordPermissions>(opts, "GET", `${path}/permissions`),
   };
 }
 
@@ -1127,16 +1206,25 @@ export function createClient(options: ClientOptions): CanvasdropClient {
   };
   return {
     me: () => request<Me>(opts, "GET", "/me"),
-    kv: { ...shared, user: kvNamespace(opts, "/kv/user") },
+    kv: {
+      ...shared,
+      user: kvNamespace(opts, "/kv/user"),
+      collection: (name) => collectionNamespace(opts, name),
+    },
     submissions: submissionsNamespace(opts),
     ai: aiNamespace(opts, base),
     realtime: createRealtime(opts),
     connections,
     files: {
-      async upload(file: File, options?: { scope?: "shared" | "submission" }) {
+      async upload(file: File, options?: FileUploadOptions) {
         const form = new FormData();
         form.set("file", file);
         if (options?.scope) form.set("scope", options.scope);
+        if (options?.group) form.set("group", options.group);
+        if (options?.collection) {
+          form.set("collection", options.collection);
+          form.set("recordId", options.recordId);
+        }
         const res = await opts.fetch(base("/files"), {
           method: "POST",
           credentials: "include",
@@ -1154,6 +1242,9 @@ export function createClient(options: ClientOptions): CanvasdropClient {
       },
       async delete(id: string) {
         await request(opts, "DELETE", `/files/${encodeURIComponent(id)}`);
+      },
+      async rename(id: string, name: string) {
+        await request(opts, "PATCH", `/files/${encodeURIComponent(id)}`, { name });
       },
       url(id: string) {
         return base(`/files/${encodeURIComponent(id)}/content`);

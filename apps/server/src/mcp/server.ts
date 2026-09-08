@@ -1,5 +1,11 @@
 import { Buffer } from "node:buffer";
-import { CANVAS_MAX_TAG_LENGTH, CANVAS_MAX_TAGS, type Config } from "@canvas-drop/shared";
+import {
+  CANVAS_MAX_TAG_LENGTH,
+  CANVAS_MAX_TAGS,
+  type Config,
+  PolicyConflictError,
+  runtimePolicySchema,
+} from "@canvas-drop/shared";
 import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -1044,6 +1050,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {
         id: z.string().describe("The canvas id."),
         backendEnabled: z.boolean().optional(),
+        runtimePolicy: runtimePolicySchema
+          .optional()
+          .describe(
+            "Complete resource policy document. Defaults initialize new resources; preserve existing entries. Requires expectedRuntimePolicy from get_canvas.runtimePolicyRevision.",
+          ),
+        expectedRuntimePolicy: z.string().max(65536).nullable().optional(),
         aiAudience: z
           .enum(["editors", "viewers"])
           .optional()
@@ -1065,7 +1077,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const cv = gate.canvas;
       const fields = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
       if (Object.keys(fields).length === 0) return ok(await viewWithIdentity(cv, gate.role));
-      const updated = await deps.canvases.updateCapabilities(cv.id, fields);
+      let updated: Canvas;
+      try {
+        updated = await deps.canvases.updateCapabilities(cv.id, fields);
+      } catch (error) {
+        if (error instanceof PolicyConflictError) return fail(`${error.code}: ${error.message}`);
+        throw error;
+      }
       deps.audit.recordAudit({
         action: "capabilities_update",
         actorId: caller.userId,

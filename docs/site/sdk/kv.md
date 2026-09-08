@@ -8,6 +8,12 @@ reference for `canvasdrop.kv`, the KV primitive on the `canvasdrop` global that
 write, count, and page through keys in both scopes and handle every error KV
 returns.
 
+For multiple authored items, use `kv.collection(name)`. Collections support five
+policy presets, immutable authorship and read/create/update/delete/increment rights.
+Configure a collection with the Participation default for shared comments whose
+authors and owners/editors can update/delete them. See [Permissions and defaults](/docs/sdk/permissions)
+for the collection API. Raw `kv` and `kv.user` below keep their existing contracts.
+
 The canvas needs **Enable backend** on and the **Key-value storage** toggle on
 (it is pre-enabled) in its **Backend** tab; see
 [Capabilities](/docs/authoring/capabilities).

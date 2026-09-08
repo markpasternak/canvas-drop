@@ -154,9 +154,10 @@ Three cases do not throw the way the rest do:
 ## Reading, editing and participating
 
 Feature availability does not grant write access. Owners/editors change shared
-KV and files; viewers read shared content, save `kv.user` preferences, and write
-their own submissions and private attachments. AI/Connections require an explicit
-viewer audience when used by viewers. Ordinary realtime channels have
-owner/editor publishing; `participants:` channels allow public-to-subscribers
-viewer events. Render controls from `me().permissions` and handle typed
-`PermissionDeniedError` if access changes. See [Capabilities](/docs/authoring/capabilities).
+raw KV and files. Configured collections and file groups support five presets,
+including shared contributions that participants can create and manage as authors.
+Attachments inherit record rights; personal preferences remain caller-only.
+Defaults make setup simple, with advanced operation and channel rights available
+when needed. AI and Connections have explicit audiences. Render controls from
+`me().permissions` and `me().resources` and handle typed `PermissionDeniedError` if
+access changes. See [Permissions and defaults](/docs/sdk/permissions).

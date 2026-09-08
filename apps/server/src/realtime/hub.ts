@@ -1,4 +1,12 @@
-import type { Config } from "@canvas-drop/shared";
+import {
+  type ChannelPolicy,
+  type Config,
+  channelPolicy,
+  emptyRuntimePolicy,
+  parseRuntimePolicy,
+  type RuntimePolicy,
+  rightAllows,
+} from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import {
   decideCanvasAccess,
@@ -66,6 +74,7 @@ export interface ConnUser {
 }
 
 export interface Conn {
+  runtimePolicy?: RuntimePolicy;
   runtimeRole?: "owner" | "editor" | "viewer";
   readonly socket: Socket;
   readonly canvasId: string;
@@ -127,6 +136,16 @@ function send(conn: Conn, obj: unknown): void {
 export function createHub(deps: HubDeps) {
   /** canvasId → live connections. */
   const byCanvas = new Map<string, Set<Conn>>();
+  function channelAllows(conn: Conn, channel: string, op: keyof ChannelPolicy): boolean {
+    return (
+      !conn.closed &&
+      rightAllows(
+        channelPolicy(conn.runtimePolicy ?? emptyRuntimePolicy(), channel)[op],
+        conn.runtimeRole ?? "viewer",
+        conn.user.id,
+      )
+    );
+  }
 
   /** The shared role resolver's deps, over the hub's function-shaped probe. */
   const roleDeps = {
@@ -196,19 +215,33 @@ export function createHub(deps: HubDeps) {
   function presence(canvasId: string, channel: string): PresenceUser[] {
     const seen = new Map<string, PresenceUser>();
     for (const c of subscribers(canvasId, channel)) {
-      if (!seen.has(c.user.id)) seen.set(c.user.id, { id: c.user.id, name: c.user.name });
+      if (channelAllows(c, channel, "participatePresence") && !seen.has(c.user.id))
+        seen.set(c.user.id, { id: c.user.id, name: c.user.name });
     }
     return [...seen.values()];
   }
 
   /** How many of a user's connections are subscribed to a channel. */
   function userSubCount(canvasId: string, channel: string, userId: string): number {
-    return subscribers(canvasId, channel).filter((c) => c.user.id === userId).length;
+    return subscribers(canvasId, channel).filter(
+      (c) => c.user.id === userId && channelAllows(c, channel, "participatePresence"),
+    ).length;
   }
 
-  function broadcast(canvasId: string, channel: string, obj: unknown, except?: Conn): void {
+  function broadcast(
+    canvasId: string,
+    channel: string,
+    obj: unknown,
+    except?: Conn,
+    presenceEvent = false,
+  ): void {
     for (const c of subscribers(canvasId, channel)) {
-      if (c !== except) send(c, obj);
+      if (
+        c !== except &&
+        channelAllows(c, channel, "subscribe") &&
+        (!presenceEvent || channelAllows(c, channel, "seePresence"))
+      )
+        send(c, obj);
     }
   }
 
@@ -226,14 +259,16 @@ export function createHub(deps: HubDeps) {
     const wasPresent = userSubCount(conn.canvasId, channel, conn.user.id) > 0;
     conn.channels.add(channel);
     send(conn, { type: "subscribed", channel });
-    send(conn, { type: "presence", channel, users: presence(conn.canvasId, channel) });
+    if (channelAllows(conn, channel, "seePresence"))
+      send(conn, { type: "presence", channel, users: presence(conn.canvasId, channel) });
     // First connection of this user in the channel → others see a join.
-    if (!wasPresent) {
+    if (!wasPresent && channelAllows(conn, channel, "participatePresence")) {
       broadcast(
         conn.canvasId,
         channel,
         { type: "join", channel, user: { id: conn.user.id, name: conn.user.name } },
         conn,
+        true,
       );
     }
   }
@@ -242,12 +277,21 @@ export function createHub(deps: HubDeps) {
     if (!conn.channels.has(channel)) return;
     conn.channels.delete(channel);
     // Last connection of this user in the channel → others see a leave.
-    if (userSubCount(conn.canvasId, channel, conn.user.id) === 0) {
-      broadcast(conn.canvasId, channel, {
-        type: "leave",
+    if (
+      channelAllows(conn, channel, "participatePresence") &&
+      userSubCount(conn.canvasId, channel, conn.user.id) === 0
+    ) {
+      broadcast(
+        conn.canvasId,
         channel,
-        user: { id: conn.user.id, name: conn.user.name },
-      });
+        {
+          type: "leave",
+          channel,
+          user: { id: conn.user.id, name: conn.user.name },
+        },
+        undefined,
+        true,
+      );
     }
   }
 
@@ -362,6 +406,26 @@ export function createHub(deps: HubDeps) {
         });
         return;
       }
+      if (channel && ["subscribe", "publish", "presence"].includes(String(frame.type))) {
+        // Recheck every receiver before fan-out, including live role and channel-policy changes.
+        await this.revalidateCanvas(conn.canvasId);
+        if (conn.closed) return;
+        const op =
+          frame.type === "subscribe"
+            ? "subscribe"
+            : frame.type === "publish"
+              ? "publish"
+              : "seePresence";
+        if (!channelAllows(conn, channel, op)) {
+          send(conn, {
+            type: "error",
+            code: "PERMISSION_DENIED",
+            channel,
+            message: `Channel permission denied: ${op}`,
+          });
+          return;
+        }
+      }
       switch (frame.type) {
         case "subscribe":
           if (channel) doSubscribe(conn, channel);
@@ -371,22 +435,6 @@ export function createHub(deps: HubDeps) {
           break;
         case "publish":
           if (channel) {
-            await this.revalidateCanvas(conn.canvasId, conn);
-            if (conn.closed) return;
-            if (
-              !channel.startsWith("participants:") &&
-              conn.runtimeRole !== "owner" &&
-              conn.runtimeRole !== "editor"
-            ) {
-              send(conn, {
-                type: "error",
-                code: "PERMISSION_DENIED",
-                channel,
-                message:
-                  "Only owners and editors can publish to shared channels. Use a participants: channel for participant messages.",
-              });
-              return;
-            }
             doPublish(
               conn,
               channel,
@@ -484,6 +532,23 @@ export function createHub(deps: HubDeps) {
         // through the shared role resolver; a demoted editor needs a remaining viewer grant.
         const role = await roleOf(canvas, conn);
         conn.runtimeRole = role === "none" ? "viewer" : role;
+        try {
+          conn.runtimePolicy = parseRuntimePolicy(canvas.runtimePolicy);
+        } catch {
+          dropConn(conn, CLOSE_UNAUTHORIZED, "invalid_policy");
+          continue;
+        }
+        for (const channel of [...conn.channels]) {
+          if (!channelAllows(conn, channel, "subscribe")) {
+            doUnsubscribe(conn, channel);
+            send(conn, {
+              type: "error",
+              code: "PERMISSION_DENIED",
+              channel,
+              message: "Channel subscription revoked",
+            });
+          }
+        }
         const editorMatch = role === "editor";
         const decision = decideCanvasAccess(canvas, principal, now, {
           isAllowed,

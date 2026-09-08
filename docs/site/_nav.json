@@ -63,6 +63,11 @@
         "title": "Submissions"
       },
       {
+        "path": "sdk/permissions",
+        "file": "sdk/permissions.md",
+        "title": "Permissions and defaults"
+      },
+      {
         "path": "sdk/files",
         "file": "sdk/files.md",
         "title": "File storage"

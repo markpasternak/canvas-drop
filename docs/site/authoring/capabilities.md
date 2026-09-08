@@ -200,10 +200,19 @@ Backend tab.
 ## Who can use the backend
 
 Feature switches control availability; canvas roles control each operation.
-Owners and editors change shared content and review submissions. Viewers can
-read shared data, keep private preferences, submit their own votes/forms and
-upload private attachments. [`me().permissions`](/docs/sdk/identity) reports the
-current caller's allowed operations. A denied role returns `PERMISSION_DENIED`.
+Raw shared KV and shared files require owners/editors for mutations. Configured
+collections and file groups support Personal, Private submissions, Shared
+contributions, Managed content and Collaborative content. Viewers can contribute
+and manage their own records without permission to edit the canvas itself.
+[`me().permissions` and `me().resources`](/docs/sdk/identity) report effective rights.
+A denied operation returns `PERMISSION_DENIED`.
+
+**Participation and permissions** starts with a default for new resources:
+Read only, Participation or Collaboration. Add a named collection, file group or
+channel using that default. Expand **Advanced permissions** only when a resource
+needs a different preset or operation-level rights. Review the affected resources
+before saving. Changing the default preserves existing policies. Attachments inherit
+their record's policy. [Full policy and API guide](/docs/sdk/permissions).
 
 The Backend tab also has **AI access** and **Connection access**, each set to
 **Owners and editors** by default. Choose **All signed-in viewers** to permit
@@ -215,6 +224,10 @@ key, grant a Connection profile, or bypass quotas and legacy guest restrictions.
 `aiAudience` and `connectionsAudience`, each `"editors"` or `"viewers"`.
 The management canvas view exposes both alongside `capabilities` and `effective`.
 Omitted values stay unchanged. Only owners and editors can change them.
+The same endpoint and MCP tool accept `runtimePolicy` plus the exact previous
+`runtimePolicyRevision` as `expectedRuntimePolicy` (initially null). A stale or
+missing revision returns `POLICY_CONFLICT`. Per-Connection policies can override
+the default audience and narrow methods; administrator grants still bound them.
 
 ```json
 { "backendEnabled": true, "ai": true, "aiAudience": "viewers", "connectionsAudience": "editors" }

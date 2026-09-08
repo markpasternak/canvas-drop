@@ -138,6 +138,14 @@ Private `kv.user` preferences remain unreadable by other users, including editor
 
 ## Canvas role and permissions
 
+`me().resources` additionally exposes configured collections and file groups as
+operation rights `{read, create, update, delete, increment}`, each `{own, any}`.
+Channels expose `{subscribe, publish, seePresence, participatePresence}` booleans;
+granted Connections expose `{invoke, methods}` after audience/admin restrictions.
+`permissions.canCreateCanvas` describes enabled page-driven authoring for members,
+separate from editing existing canvases. For per-record controls, compare `me().id`
+with the server-derived `record.authorId`. See [Permissions and defaults](/docs/sdk/permissions).
+
 `canvasRole` is the effective role on this canvas. Ownership wins, followed by a
 live direct or team editor grant; everyone else admitted by the access rules is
 `viewer`. A platform admin does not gain a canvas role through their admin flag.

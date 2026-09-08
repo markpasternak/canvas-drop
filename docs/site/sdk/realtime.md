@@ -175,7 +175,7 @@ the [Runtime API](/docs/api/runtime-api) for the wire protocol behind the SDK.
 
 ## Who can publish
 
-On ordinary channels (for example `results`), only owners and editors publish;
+On unconfigured ordinary channels (for example `results`), only owners and editors publish;
 admitted viewers may subscribe and use presence. Prefix a channel with
 `participants:` for attributed viewer messages, such as `participants:cursors`.
 These channels are visible to any admitted subscriber. Use submissions for
@@ -183,9 +183,18 @@ private votes or forms; never broadcast individual responses on a participant ch
 
 The server derives `from.canvasRole` from live grants before publishing. A role
 inside `data` has no authority. Access and role are rechecked on every publish,
-as well as the existing access-change and heartbeat checks. A demoted editor
+and receiving operation, as well as the existing access-change and heartbeat checks. A demoted editor
 who still has viewing access can keep receiving shared updates but cannot
 publish them (`PERMISSION_DENIED`); loss of viewing access closes the socket.
+
+Configured channel policies override the legacy prefix defaults. Set separate
+subscribe, publish, seePresence and participatePresence audiences in **Advanced
+permissions**, via the management API, or MCP `set_capabilities`. All use `none`,
+`editors`, or `viewers`. Viewers can receive updates while only owners/editors publish;
+activity channels can allow everyone to publish. Presence visibility is independent
+of message visibility. Receivers are revalidated before fan-out, so changing a
+subscription policy also stops an already-open viewer socket receiving that channel.
+See [Permissions and defaults](/docs/sdk/permissions).
 
 ```js
 const results = canvasdrop.realtime.channel("results");

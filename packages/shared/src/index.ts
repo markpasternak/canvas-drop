@@ -16,6 +16,7 @@ export * from "./canvas/share-status.js";
 export * from "./canvas/slug-policy.js";
 export * from "./canvas/tags.js";
 export * from "./capabilities/index.js";
+export * from "./capabilities/policies.js";
 export * from "./capabilities/runtime.js";
 export {
   AUTH_MODES,

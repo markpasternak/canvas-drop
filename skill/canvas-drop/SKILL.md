@@ -363,7 +363,7 @@ Use `me().permissions` for UI controls. Viewers read shared KV/files, save priva
 `kv.user` preferences, and submit their own votes/forms/attachments. Shared
 set/delete/increment and shared file mutations require owner/editor. Submissions
 are private to their author and owner/editors; owner/editors cannot inspect
-`kv.user`. A collection holds one current response per author, 1–80 ASCII name
+`kv.user`. The submissions convenience API holds one current response per author, 1–80 ASCII name
 characters (letters/digits/dots/underscores/hyphens, starting alphanumeric), up to
 64 KiB JSON. Lists are paginated (1–1000, default 100). Counts across collections
 use the existing 10,000/canvas and 1,000/author admin defaults separately from KV.
@@ -372,10 +372,24 @@ AI and Connections each default to the `editors` audience. To support viewer
 interaction, explicitly set `aiAudience` or `connectionsAudience` to `viewers`.
 These fields do not bypass feature switches, admin grants, quotas, guest policy
 or public static-only restrictions. Runtime admin status grants no owner bypass.
-Ordinary realtime channels permit owner/editor publishing; `participants:` permits
+Unconfigured ordinary realtime channels permit owner/editor publishing; `participants:` permits
 attributed viewer events readable by all subscribers. Never put private responses
 on those channels. Role refusals use `PERMISSION_DENIED` / `PermissionDeniedError`.
 See `{base}/docs/sdk/submissions` and `{base}/docs/sdk/identity` for the contracts.
+
+For multiple authored items, configure a collection and use `kv.collection(name)`.
+Five presets: personal, submissions, contributions, managed, collaborative. Shared
+contributions let everyone read/create, with author or owner/editor update/delete.
+The server generates ids and immutable authorId. Attach files with `{collection,
+recordId}` to inherit rights, or `{group}` for standalone file policies. Defaults
+Read only / Participation / Collaboration apply when adding resources; they never
+rewrite existing policies. Expand Advanced permissions only for overrides.
+MCP `set_capabilities` accepts the complete `runtimePolicy` plus
+`expectedRuntimePolicy` from `get_canvas.runtimePolicyRevision` (initially null).
+Preserve existing entries; reconcile POLICY_CONFLICT rather than overwriting blindly.
+Per-channel subscribe/publish/seePresence/participatePresence and per-Connection
+audience/method rules override legacy defaults. `me().resources` exposes effective
+operation rights. See `{base}/docs/sdk/permissions` for the schema and SDK methods.
 
 For version cleanup, `preview_version_prune(id, versions)` accepts `"previous"` or
 an explicit list. Review `versions`, `expectedVersionIds`, `skipped` and

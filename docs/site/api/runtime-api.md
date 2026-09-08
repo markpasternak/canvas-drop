@@ -504,9 +504,45 @@ opts in admitted signed-in viewers. Existing feature, provider, admin grant,
 legacy guest and static-only gates still apply. A role denial is
 `403 PERMISSION_DENIED`, represented by SDK `PermissionDeniedError`.
 
-Realtime publishing is owner/editor-only on ordinary channels. Channels prefixed
+Without an explicit channel policy, realtime publishing is owner/editor-only on ordinary channels. Channels prefixed
 `participants:` permit admitted viewers to publish attributed events. Everyone
 admitted can subscribe; these are not private submission channels. Before each
 publish the server revalidates access and stamps `from.canvasRole`. A disallowed
 publish returns `{ type: "error", code: "PERMISSION_DENIED", channel, message }`;
 the SDK delivers it through `channel.onError`.
+
+## Authored collections and resource permissions
+
+The [complete policy guide](/docs/sdk/permissions) defines the five presets,
+defaults, overrides and management/MCP configuration. Runtime routes require a
+configured collection, effective KV and the live caller's resource rights. All
+responses are `private, no-store`; author identity is immutable and server-derived.
+
+| Route (under `/v1/c/{slug}`) | Behavior |
+|---|---|
+| `POST /collections/{name}` | JSON value → `201 {id, authorId, value, updatedAt}` |
+| `GET /collections/{name}?limit=&cursor=` | Visible records, `{entries, nextCursor}`; pagination 1–1000, default 100 |
+| `GET /collections/{name}/{id}` | Visible record or 404 |
+| `PUT /collections/{name}/{id}` | Replace value; require read/update, preserve author |
+| `DELETE /collections/{name}/{id}` | Require read/delete; `{ok, attachmentCleanupFailed}` |
+| `DELETE /collections/{name}` | Delete only readable/deletable records; `{deleted, attachmentCleanupFailed}` |
+| `POST /collections/{name}/{id}/increment` | `{by: number}` → numeric record, atomic; no upsert |
+| `GET /collections/{name}/permissions` | Effective operation rights, each `{own, any}` |
+| `GET /collections/{name}/count` | `{count}` only with explicit aggregateCount audience |
+
+Unknown collection → `404 COLLECTION_NOT_CONFIGURED`; invalid name/pagination/JSON
+→ `400 INVALID_BODY`; inaccessible record → `404 NOT_FOUND`; forbidden operation
+→ `403 PERMISSION_DENIED`; oversized value → `413 VALUE_TOO_LARGE`; creation quota
+→ `409 KEY_LIMIT`; nonnumeric increment → `409 NOT_NUMERIC`. JSON null is supported.
+
+File uploads additionally accept either multipart `group`, or `collection` plus
+`recordId`, mutually exclusive with legacy `scope`. Bound files inherit record
+rights; standalone groups use file policies. `PATCH /files/{id}` with `{name}`
+renames a readable/updatable file (nonempty name, at most 255 characters).
+Lists and content URLs honor the same read policy. Deleted parents hide their
+attachments immediately and trigger cleanup.
+
+`me()` adds `resources` for named collections, groups, channels and Connections,
+plus `permissions.canCreateCanvas`. Channel policies separately gate receiving,
+publishing and presence; configured policies override prefix defaults and apply to
+open sockets. Per-Connection audiences/methods intersect administrator grants.

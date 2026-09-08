@@ -6,6 +6,9 @@ import {
   type CapabilityGlobals,
   type Config,
   effectiveCapabilities,
+  PolicyConflictError,
+  parseRuntimePolicy,
+  runtimePolicySchema,
   storedCapabilities,
   validateSlug,
 } from "@canvas-drop/shared";
@@ -168,6 +171,8 @@ const createSchema = z.object({
 
 /** Capability flags and runtime audiences. Absent fields remain unchanged. */
 const capabilitiesSchema = z.object({
+  runtimePolicy: runtimePolicySchema.optional(),
+  expectedRuntimePolicy: z.string().max(65536).nullable().optional(),
   aiAudience: z.enum(["editors", "viewers"]).optional(),
   connectionsAudience: z.enum(["editors", "viewers"]).optional(),
   backendEnabled: z.boolean().optional(),
@@ -274,6 +279,8 @@ function ownerCanvasView(
     // explain a feature that's off because the operator disabled it).
     backendEnabled: cv.backendEnabled,
     aiAudience: cv.aiAudience,
+    runtimePolicy: parseRuntimePolicy(cv.runtimePolicy),
+    runtimePolicyRevision: cv.runtimePolicy,
     connectionsAudience: cv.connectionsAudience,
     capabilities: storedCapabilities(cv),
     // Effective state ANDs in the operator globals — resolved per request so an
@@ -1114,7 +1121,14 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const patch = body.data;
     if (Object.keys(patch).length === 0) return c.json(await canvasView(cv, roleOf(c)));
-    const updated = await deps.canvases.updateCapabilities(cv.id, patch);
+    let updated: Canvas;
+    try {
+      updated = await deps.canvases.updateCapabilities(cv.id, patch);
+    } catch (error) {
+      if (error instanceof PolicyConflictError)
+        return c.json({ code: error.code, message: error.message }, 409);
+      throw error;
+    }
     deps.audit.recordAudit({
       action: "capabilities_update",
       actorId: c.get("user").id,

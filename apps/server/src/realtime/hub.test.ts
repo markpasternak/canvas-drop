@@ -976,6 +976,73 @@ describe("RealtimeHub — verdict parity with decideCanvasAccess over one fixtur
   }
 });
 
+it("enforces configured receive, publish and presence rights and revokes receivers before fan-out", async () => {
+  const canvas = fakeCanvas({ access: "whole_org" });
+  const policy = {
+    defaultMode: "participation",
+    collections: {},
+    fileGroups: {},
+    connections: {},
+    channels: {
+      activity: {
+        subscribe: "viewers",
+        publish: "viewers",
+        seePresence: "editors",
+        participatePresence: "editors",
+      },
+      updates: {
+        subscribe: "viewers",
+        publish: "editors",
+        seePresence: "viewers",
+        participatePresence: "viewers",
+      },
+    },
+  };
+  canvas.runtimePolicy = JSON.stringify(policy);
+  const hub = createHub({ config, resolveCanvas: async () => canvas });
+  const ownerSocket = new FakeSocket(),
+    viewerSocket = new FakeSocket();
+  const owner = mc(hub, canvas.id, user(canvas.ownerId), ownerSocket);
+  const viewer = mc(hub, canvas.id, user("viewer"), viewerSocket);
+  for (const conn of [owner, viewer])
+    for (const channel of ["activity", "updates"])
+      await hub.handleMessage(conn, JSON.stringify({ type: "subscribe", channel }));
+  expect(hub.presence(canvas.id, "activity").map((person) => person.id)).toEqual([canvas.ownerId]);
+  expect(
+    viewerSocket.ofType("presence").filter((frame) => frame.channel === "activity"),
+  ).toHaveLength(0);
+  await hub.handleMessage(viewer, JSON.stringify({ type: "presence", channel: "activity" }));
+  expect(viewerSocket.ofType("error").at(-1)).toMatchObject({ code: "PERMISSION_DENIED" });
+  await hub.handleMessage(
+    viewer,
+    JSON.stringify({ type: "publish", channel: "activity", event: "ping" }),
+  );
+  expect(ownerSocket.ofType("message").at(-1)).toMatchObject({
+    event: "ping",
+    from: { id: "viewer", canvasRole: "viewer" },
+  });
+  await hub.handleMessage(
+    viewer,
+    JSON.stringify({ type: "publish", channel: "updates", event: "forged" }),
+  );
+  expect(ownerSocket.ofType("message").filter((frame) => frame.event === "forged")).toHaveLength(0);
+  await hub.handleMessage(
+    owner,
+    JSON.stringify({ type: "publish", channel: "updates", event: "changed" }),
+  );
+  expect(viewerSocket.ofType("message").at(-1)).toMatchObject({ event: "changed" });
+  policy.channels.updates.subscribe = "editors";
+  canvas.runtimePolicy = JSON.stringify(policy);
+  await hub.handleMessage(
+    owner,
+    JSON.stringify({ type: "publish", channel: "updates", event: "private" }),
+  );
+  expect(viewerSocket.ofType("message").filter((frame) => frame.event === "private")).toHaveLength(
+    0,
+  );
+  expect(viewer.channels.has("updates")).toBe(false);
+});
+
 it("protects shared channels with live roles while allowing attributed participant events", async () => {
   let editing = true;
   const canvas = fakeCanvas({ access: "whole_org" });

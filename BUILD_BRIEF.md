@@ -203,26 +203,55 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 9. Data export (JSON dump, owner-only) [v1.1]
 10. TTL on keys [later]
 11. KV change-subscriptions (auto-notify on writes) [v1.1 — realtime primitive exists in v1, but KV-backed sync is a separate, larger surface; for now canvases combine `kv.*` with the realtime primitive manually]
-12. Collections/documents query API [later — only if KV proves insufficient]
+12. Arbitrary document queries [later — authored collections below support only bounded CRUD, pagination and explicit count]
 
-### 6.4a Runtime roles and participant submissions (post-v1)
+### 6.4a Runtime roles, resource policies and participant input (post-v1)
 
 The effective canvas role is owner, editor (direct or team grant), or viewer
 (admitted by direct/team/general access). It comes from live server-side identity
 and access checks; platform admin status is not a runtime bypass. `me()` exposes
 `canvasRole` and concrete `permissions` for UI decisions. The server enforces the
-same rules on every operation and revalidates realtime publishes.
+same rules on every operation and revalidates realtime receivers and publishers.
+
+Resource policies complement the three canvas roles. The default for new resources
+is Read only / Participation / Collaboration, initializing Managed content / Shared
+contributions / Collaborative content respectively. Existing resource policies do
+not change when the default changes. Owners/editors configure policies through the
+dashboard, management API or MCP `set_capabilities`; revision checks reject stale
+writes. Five data/file presets cover Personal (author only), Private submissions
+(author and managers), Shared contributions (everyone reads/creates; author and
+managers mutate), Managed content (everyone reads; managers mutate), and Collaborative
+content (everyone reads/creates/mutates). Bounded operation overrides control
+read/create/update/delete/increment; mutations also require read permission.
+
+`kv.collection(name)` uses reserved KV scopes and server-generated record ids with
+immutable server-derived authorship, supports multiple records per author, bounded
+pagination filtered before retrieval, atomic increment and author-filtered bulk
+deletion. Values are JSON up to 64 KiB; limits across collections default to 10,000
+records per canvas and 1,000 per author. An explicit aggregateCount audience permits
+only total count; private fields are never exposed through aggregation. No arbitrary
+query or permission expression language. Existing shared KV and the compatibility
+submissions namespace retain their contracts below.
+
+File groups use the same presets; attachments inherit their parent record's access.
+Uploading attachments requires read/update of the parent; deleting the parent hides
+and cleans up attachments. Downloads/exports follow read access. File update means
+rename. Channels independently configure subscribe/publish/seePresence/participatePresence.
+Connection policies independently select audience and HTTP methods, intersected with
+admin grants; upstream item ownership remains upstream. AI retains its audience,
+model and budget gates. Authoring's `canCreateCanvas` is separate from existing-canvas
+editing. `me().resources` exposes effective named resource rights.
 
 | Operation | Viewer | Editor / owner |
 |---|---|---|
-| Read shared KV/files | Yes | Yes |
+| Read legacy shared KV/files | Yes | Yes |
 | Set/delete/increment shared KV; upload/delete shared files | No | Yes |
 | Read/write private `kv.user` preferences | Own only | Own only |
 | Submit/read/update/withdraw votes/forms | Own only | Own plus review/remove/clear all submissions |
 | Upload/read/delete `scope: "submission"` files | Own only | All |
 | AI / Connections | Only when that audience is `viewers` | Yes when feature and upstream policy permit |
-| Publish ordinary realtime channel | No | Yes |
-| Publish `participants:` channel | Yes, attributed and readable by subscribers | Yes |
+| Publish unconfigured ordinary realtime channel | No | Yes |
+| Publish unconfigured `participants:` channel | Yes, attributed and readable by subscribers | Yes |
 
 `submissions.get/set/delete(collection)` operates only on the authenticated
 caller's response. `list(collection, {cursor?, limit?})`, `remove(collection,
@@ -241,6 +270,8 @@ owners/editors through Backend settings, management API or MCP `set_capabilities
 Feature flags, provider availability, admin grants, quotas, legacy guest gates,
 password/lifecycle and public static-only rules still apply. Denied operations
 return `PERMISSION_DENIED` (403). No canvas-supplied server code is introduced.
+Configured resource policies take precedence over channel prefixes and the default
+Connection audience. See [the complete policy contract](docs/site/sdk/permissions.md).
 
 Existing files default to shared; data is preserved by additive migrations on both
 dialects. See [runtime upgrade guidance](docs/site/self-hosting/runtime-upgrade.md)
@@ -622,6 +653,7 @@ canvasdrop.submissions.delete(collection): Promise<void>
 canvasdrop.submissions.list(collection, {cursor?, limit?}): Promise<{entries, nextCursor}>
 canvasdrop.submissions.remove(collection, userId): Promise<void>
 canvasdrop.submissions.clear(collection): Promise<void>
+canvasdrop.kv.collection(name): CollectionNamespace // create/get/update/delete/list/clear/increment/count/permissions
 
 canvasdrop.files.upload(file: File, options?: { scope?: "shared" | "submission" }): Promise<{ id, name, size, url }>
 canvasdrop.files.list(): Promise<FileMeta[]>

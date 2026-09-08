@@ -1,6 +1,7 @@
 import { useParams } from "@tanstack/react-router";
 import { Badge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { RuntimePolicySettings } from "../components/RuntimePolicySettings.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
@@ -133,7 +134,7 @@ export default function Capabilities() {
       <Section
         id="runtime-permissions"
         title="Who can use the backend"
-        description="Viewers can read shared content, save private preferences, and submit their own responses. Only owners and editors can change shared content or review everyone's submissions."
+        description="Choose who can use AI and external services. Resource permissions below control participation in data, files and realtime."
       >
         {(
           [
@@ -216,6 +217,12 @@ export default function Capabilities() {
           </div>
         ))}
       </Section>
+      <RuntimePolicySettings
+        canvas={canvas}
+        save={(patch) => update.mutateAsync(patch)}
+        pending={update.isPending}
+        connectionKeys={connections.data?.map((connection) => connection.key) ?? []}
+      />
     </TabContentFrame>
   );
 }

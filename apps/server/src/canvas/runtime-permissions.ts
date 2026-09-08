@@ -11,8 +11,8 @@ export function permissionDenied(c: Context<AppEnv>, action: string) {
   return c.json(
     {
       code: "PERMISSION_DENIED",
-      message: `Your canvas role cannot ${action}.`,
-      hint: "Only the canvas owner or an editor can perform this action.",
+      message: `Your current permissions do not allow you to ${action}.`,
+      hint: "This action depends on your canvas role and the resource's permissions.",
     },
     403,
   );

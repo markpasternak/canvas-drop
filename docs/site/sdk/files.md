@@ -24,12 +24,21 @@ the page and no key to hold.
 </script>
 ```
 
-Files have two scopes. **Shared** (the default) files are readable by admitted
+Legacy files have two scopes. **Shared** (the default) files are readable by admitted
 viewers; only owners/editors upload or delete them. **Submission** files are
 visible to their authenticated uploader and owners/editors. The uploader can
 delete their own submission file; owners/editors can manage all submission files.
 Other viewers receive `404 NOT_FOUND` for private files, including content URLs.
 Existing files remain shared. List metadata includes `scope` and `uploadedBy`.
+
+New uploads can instead use `{group: "uploads"}` for a configured file-group policy
+or `{collection: "comments", recordId: comment.id}` to inherit the parent record's
+permissions. These options are mutually exclusive with `scope`. Personal files remain
+hidden from owners/editors; shared contributions allow authors and owners/editors to
+manage items. `list()` returns only visible files under all policies, and content URLs
+enforce the same rules. Bound metadata includes `recordId`; its scope is
+`record:<collection>` or `group:<group>`. `files.rename(id, name)` requires read and
+update permission; replacing bytes requires a new upload. See [Permissions and defaults](/docs/sdk/permissions).
 
 ## Methods
 
@@ -38,14 +47,16 @@ API call each one makes:
 
 | Method | Signature | HTTP call |
 | --- | --- | --- |
-| `upload` | `upload(file: File, options?: { scope?: "shared" | "submission" }): Promise<{ id: string; name: string; size: number; url: string }>` | `POST {base}/v1/c/{slug}/files` |
+| `upload` | `upload(file: File, options?: FileUploadOptions): Promise<{ id: string; name: string; size: number; url: string }>` | `POST {base}/v1/c/{slug}/files` |
 | `list` | `list(): Promise<FileMeta[]>` | `GET {base}/v1/c/{slug}/files` |
 | `delete` | `delete(id: string): Promise<void>` | `DELETE {base}/v1/c/{slug}/files/{id}` |
+| `rename` | `rename(id: string, name: string): Promise<void>` | `PATCH {base}/v1/c/{slug}/files/{id}` |
 | `url` | `url(id: string): string` | none (builds `{base}/v1/c/{slug}/files/{id}/content`) |
 
 ```ts
 interface FileMeta {
-  scope?: "shared" | "submission"; // always sent by the current server
+  scope?: string; // shared, submission, group:<name>, or record:<collection>
+  recordId?: string | null; // parent record for attachments
   uploadedBy?: string; // server-resolved author
   id: string;
   name: string;
@@ -53,6 +64,11 @@ interface FileMeta {
   mime?: string;     // always sent by the server
   createdAt?: number; // Unix ms; always sent by the server
 }
+
+type FileUploadOptions =
+  | { scope?: "shared" | "submission" }
+  | { group: string }
+  | { collection: string; recordId: string };
 ```
 
 ### upload
@@ -71,7 +87,7 @@ own pending state around the `await`. Ids are server-assigned UUIDs.
 
 ### list
 
-`list()` resolves to shared files plus your own submission files; owners/editors
+For legacy scopes, `list()` resolves to shared files plus your own submission files; owners/editors
 receive all files, with metadata, in one array.
 There is no paging and no filter.
 

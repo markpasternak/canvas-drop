@@ -394,5 +394,14 @@ it does not promise recovered bytes. See [version cleanup](/docs/authoring/edito
 `set_capabilities` additionally accepts `aiAudience` and `connectionsAudience`,
 each `"editors"` (default) or `"viewers"`. Canvas views expose both. Runtime canvas
 code reads its own role and permissions from [`me()`](/docs/sdk/identity).
-Viewers write [`submissions`](/docs/sdk/submissions), private preferences and
-private attachments; shared content mutations require owner/editor.
+`set_capabilities` also accepts a full `runtimePolicy` document and
+`expectedRuntimePolicy`, copied exactly from `get_canvas.runtimePolicyRevision`
+(initially null). Preserve existing entries when adding resources. Stale/missing
+revisions fail with `POLICY_CONFLICT`; reload and reconcile. Policies support
+collection/file presets and overrides, channel rights, and per-Connection audiences
+and methods. Defaults initialize new resources; they do not change existing ones.
+See [Permissions and defaults](/docs/sdk/permissions) for the complete schema.
+
+Viewers use configured authored collections, private preferences or the
+[`submissions`](/docs/sdk/submissions) convenience API. Raw shared KV mutations
+retain owner/editor gates. Runtime code cannot configure resource policies.

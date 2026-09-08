@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createClient } from "@canvas-drop/sdk";
-import { type Config, loadConfig } from "@canvas-drop/shared";
+import { type Config, emptyRuntimePolicy, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeProvider } from "../ai/testing.js";
@@ -122,6 +122,37 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
     expect(fetch).not.toHaveBeenCalled();
     await repo.updateCapabilities(canvas.id, { connectionsAudience: "viewers" });
     expect((await app.request("/v1/c/stocks/connections/market/quote")).status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("intersects per-Connection audience and methods with the administrator grant", async () => {
+    const { app, canvas, fetch } = await fixture({ asViewer: true });
+    const repo = canvasesRepository(client);
+    await repo.updateSettings(canvas.id, { access: "whole_org" });
+    const policy = emptyRuntimePolicy();
+    policy.connections.market = { audience: "viewers", methods: ["GET", "POST"] };
+    const stored = await repo.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: null,
+    });
+    expect((await app.request("/v1/c/stocks/connections/market/quote")).status).toBe(200);
+    expect(
+      (await app.request("/v1/c/stocks/connections/market/quote", { method: "POST" })).status,
+    ).toBe(405);
+    expect(
+      (await app.request("/v1/c/stocks/connections/market/quote", { method: "DELETE" })).status,
+    ).toBe(403);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await (await app.request("/v1/c/stocks/me")).json()).toMatchObject({
+      permissions: { canUseConnections: true },
+      resources: { connections: { market: { invoke: true, methods: ["GET"] } } },
+    });
+    policy.connections.market = { audience: "none" };
+    await repo.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: stored.runtimePolicy,
+    });
+    expect((await app.request("/v1/c/stocks/connections/market/quote")).status).toBe(403);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 

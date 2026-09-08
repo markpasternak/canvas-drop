@@ -55,7 +55,8 @@ same order (each entry is `{ status, summary }`; `ErrorCode` is its key type).
 | `VALUE_TOO_LARGE` | 413 | The KV value exceeds the size limit. |
 | `FILE_TOO_LARGE` | 413 | An uploaded file exceeds the per-file size limit. |
 | `KEY_LIMIT` | 409 | The canvas hit its key-count limit. |
-| `NOT_NUMERIC` | 409 | `increment` was called on a non-numeric value. |
+| `NOT_NUMERIC` | 409 | `increment` was called on a non-numeric value, or a collection increment would exceed the finite numeric range. The stored value is unchanged. |
+| `POLICY_CONFLICT` | 409 | A management policy save omitted its expected revision or used an old one. Reload the current policy and reconcile the edit before saving again. |
 | `QUOTA_EXCEEDED` | 429 | A spend or rate quota was exceeded. |
 | `CONNECTION_LIMIT` | 429 | A realtime or outbound connection concurrency limit was reached. |
 | `CONNECTION_RATE_LIMIT` | 429 | The outbound connection rate limit was reached. |

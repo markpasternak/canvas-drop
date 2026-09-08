@@ -41,6 +41,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     capFiles: true,
     capAi: true,
     aiAudience: "editors",
+    runtimePolicy: null,
     connectionsAudience: "editors",
     capRealtime: true,
     capAuthoring: true,

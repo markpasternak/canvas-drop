@@ -1,4 +1,10 @@
-import { loadConfig } from "@canvas-drop/shared";
+import {
+  type DataPolicy,
+  emptyRuntimePolicy,
+  loadConfig,
+  PolicyConflictError,
+  type RuntimePolicy,
+} from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeProvider } from "../ai/testing.js";
@@ -87,6 +93,290 @@ describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
     }
     return { owner, editor, viewer, other, canvases, canvas, teams, as };
   }
+
+  it("supports multiple shared contributions with immutable authorship and own-item mutation", async () => {
+    const { owner, viewer, other, canvases, canvas, as } = await setup();
+    await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: {
+        defaultMode: "participation",
+        collections: { comments: { preset: "contributions" } },
+        fileGroups: {},
+        channels: {},
+        connections: {},
+      },
+      expectedRuntimePolicy: null,
+    });
+    const path = "/v1/c/app/collections/comments";
+    const first = await as(viewer).request(path, {
+      ...put({ text: "one", authorId: owner.id }),
+      method: "POST",
+    });
+    expect(first.status).toBe(201);
+    const record = (await first.json()) as { id: string; authorId: string };
+    expect(record.authorId).toBe(viewer.id);
+    expect(
+      (await as(viewer).request(path, { ...put({ text: "two" }), method: "POST" })).status,
+    ).toBe(201);
+    expect(await (await as(other).request(path)).json()).toMatchObject({
+      entries: expect.any(Array),
+    });
+    expect(
+      ((await (await as(other).request(path)).json()) as { entries: unknown[] }).entries,
+    ).toHaveLength(2);
+    expect((await as(other).request(`${path}/${record.id}`, put({ text: "forged" }))).status).toBe(
+      403,
+    );
+    expect((await as(other).request(`${path}/${record.id}`, { method: "DELETE" })).status).toBe(
+      403,
+    );
+    expect((await as(viewer).request(`${path}/${record.id}`, put({ text: "own" }))).status).toBe(
+      200,
+    );
+    expect(
+      (await as(owner).request(`${path}/${record.id}`, put({ text: "moderated" }))).status,
+    ).toBe(200);
+    expect(await (await as(viewer).request(`${path}/${record.id}`)).json()).toMatchObject({
+      authorId: viewer.id,
+    });
+    expect((await as(viewer).request(`${path}/${record.id}`, { method: "DELETE" })).status).toBe(
+      200,
+    );
+  });
+
+  it("enforces all five presets for reads, updates, bulk deletion and private aggregates", async () => {
+    const { owner, viewer, other, canvases, canvas, as } = await setup();
+    const policy = emptyRuntimePolicy();
+    for (const preset of [
+      "personal",
+      "submissions",
+      "contributions",
+      "managed",
+      "collaborative",
+    ] as const)
+      policy.collections[preset] = { preset };
+    await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: null,
+    });
+    for (const preset of Object.keys(policy.collections)) {
+      const path = `/v1/c/app/collections/${preset}`;
+      const response = await as(viewer).request(path, { ...put(1), method: "POST" });
+      if (preset === "managed") {
+        expect(response.status).toBe(403);
+        continue;
+      }
+      const record = (await response.json()) as { id: string };
+      expect((await as(other).request(`${path}/${record.id}`)).status).toBe(
+        ["personal", "submissions"].includes(preset) ? 404 : 200,
+      );
+      expect((await as(owner).request(`${path}/${record.id}`)).status).toBe(
+        preset === "personal" ? 404 : 200,
+      );
+      expect((await as(other).request(`${path}/${record.id}`, put(2))).status).toBe(
+        preset === "collaborative" ? 200 : ["personal", "submissions"].includes(preset) ? 404 : 403,
+      );
+      const page = (await (await as(other).request(path)).json()) as { entries: unknown[] };
+      expect(page.entries.length).toBe(["personal", "submissions"].includes(preset) ? 0 : 1);
+      const clear = (await (await as(other).request(path, { method: "DELETE" })).json()) as {
+        deleted: number;
+      };
+      expect(clear.deleted).toBe(preset === "collaborative" ? 1 : 0);
+      expect((await as(viewer).request(`${path}/count`)).status).toBe(403);
+    }
+    const stored = await canvases.findById(canvas.id);
+    policy.collections.submissions = { preset: "submissions", aggregateCount: "viewers" };
+    await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: stored?.runtimePolicy,
+    });
+    expect(
+      await (await as(other).request("/v1/c/app/collections/submissions/count")).json(),
+    ).toEqual({ count: 1 });
+    expect((await as(other).request("/v1/c/app/collections/toString")).status).toBe(400);
+  });
+
+  it("filters before pagination and atomically increments without changing authorship", async () => {
+    const { owner, viewer, other, canvases, canvas, as } = await setup();
+    const policy = emptyRuntimePolicy();
+    policy.collections.items = { preset: "personal" };
+    await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: null,
+    });
+    const path = "/v1/c/app/collections/items";
+    await as(other).request(path, { ...put(99), method: "POST" });
+    const first = (await (
+      await as(viewer).request(path, { ...put(0), method: "POST" })
+    ).json()) as { id: string };
+    await as(viewer).request(path, { ...put(5), method: "POST" });
+    const page = (await (await as(viewer).request(`${path}?limit=1`)).json()) as {
+      entries: { id: string }[];
+      nextCursor: string;
+    };
+    expect(page.entries[0]?.id).toBe(first.id);
+    expect(page.nextCursor).toBe(first.id);
+    const next = (await (
+      await as(viewer).request(`${path}?limit=1&cursor=${page.nextCursor}`)
+    ).json()) as { entries: unknown[]; nextCursor: string | null };
+    expect(next.entries).toHaveLength(1);
+    expect(next.nextCursor).toBeNull();
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        as(viewer).request(`${path}/${first.id}/increment`, { ...put({ by: 1 }), method: "POST" }),
+      ),
+    );
+    expect(results.every((result) => result.status === 200)).toBe(true);
+    expect(await (await as(viewer).request(`${path}/${first.id}`)).json()).toMatchObject({
+      value: 8,
+      authorId: viewer.id,
+    });
+    expect(
+      (
+        await as(owner).request(`${path}/${first.id}/increment`, {
+          ...put({ by: 1 }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+    expect((await as(viewer).request(`${path}?limit=1001`)).status).toBe(400);
+    await as(viewer).request(`${path}/${first.id}`, put(Number.MAX_VALUE));
+    expect(
+      (
+        await as(viewer).request(`${path}/${first.id}/increment`, {
+          ...put({ by: Number.MAX_VALUE }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(409);
+    expect(await (await as(viewer).request(`${path}/${first.id}`)).json()).toMatchObject({
+      value: Number.MAX_VALUE,
+    });
+    await as(viewer).request(`${path}/${first.id}`, put({ text: "not a number" }));
+    expect(
+      (
+        await as(viewer).request(`${path}/${first.id}/increment`, {
+          ...put({ by: 1 }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(409);
+  });
+
+  it("protects attached files and standalone personal files, including content URLs and parent deletion", async () => {
+    const { owner, viewer, other, canvases, canvas, as } = await setup();
+    const policy = emptyRuntimePolicy();
+    policy.collections.comments = { preset: "contributions" };
+    policy.fileGroups.private = { preset: "personal" };
+    const saved = await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: null,
+    });
+    const path = "/v1/c/app/collections/comments";
+    const record = (await (
+      await as(viewer).request(path, { ...put("comment"), method: "POST" })
+    ).json()) as { id: string };
+    const upload = (user: typeof viewer, fields: Record<string, string>) => {
+      const form = new FormData();
+      form.set("file", new File(["image"], "image.txt"));
+      for (const [key, value] of Object.entries(fields)) form.set(key, value);
+      return as(user).request("/v1/c/app/files", { method: "POST", body: form });
+    };
+    expect((await upload(other, { collection: "comments", recordId: record.id })).status).toBe(403);
+    const attached = (await (
+      await upload(viewer, { collection: "comments", recordId: record.id })
+    ).json()) as { id: string };
+    const filePath = `/v1/c/app/files/${attached.id}`;
+    expect((await as(other).request(`${filePath}/content`)).status).toBe(200);
+    expect((await as(other).request(filePath, { method: "DELETE" })).status).toBe(403);
+    expect(
+      (await as(viewer).request(filePath, { ...put({ name: "renamed.txt" }), method: "PATCH" }))
+        .status,
+    ).toBe(200);
+    policy.collections.comments = { preset: "submissions" };
+    await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: saved.runtimePolicy,
+    });
+    expect((await as(other).request(`${filePath}/content`)).status).toBe(404);
+    expect((await as(owner).request(`${filePath}/content`)).status).toBe(200);
+    const personal = (await (await upload(viewer, { group: "private" })).json()) as { id: string };
+    expect((await as(owner).request(`/v1/c/app/files/${personal.id}/content`)).status).toBe(404);
+    const ownerList = (await (await as(owner).request("/v1/c/app/files")).json()) as {
+      files: { id: string }[];
+    };
+    expect(ownerList.files.map((file) => file.id)).not.toContain(personal.id);
+    await as(viewer).request(`${path}/${record.id}`, { method: "DELETE" });
+    expect((await as(owner).request(`${filePath}/content`)).status).toBe(404);
+    expect(
+      (await as(viewer).request(`/v1/c/app/files/${personal.id}`, { method: "DELETE" })).status,
+    ).toBe(200);
+  });
+
+  it("rejects stale or missing policy revisions and preserves existing resources when defaults change", async () => {
+    const { canvases, canvas } = await setup();
+    const policy = emptyRuntimePolicy();
+    policy.collections.comments = { preset: "contributions" };
+    const saved = await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: null,
+    });
+    const next: RuntimePolicy = { ...policy, defaultMode: "read_only" };
+    await expect(
+      canvases.updateCapabilities(canvas.id, { runtimePolicy: next, expectedRuntimePolicy: null }),
+    ).rejects.toBeInstanceOf(PolicyConflictError);
+    await expect(
+      canvases.updateCapabilities(canvas.id, { runtimePolicy: next }),
+    ).rejects.toBeInstanceOf(PolicyConflictError);
+    const updated = await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: next,
+      expectedRuntimePolicy: saved.runtimePolicy,
+    });
+    expect(JSON.parse(updated.runtimePolicy ?? "{}").collections.comments).toEqual({
+      preset: "contributions",
+    });
+  });
+
+  it("bounds collections across names and applies granular create/delete overrides", async () => {
+    const { viewer, owner, canvases, canvas, as } = await setup(1);
+    const policy = emptyRuntimePolicy();
+    const entry: DataPolicy = {
+      preset: "contributions",
+      overrides: { delete: "editors", increment: "none" },
+    };
+    policy.collections.first = entry;
+    policy.collections.second = entry;
+    await canvases.updateCapabilities(canvas.id, {
+      runtimePolicy: policy,
+      expectedRuntimePolicy: null,
+    });
+    const path = "/v1/c/app/collections/first";
+    const row = (await (await as(viewer).request(path, { ...put(0), method: "POST" })).json()) as {
+      id: string;
+    };
+    expect(
+      (await as(viewer).request("/v1/c/app/collections/second", { ...put(0), method: "POST" }))
+        .status,
+    ).toBe(409);
+    expect((await as(viewer).request(`${path}/${row.id}`, put(2))).status).toBe(200);
+    expect((await as(viewer).request(`${path}/${row.id}`, { method: "DELETE" })).status).toBe(403);
+    expect(
+      (
+        await as(owner).request(`${path}/${row.id}/increment`, {
+          ...put({ by: 1 }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
+    const identity = (await (await as(viewer).request("/v1/c/app/me")).json()) as {
+      resources: {
+        collections: {
+          first: { delete: { own: boolean }; update: { own: boolean; any: boolean } };
+        };
+      };
+    };
+    expect(identity.resources.collections.first.delete.own).toBe(false);
+    expect(identity.resources.collections.first.update).toEqual({ own: true, any: false });
+  });
 
   it("reports effective roles and forbids a viewer, including an admin, from changing shared KV", async () => {
     const { owner, editor, viewer, canvases, canvas, as } = await setup();

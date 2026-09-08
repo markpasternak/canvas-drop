@@ -27,6 +27,46 @@ const fetchMock = (impl?: FetchLike) => vi.fn<FetchLike>(impl ?? (async () => re
 
 const ctx: CanvasContext = { slug: "foo", apiBase: "https://canvases.example.com" };
 
+it("uses authored collection routes and sends attachment bindings without changing scope", async () => {
+  const fetch = fetchMock(async () =>
+    res(200, { id: "record-1", authorId: "server-user", value: 1, count: 3 }),
+  );
+  const client = createClient({ context: ctx, fetch });
+  const comments = client.kv.collection("comments");
+  await comments.create({ text: "hello" });
+  expect(fetch.mock.calls.at(-1)?.[0]).toBe(
+    "https://canvases.example.com/v1/c/foo/collections/comments",
+  );
+  expect(fetch.mock.calls.at(-1)?.[1]).toMatchObject({
+    method: "POST",
+    body: JSON.stringify({ text: "hello" }),
+  });
+  await comments.update("record-1", { text: "changed" });
+  expect(fetch.mock.calls.at(-1)?.[1]?.method).toBe("PUT");
+  await comments.increment("record-1", 2);
+  expect(fetch.mock.calls.at(-1)?.[0]).toContain("/record-1/increment");
+  expect(await comments.count()).toBe(3);
+  await comments.list({ limit: 1, cursor: "next" });
+  expect(fetch.mock.calls.at(-1)?.[0]).toContain("?cursor=next&limit=1");
+  await comments.permissions();
+  expect(fetch.mock.calls.at(-1)?.[0]).toContain("/comments/permissions");
+  await comments.clear();
+  expect(fetch.mock.calls.at(-1)?.[1]?.method).toBe("DELETE");
+  await client.files.upload(new File(["image"], "image.txt"), {
+    collection: "comments",
+    recordId: "record-1",
+  });
+  const form = fetch.mock.calls.at(-1)?.[1]?.body as FormData;
+  expect(form.get("collection")).toBe("comments");
+  expect(form.get("recordId")).toBe("record-1");
+  expect(form.has("scope")).toBe(false);
+  await client.files.rename("file-1", "new.txt");
+  expect(fetch.mock.calls.at(-1)?.[1]).toMatchObject({
+    method: "PATCH",
+    body: JSON.stringify({ name: "new.txt" }),
+  });
+});
+
 describe("detectContext", () => {
   it("path mode: /c/{slug}/ → slug + same-origin API base", () => {
     expect(
