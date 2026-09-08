@@ -1,4 +1,5 @@
 import type { Config } from "@canvas-drop/shared";
+import { runtimePermissions } from "@canvas-drop/shared";
 import type { Canvas, User } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -12,9 +13,10 @@ import {
   requestPrincipal,
   resolveAccessContext,
 } from "../canvas/authorization.js";
-import { requireCapability } from "../canvas/capability-guard.js";
+import { capabilityGlobals, requireCapability } from "../canvas/capability-guard.js";
 import type { FilesService } from "../canvas/files-service.js";
 import { GATE_COOKIE, verifyGrant } from "../canvas/password-gate.js";
+import { isOwnerOf } from "../canvas/role.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { AuthoringUsageRepository } from "../db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
@@ -133,6 +135,14 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         return c.json({ code: "PASSWORD_REQUIRED" }, 403);
       }
       c.set("canvas", canvas as Canvas);
+      c.set(
+        "runtimeRole",
+        principal.kind === "member" && isOwnerOf(canvas as Canvas, principal.id)
+          ? "owner"
+          : ctx.editorMatch
+            ? "editor"
+            : "viewer",
+      );
       c.set("staticOnly", decision.staticOnly);
       // Static-only (public_link non-owner / anonymous, R17): the runtime API is
       // entirely closed — every primitive refused. Static files still serve via the
@@ -174,12 +184,31 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
 
   // Identity primitive (U5): minimal projection (NO isAdmin), identity-capability
   // gated (→ 403 when backend is off). Explicit fields, never a row spread.
-  app.get("/me", requireCapability("identity", deps.config), (c) => {
+  app.get("/me", requireCapability("identity", deps.config), async (c) => {
     const u = c.get("user");
     // `kind` lets canvas code branch on member vs guest (anonymous never reaches
     // the runtime API — it's refused above as static-only). U9.
     const kind = c.get("principal")?.kind === "guest" ? "guest" : "member";
-    return c.json({ id: u.id, email: u.email, name: u.name, avatarUrl: u.avatarUrl, kind });
+    const canvas = c.get("canvas") as Canvas;
+    const canvasRole = c.get("runtimeRole") ?? "viewer";
+    const globals = capabilityGlobals(deps.config);
+    if (deps.settings) globals.aiEnabled = await deps.settings.aiEnabled();
+    const connections = (await deps.connections?.service.listForCanvas(canvas.id)) ?? [];
+    c.header("Cache-Control", "private, no-store");
+    return c.json({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      avatarUrl: u.avatarUrl,
+      kind,
+      canvasRole,
+      permissions: runtimePermissions(
+        canvas,
+        canvasRole,
+        globals,
+        connections.some((connection) => connection.available),
+      ),
+    });
   });
 
   // KV primitive (U6) and Files primitive (U7).

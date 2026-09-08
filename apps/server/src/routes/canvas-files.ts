@@ -5,6 +5,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { safeServeHeaders } from "../canvas/file-serving.js";
 import { FilesQuotaError, type FilesService, FileTooLargeError } from "../canvas/files-service.js";
+import { canEditRuntime, permissionDenied } from "../canvas/runtime-permissions.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
@@ -38,11 +39,18 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
   app.post("/", blobBodyLimit, async (c) => {
     const cv = canvas(c);
     let file: unknown;
+    let scope: "shared" | "submission";
     try {
-      file = (await c.req.formData()).get("file");
+      const data = await c.req.formData();
+      file = data.get("file");
+      const requestedScope = data.get("scope") ?? "shared";
+      if (requestedScope !== "shared" && requestedScope !== "submission")
+        return c.json({ code: "INVALID_BODY" }, 400);
+      scope = requestedScope;
     } catch {
       return c.json({ code: "INVALID_BODY" }, 400);
     }
+    if (scope === "shared" && !canEditRuntime(c)) return permissionDenied(c, "upload shared files");
     if (!(file instanceof File)) return c.json({ code: "INVALID_BODY" }, 400);
     const bytes = new Uint8Array(await file.arrayBuffer());
     try {
@@ -52,6 +60,7 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
         mime: file.type || "application/octet-stream",
         bytes,
         userId: c.get("user").id,
+        scope,
       });
       meter(c, "upload");
       deps.audit?.recordAudit({
@@ -77,7 +86,10 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
   });
 
   app.get("/", async (c) => {
-    const rows = await deps.files.list(canvas(c).id);
+    const rows = await deps.files.list(
+      canvas(c).id,
+      canEditRuntime(c) ? undefined : c.get("user").id,
+    );
     meter(c, "list");
     return c.json({
       files: rows.map((r) => ({
@@ -86,13 +98,25 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
         size: r.sizeBytes,
         mime: r.mime,
         createdAt: r.createdAt,
+        scope: r.scope,
+        uploadedBy: r.uploadedBy,
       })),
     });
   });
 
   app.delete("/:id", async (c) => {
     const id = c.req.param("id");
-    const ok = await deps.files.delete(canvas(c).id, id);
+    if (!canEditRuntime(c)) {
+      const file = await deps.files.metadata(canvas(c).id, id);
+      if (!file || (file.scope !== "shared" && file.uploadedBy !== c.get("user").id))
+        return c.json({ code: "NOT_FOUND" }, 404);
+      if (file.scope === "shared") return permissionDenied(c, "delete shared files");
+    }
+    const ok = await deps.files.delete(
+      canvas(c).id,
+      id,
+      canEditRuntime(c) ? undefined : c.get("user").id,
+    );
     meter(c, "delete");
     if (!ok) return c.json({ code: "NOT_FOUND" }, 404);
     deps.audit?.recordAudit({
@@ -105,7 +129,11 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
   });
 
   app.get("/:id/content", async (c) => {
-    const got = await deps.files.content(canvas(c).id, c.req.param("id"));
+    const got = await deps.files.content(
+      canvas(c).id,
+      c.req.param("id"),
+      canEditRuntime(c) ? undefined : c.get("user").id,
+    );
     if (!got) return c.json({ code: "NOT_FOUND" }, 404);
     meter(c, "download");
     // Set the safe-serve headers via the Hono context (NOT a raw `new Response`),
@@ -116,6 +144,7 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
     for (const [k, v] of Object.entries(safeServeHeaders(got.row.mime, got.row.filename))) {
       c.header(k, v);
     }
+    c.header("Cache-Control", "private, no-store");
     return c.body(new Uint8Array(got.bytes));
   });
 

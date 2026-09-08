@@ -54,6 +54,8 @@ export function canvasView(
     sharedExpiresAt?: number | null;
     spaFallback?: boolean;
     backendEnabled?: boolean;
+    aiAudience?: string;
+    connectionsAudience?: string;
     disabledReason?: string | null;
     galleryListed?: boolean;
     galleryTemplatable?: boolean;
@@ -101,6 +103,8 @@ export function canvasView(
     sharedExpiresAt: cv.sharedExpiresAt ?? null,
     spaFallback: cv.spaFallback,
     backendEnabled: cv.backendEnabled,
+    aiAudience: cv.aiAudience ?? "editors",
+    connectionsAudience: cv.connectionsAudience ?? "editors",
     disabledReason: cv.disabledReason ?? null,
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,

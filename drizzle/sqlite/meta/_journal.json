@@ -288,6 +288,13 @@
       "when": 1788724954687,
       "tag": "0040_connection-health-index",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1788845920917,
+      "tag": "0041_participant-permissions",
+      "breakpoints": true
     }
   ]
 }

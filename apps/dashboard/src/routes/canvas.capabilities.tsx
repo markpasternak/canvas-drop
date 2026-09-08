@@ -19,7 +19,7 @@ const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: st
   {
     key: "kv",
     label: "Key-value storage",
-    description: "Per-canvas and per-user durable state.",
+    description: "Shared content, private preferences, and participant submissions.",
   },
   {
     key: "files",
@@ -128,6 +128,49 @@ export default function Capabilities() {
         >
           <span className="text-xs font-medium text-muted">{backendOn ? "Always on" : "Off"}</span>
         </Row>
+      </Section>
+      <Section
+        id="runtime-permissions"
+        title="Who can use the backend"
+        description="Viewers can read shared content, save private preferences, and submit their own responses. Only owners and editors can change shared content or review everyone's submissions."
+      >
+        {(
+          [
+            {
+              key: "aiAudience",
+              title: "AI access",
+              description: "AI requests use the canvas's budget.",
+            },
+            {
+              key: "connectionsAudience",
+              title: "Connection access",
+              description:
+                "Connections can send requests and trigger actions in external services. Admin grants and allowed methods still apply.",
+            },
+          ] as const
+        ).map((setting) => (
+          <Row key={setting.key} title={setting.title} description={setting.description}>
+            <select
+              aria-label={setting.title}
+              value={canvas[setting.key] ?? "editors"}
+              disabled={!backendOn || update.isPending || canvas.status === "disabled"}
+              className="max-w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg"
+              onChange={(event) =>
+                update.mutate(
+                  { [setting.key]: event.target.value as "editors" | "viewers" },
+                  { onError: onSaveError },
+                )
+              }
+            >
+              <option value="editors">Owners and editors</option>
+              <option value="viewers">All signed-in viewers</option>
+            </select>
+          </Row>
+        ))}
+        <p className="text-xs text-muted">
+          Private file submissions are visible to their uploader and the canvas's owners and
+          editors. Public visitors have no backend access.
+        </p>
       </Section>
       <Section
         id="connections"

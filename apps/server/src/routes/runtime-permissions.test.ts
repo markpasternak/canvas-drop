@@ -1,0 +1,172 @@
+import { loadConfig } from "@canvas-drop/shared";
+import { Hono } from "hono";
+import { afterEach, describe, expect, it } from "vitest";
+import { fakeProvider } from "../ai/testing.js";
+import { filesService } from "../canvas/files-service.js";
+import type { DbClient } from "../db/factory.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
+import { canvasesRepository } from "../db/repositories/canvases.js";
+import { filesRepository } from "../db/repositories/files.js";
+import { kvRepository } from "../db/repositories/kv.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
+import { usersRepository } from "../db/repositories/users.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
+import type { AppEnv } from "../http/types.js";
+import { memStorage } from "../storage/mem.js";
+import { canvasApiRoutes } from "./canvas-api.js";
+
+const config = loadConfig({
+  CANVAS_DROP_AUTH_MODE: "dev",
+  CANVAS_DROP_AI_API_KEY: "test",
+  CANVAS_DROP_AI_MODELS: "claude-haiku-4-5",
+});
+const put = (body: unknown) => ({
+  method: "PUT",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+describe.each(DIALECTS)("runtime participant permissions [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => client?.close());
+
+  async function setup() {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const identities = await Promise.all(
+      (["owner", "editor", "viewer", "other"] as const).map((name) =>
+        users.upsert({
+          providerSub: name,
+          name,
+          email: `${name}@example.com`,
+          isAdmin: name === "viewer",
+        }),
+      ),
+    );
+    const [owner, editor, viewer, other] = identities;
+    if (!owner || !editor || !viewer || !other) throw new Error("missing test identity");
+    const canvases = canvasesRepository(client);
+    const canvas = await canvases.create({
+      ownerId: owner.id,
+      slug: "app",
+      apiKeyHash: "key",
+      backendEnabled: true,
+    });
+    await canvases.updateSettings(canvas.id, { access: "whole_org" });
+    await canvases.addAllowlistEntry({
+      canvasId: canvas.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const storage = memStorage();
+    const files = filesService({ files: filesRepository(client), storage });
+    function as(user: NonNullable<typeof owner>) {
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("user", user);
+        await next();
+      });
+      app.route(
+        "/v1/c/:slug",
+        canvasApiRoutes({
+          config,
+          canvases,
+          files,
+          kv: kvRepository(client),
+          usage: usageEventsRepository(client),
+          aiUsage: aiUsageRepository(client),
+          aiProvider: fakeProvider({ deltas: ["ok"] }),
+        }),
+      );
+      return app;
+    }
+    return { owner, editor, viewer, other, canvases, canvas, as };
+  }
+
+  it("reports effective roles and forbids a viewer, including an admin, from changing shared KV", async () => {
+    const { owner, editor, viewer, canvases, canvas, as } = await setup();
+    for (const [user, role] of [
+      [owner, "owner"],
+      [editor, "editor"],
+      [viewer, "viewer"],
+    ] as const) {
+      const me = (await (await as(user).request("/v1/c/app/me")).json()) as {
+        canvasRole: string;
+        permissions: Record<string, boolean>;
+      };
+      expect(me.canvasRole).toBe(role);
+      expect(me.permissions.canWriteSharedData).toBe(role !== "viewer");
+      expect(me.permissions.canSubmit).toBe(true);
+    }
+    const reader = as(viewer);
+    for (const request of [put("forged"), { method: "DELETE" }, { method: "POST", body: "{}" }]) {
+      const path =
+        request.method === "POST" ? "/v1/c/app/kv/question/increment" : "/v1/c/app/kv/question";
+      const response = await reader.request(path, request);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ code: "PERMISSION_DENIED" });
+    }
+    expect((await as(editor).request("/v1/c/app/kv/question", put("Choose a colour"))).status).toBe(
+      200,
+    );
+    expect(await (await reader.request("/v1/c/app/kv/question")).json()).toEqual({
+      value: "Choose a colour",
+    });
+    expect((await reader.request("/v1/c/app/kv/user/theme", put("dark"))).status).toBe(200);
+    expect((await as(owner).request("/v1/c/app/kv/user/theme")).status).toBe(404);
+    const entry = await canvases.findMemberEntry(canvas.id, editor.id);
+    if (!entry) throw new Error("missing editor grant");
+    await canvases.setAllowlistRole(canvas.id, entry.id, "viewer");
+    expect((await as(editor).request("/v1/c/app/kv/question", put("Changed"))).status).toBe(403);
+  });
+
+  it("separates private participant uploads from shared files on list, read and delete", async () => {
+    const { owner, editor, viewer, other, as } = await setup();
+    async function upload(user: NonNullable<typeof owner>, scope: string) {
+      const body = new FormData();
+      body.set("file", new File(["response"], "response.txt"));
+      body.set("scope", scope);
+      return as(user).request("/v1/c/app/files", { method: "POST", body });
+    }
+    expect((await upload(viewer, "shared")).status).toBe(403);
+    const shared = (await (await upload(editor, "shared")).json()) as { id: string };
+    const response = (await (await upload(viewer, "submission")).json()) as { id: string };
+    expect(response.id).toBeTypeOf("string");
+    const list = (await (await as(other).request("/v1/c/app/files")).json()) as {
+      files: Array<{ id: string }>;
+    };
+    expect(list.files.map((f: { id: string }) => f.id)).toEqual([shared.id]);
+    expect((await as(other).request(`/v1/c/app/files/${response.id}/content`)).status).toBe(404);
+    expect(
+      (await as(other).request(`/v1/c/app/files/${response.id}`, { method: "DELETE" })).status,
+    ).toBe(404);
+    expect(
+      (await as(viewer).request(`/v1/c/app/files/${shared.id}`, { method: "DELETE" })).status,
+    ).toBe(403);
+    expect((await as(editor).request(`/v1/c/app/files/${response.id}/content`)).status).toBe(200);
+    expect(
+      (await as(viewer).request(`/v1/c/app/files/${response.id}`, { method: "DELETE" })).status,
+    ).toBe(200);
+  });
+
+  it("requires an explicit AI audience and keeps feature gates authoritative", async () => {
+    const { viewer, canvases, canvas, as } = await setup();
+    const request = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    };
+    expect((await as(viewer).request("/v1/c/app/ai/chat", request)).status).toBe(403);
+    await canvases.updateCapabilities(canvas.id, { aiAudience: "viewers" });
+    const allowed = await as(viewer).request("/v1/c/app/ai/chat", request);
+    expect(allowed.status).toBe(200);
+    await allowed.text();
+    await canvases.updateCapabilities(canvas.id, { ai: false });
+    const denied = await as(viewer).request("/v1/c/app/ai/chat", request);
+    expect(await denied.json()).toMatchObject({ code: "CAPABILITY_DISABLED" });
+  });
+});

@@ -173,6 +173,8 @@ export function useUpdateCapabilities(id: string) {
         const optimistic: Canvas = {
           ...prev,
           backendEnabled,
+          aiAudience: patch.aiAudience ?? prev.aiAudience,
+          connectionsAudience: patch.connectionsAudience ?? prev.connectionsAudience,
           capabilities,
           effective: {
             identity: backendEnabled,

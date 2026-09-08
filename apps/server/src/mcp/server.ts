@@ -1044,6 +1044,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {
         id: z.string().describe("The canvas id."),
         backendEnabled: z.boolean().optional(),
+        aiAudience: z
+          .enum(["editors", "viewers"])
+          .optional()
+          .describe("Who can use AI; defaults to editors (includes owner)."),
+        connectionsAudience: z
+          .enum(["editors", "viewers"])
+          .optional()
+          .describe("Who can use admin-granted connections; defaults to editors."),
         kv: z.boolean().optional(),
         files: z.boolean().optional(),
         ai: z.boolean().optional(),

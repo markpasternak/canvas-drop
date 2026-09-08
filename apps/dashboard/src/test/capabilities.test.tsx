@@ -185,3 +185,22 @@ describe("capabilities tab", () => {
     expect(screen.queryByRole("button", { name: /grant|revoke|edit/i })).not.toBeInTheDocument();
   });
 });
+
+it("lets an editor explicitly enable AI for viewers and preserves the connection audience", async () => {
+  const calls = mockFetch({
+    "GET /api/canvases/c1": () =>
+      json({ ...ON, role: "editor", aiAudience: "editors", connectionsAudience: "editors" }),
+    "PATCH /api/canvases/c1/capabilities": () =>
+      json({ ...ON, aiAudience: "viewers", connectionsAudience: "editors" }),
+  });
+  renderCapabilities();
+  const select = await screen.findByRole("combobox", { name: "AI access" });
+  expect(select).toHaveValue("editors");
+  await userEvent.selectOptions(select, "viewers");
+  await vi.waitFor(() =>
+    expect(calls.find((call) => call.method === "PATCH")?.body).toBe(
+      JSON.stringify({ aiAudience: "viewers" }),
+    ),
+  );
+  expect(screen.getByRole("combobox", { name: "Connection access" })).toHaveValue("editors");
+});

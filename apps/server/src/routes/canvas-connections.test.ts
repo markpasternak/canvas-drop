@@ -112,6 +112,19 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
     return { app, canvas, config, fetch, profile, service, usage };
   }
 
+  it("refuses viewer forwarding before transport until the audience is explicitly opened", async () => {
+    const { app, canvas, fetch } = await fixture({ asViewer: true });
+    const repo = canvasesRepository(client);
+    await repo.updateSettings(canvas.id, { access: "whole_org" });
+    const denied = await app.request("/v1/c/stocks/connections/market/quote");
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(fetch).not.toHaveBeenCalled();
+    await repo.updateCapabilities(canvas.id, { connectionsAudience: "viewers" });
+    expect((await app.request("/v1/c/stocks/connections/market/quote")).status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("forwards a granted relative stock path with the protected agent and hardened response", async () => {
     const { app, canvas, fetch, profile, usage } = await fixture();
     const sdk = createClient({

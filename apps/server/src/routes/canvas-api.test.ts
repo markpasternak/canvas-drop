@@ -94,7 +94,15 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
     const res = await buildApi(client, { id: owner.id, isAdmin: true }).request("/v1/c/app/me");
     expect(res.status).toBe(200);
     const body = (await jsonOf<Record<string, unknown>>(res)) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(["avatarUrl", "email", "id", "kind", "name"]);
+    expect(Object.keys(body).sort()).toEqual([
+      "avatarUrl",
+      "canvasRole",
+      "email",
+      "id",
+      "kind",
+      "name",
+      "permissions",
+    ]);
     expect(body.kind).toBe("member");
     expect(body.isAdmin).toBeUndefined();
   });
@@ -392,6 +400,17 @@ describe("canvasApiRoutes — guest/anonymous primitives (U9)", () => {
         messages: [{ role: "user", content: "hi" }],
       }),
     });
-    expect(on.status).toBe(200);
+    expect(on.status).toBe(403); // Guest opt-in also requires the explicit runtime audience.
+    await canvasesRepository(client).updateCapabilities(cv.id, { aiAudience: "viewers" });
+    const allowed = await buildApiAs(client, principal, aiConfig).request("/v1/c/app/ai/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    expect(allowed.status).toBe(200);
+    await allowed.text();
   });
 });

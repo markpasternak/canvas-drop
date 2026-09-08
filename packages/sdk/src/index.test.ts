@@ -797,3 +797,41 @@ describe("realtime", () => {
     await expect(p).rejects.toMatchObject({ code: "CHANNEL_CLOSED" });
   });
 });
+
+it("sends participant upload scope and exposes typed role denials", async () => {
+  const { PermissionDeniedError } = await import("./index.js");
+  const fetch = fetchMock()
+    .mockResolvedValueOnce(res(200, { id: "f1", name: "answer.txt", size: 1 }))
+    .mockResolvedValueOnce(
+      res(403, {
+        code: "PERMISSION_DENIED",
+        message: "Editors only",
+        hint: "Request editor access",
+      }),
+    );
+  const client = createClient({ context: ctx, fetch });
+  await client.files.upload(new File(["x"], "answer.txt"), { scope: "submission" });
+  const body = fetch.mock.calls[0]?.[1]?.body;
+  if (!(body instanceof FormData)) throw new Error("expected form data");
+  expect(body.get("scope")).toBe("submission");
+  await expect(client.kv.set("question", "changed")).rejects.toBeInstanceOf(PermissionDeniedError);
+});
+
+it("surfaces a realtime role denial through the channel error callback", () => {
+  const client = realtimeClient();
+  const channel = client.realtime.channel("slides");
+  const onError = vi.fn();
+  channel.onError(onError);
+  channel.subscribe(() => {});
+  const ws = lastWs();
+  ws.open();
+  ws.emit({ type: "error", channel: "slides", code: "PERMISSION_DENIED", message: "Editors only" });
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: "PermissionDeniedError",
+      code: "PERMISSION_DENIED",
+      status: 403,
+    }),
+  );
+  channel.close();
+});

@@ -234,9 +234,9 @@ describe("realtime WebSocket route", () => {
     server = await startFullApp(client);
     const a = track(connect(server.port, "app"));
     await a.opened; // 101 — upgrade traversed gateway + resolve + isolation
-    a.send({ type: "subscribe", channel: "room" });
+    a.send({ type: "subscribe", channel: "participants:room" });
     await a.waitFor((m) => m.type === "subscribed");
-    a.send({ type: "publish", channel: "room", event: "ping", data: 1 });
+    a.send({ type: "publish", channel: "participants:room", event: "ping", data: 1 });
     const msg = await a.waitFor((m) => m.type === "message");
     expect(msg).toMatchObject({ event: "ping", data: 1 });
   });
@@ -291,11 +291,11 @@ describe("realtime WebSocket route", () => {
     const a = track(connect(server.port, "a")); // injected member (default header)
     const b = track(connect(server.port, "b"));
     await Promise.all([a.opened, b.opened]);
-    a.send({ type: "subscribe", channel: "room" });
-    b.send({ type: "subscribe", channel: "room" });
+    a.send({ type: "subscribe", channel: "participants:room" });
+    b.send({ type: "subscribe", channel: "participants:room" });
     await a.waitFor((m) => m.type === "subscribed");
     await b.waitFor((m) => m.type === "subscribed");
-    a.send({ type: "publish", channel: "room", event: "x", data: 1 });
+    a.send({ type: "publish", channel: "participants:room", event: "x", data: 1 });
     await a.waitFor((m) => m.type === "message"); // A sees its own publish
     await delay(100);
     expect(b.messages.some((m) => m.type === "message")).toBe(false); // B never does
@@ -307,7 +307,7 @@ describe("realtime WebSocket route", () => {
     server = await startInjectedApp(client);
     const viewer = track(connect(server.port, "app", { "x-test-user": "viewer" }));
     await viewer.opened; // shared → allowed
-    viewer.send({ type: "subscribe", channel: "room" });
+    viewer.send({ type: "subscribe", channel: "participants:room" });
     await viewer.waitFor((m) => m.type === "subscribed");
 
     // Owner un-shares; the management hook calls revalidateCanvas.
@@ -325,9 +325,9 @@ describe("realtime WebSocket route", () => {
     const a = track(connect(server.port, "app", { "x-test-user": "alice" }));
     const b = track(connect(server.port, "app", { "x-test-user": "bob" }));
     await Promise.all([a.opened, b.opened]);
-    a.send({ type: "subscribe", channel: "room" });
+    a.send({ type: "subscribe", channel: "participants:room" });
     await a.waitFor((m) => m.type === "subscribed");
-    b.send({ type: "subscribe", channel: "room" });
+    b.send({ type: "subscribe", channel: "participants:room" });
     await b.waitFor((m) => m.type === "subscribed");
     // alice sees bob join
     const join = await a.waitFor((m) => m.type === "join");

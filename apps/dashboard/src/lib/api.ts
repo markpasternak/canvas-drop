@@ -64,6 +64,8 @@ export type EffectiveCapabilities = Record<FeatureCapability | "identity", boole
 
 /** Capability patch sent to PATCH /:id/capabilities (all optional). */
 export interface CanvasCapabilitiesPatch {
+  aiAudience?: "editors" | "viewers";
+  connectionsAudience?: "editors" | "viewers";
   backendEnabled?: boolean;
   kv?: boolean;
   files?: boolean;
@@ -159,6 +161,8 @@ export interface Canvas {
   /** Backend-group master switch (plan 006). */
   backendEnabled: boolean;
   /** Raw stored feature flags (what the toggles control). */
+  aiAudience?: "editors" | "viewers";
+  connectionsAudience?: "editors" | "viewers";
   capabilities: StoredCapabilities;
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;

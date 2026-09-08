@@ -168,6 +168,8 @@ const createSchema = z.object({
 
 /** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
 const capabilitiesSchema = z.object({
+  aiAudience: z.enum(["editors", "viewers"]).optional(),
+  connectionsAudience: z.enum(["editors", "viewers"]).optional(),
   backendEnabled: z.boolean().optional(),
   kv: z.boolean().optional(),
   files: z.boolean().optional(),
@@ -271,6 +273,8 @@ function ownerCanvasView(
     // and the effective state after ANDing operator globals (so the dashboard can
     // explain a feature that's off because the operator disabled it).
     backendEnabled: cv.backendEnabled,
+    aiAudience: cv.aiAudience,
+    connectionsAudience: cv.connectionsAudience,
     capabilities: storedCapabilities(cv),
     // Effective state ANDs in the operator globals — resolved per request so an
     // admin's DB override of the AI key / realtime switch is reflected here too.

@@ -20,6 +20,10 @@ export const SDK_VERSION = "1";
 export const ERROR_CODES = {
   NOT_AUTHENTICATED: { status: 401, summary: "The viewer is not signed in." },
   PASSWORD_REQUIRED: { status: 403, summary: "The canvas is password-protected." },
+  PERMISSION_DENIED: {
+    status: 403,
+    summary: "The viewer lacks permission for this canvas operation.",
+  },
   CAPABILITY_DISABLED: {
     status: 403,
     summary: "Backend or the specific feature is off for this canvas.",
@@ -125,6 +129,17 @@ export class CapabilityDisabledError extends CanvasdropError {
     this.name = "CapabilityDisabledError";
   }
 }
+export class PermissionDeniedError extends CanvasdropError {
+  constructor(message?: string, hint?: string) {
+    super(
+      "PERMISSION_DENIED",
+      403,
+      message ?? "Your canvas role cannot perform this action.",
+      hint,
+    );
+    this.name = "PermissionDeniedError";
+  }
+}
 export class QuotaExceededError extends CanvasdropError {
   constructor(code = "QUOTA_EXCEEDED", status = 429) {
     super(code, status, "quota exceeded");
@@ -181,6 +196,8 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
     typeof body === "object" && body && "hint" in body
       ? String((body as { hint: unknown }).hint)
       : undefined;
+  if (status === 403 && code === "PERMISSION_DENIED")
+    return new PermissionDeniedError(message, responseHint);
   if (status === 401) return new NotAuthenticatedError();
   if (status === 403 && code === "CAPABILITY_DISABLED") {
     const cap =
@@ -329,7 +346,25 @@ async function request<T>(
 // Primitives.
 // ---------------------------------------------------------------------------
 
+export type CanvasRole = "owner" | "editor" | "viewer";
+export interface RuntimePermissions {
+  canEditContent: boolean;
+  canManageVersions: boolean;
+  canReadSharedData: boolean;
+  canWriteSharedData: boolean;
+  canSavePreferences: boolean;
+  canSubmit: boolean;
+  canManageSubmissions: boolean;
+  canUploadSharedFiles: boolean;
+  canUploadSubmissionFiles: boolean;
+  canUseAi: boolean;
+  canUseConnections: boolean;
+  canPublishSharedEvents: boolean;
+  canPublishParticipantEvents: boolean;
+}
 export interface Me {
+  canvasRole: CanvasRole;
+  permissions: RuntimePermissions;
   id: string;
   email: string;
   name: string;
@@ -339,6 +374,8 @@ export interface Me {
 }
 
 export interface FileMeta {
+  scope?: "shared" | "submission";
+  uploadedBy?: string;
   id: string;
   name: string;
   size: number;
@@ -397,10 +434,11 @@ export interface RealtimeUser {
 export interface RealtimeMessage {
   event: string;
   data: unknown;
-  from: RealtimeUser;
+  from: RealtimeUser & { canvasRole: CanvasRole };
 }
 export interface Channel {
   publish(event: string, data: unknown): void;
+  onError(handler: (error: CanvasdropError) => void): void;
   subscribe(handler: (msg: RealtimeMessage) => void): void;
   unsubscribe(): void;
   presence(): Promise<RealtimeUser[]>;
@@ -552,7 +590,10 @@ export interface CanvasdropClient {
   me(): Promise<Me>;
   kv: KvNamespace & { readonly user: KvNamespace };
   files: {
-    upload(file: File): Promise<{ id: string; name: string; size: number; url: string }>;
+    upload(
+      file: File,
+      options?: { scope?: "shared" | "submission" },
+    ): Promise<{ id: string; name: string; size: number; url: string }>;
     list(): Promise<FileMeta[]>;
     delete(id: string): Promise<void>;
     url(id: string): string;
@@ -739,6 +780,7 @@ function aiNamespace(opts: Required<ClientOptions>, base: (p: string) => string)
 // ---------------------------------------------------------------------------
 
 interface ChannelState {
+  onError: Array<(error: CanvasdropError) => void>;
   subscribed: boolean;
   onMessage: Array<(m: RealtimeMessage) => void>;
   onPresence: Array<(u: RealtimeUser[]) => void>;
@@ -770,6 +812,7 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
       s = {
         subscribed: false,
         onMessage: [],
+        onError: [],
         onPresence: [],
         onJoin: [],
         onLeave: [],
@@ -820,7 +863,7 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
             h({
               event: String(frame.event ?? ""),
               data: frame.data,
-              from: frame.from as RealtimeUser,
+              from: frame.from as RealtimeMessage["from"],
             });
         break;
       case "presence": {
@@ -841,6 +884,9 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
       case "error":
         if (frame.code === "CAPABILITY_DISABLED")
           failTerminal(new CapabilityDisabledError("realtime"));
+        else if (s)
+          for (const handler of s.onError)
+            handler(errorFromResponse(frame.code === "PERMISSION_DENIED" ? 403 : 400, frame));
         break;
     }
   }
@@ -936,6 +982,9 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
           rawSend({ type: "presence", channel: name });
         });
       },
+      onError(handler) {
+        st(name).onError.push(handler);
+      },
       onPresence(handler) {
         st(name).onPresence.push(handler);
       },
@@ -1030,9 +1079,10 @@ export function createClient(options: ClientOptions): CanvasdropClient {
     realtime: createRealtime(opts),
     connections,
     files: {
-      async upload(file: File) {
+      async upload(file: File, options?: { scope?: "shared" | "submission" }) {
         const form = new FormData();
         form.set("file", file);
+        if (options?.scope) form.set("scope", options.scope);
         const res = await opts.fetch(base("/files"), {
           method: "POST",
           credentials: "include",

@@ -45,6 +45,8 @@ export function canvasRealtimeRoutes(deps: CanvasRealtimeDeps): Hono<AppEnv> {
       const canvas = requireCanvas(c);
       const user = c.get("user");
       let conn: Conn | null = null;
+      let messages = Promise.resolve();
+      let pending = 0;
 
       return {
         onOpen(_evt, ws) {
@@ -88,7 +90,28 @@ export function canvasRealtimeRoutes(deps: CanvasRealtimeDeps): Hono<AppEnv> {
         onMessage(evt) {
           if (!conn) return;
           const raw = typeof evt.data === "string" ? evt.data : "";
-          if (raw) deps.hub.handleMessage(conn, raw);
+          if (!raw) return;
+          const current = conn;
+          if (pending >= 32) {
+            current.socket.send(
+              JSON.stringify({
+                type: "error",
+                code: "RATE_LIMITED",
+                message: "Too many pending messages",
+              }),
+            );
+            return;
+          }
+          pending++;
+          messages = messages
+            .then(() => deps.hub.handleMessage(current, raw))
+            .catch(() => {
+              deps.hub.disconnect(current);
+              current.socket.close(4401, "permission check failed");
+            })
+            .finally(() => {
+              pending--;
+            });
         },
         onClose() {
           if (conn) deps.hub.disconnect(conn);

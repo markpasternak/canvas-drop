@@ -41,6 +41,7 @@ same order (each entry is `{ status, summary }`; `ErrorCode` is its key type).
 |------|--------|---------|
 | `NOT_AUTHENTICATED` | 401 | The viewer is not signed in. |
 | `PASSWORD_REQUIRED` | 403 | The canvas is password-protected. |
+| `PERMISSION_DENIED` | 403 | The signed-in viewer lacks permission for this operation. The SDK throws `PermissionDeniedError`. Check `me().permissions`; requesting the API directly does not bypass role checks. |
 | `CAPABILITY_DISABLED` | 403 | Backend or the specific feature is off for this canvas. |
 | `CROSS_CANVAS_FORBIDDEN` | 403 | A request targeted another canvas's resources. |
 | `MODEL_NOT_ALLOWED` | 403 | The requested AI model is not in the allow-list. |

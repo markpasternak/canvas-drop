@@ -73,6 +73,8 @@ export interface AppVariables {
    *  (`requireCanvasRole`) on the management / draft surfaces so a handler can branch
    *  on owner vs editor without a second resolve. Server-resolved, never client input. */
   canvasRole?: "owner" | "editor";
+  /** Effective runtime role after canvas access was admitted. */
+  runtimeRole?: "owner" | "editor" | "viewer";
   /** Whether the password gate must run before serving — set by canvasAccess (U15). */
   needsPasswordGate?: boolean;
   /** The verified MCP OAuth caller — set by the `/mcp` bearer-auth middleware from a

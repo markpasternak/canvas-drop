@@ -261,6 +261,8 @@ export const canvases = sqliteTable(
     capKv: c.bool("cap_kv").notNull().default(true),
     capFiles: c.bool("cap_files").notNull().default(true),
     capAi: c.bool("cap_ai").notNull().default(true),
+    aiAudience: c.text("ai_audience").notNull().default("editors"),
+    connectionsAudience: c.text("connections_audience").notNull().default("editors"),
     capRealtime: c.bool("cap_realtime").notNull().default(true),
     // `cap_authoring` (plan 2026-07-04) defaults FALSE, unlike its siblings: letting a
     // canvas's page mint new canvases as the viewer is higher-privilege, so enabling
@@ -647,6 +649,7 @@ export const files = sqliteTable(
     storageKey: c.text("storage_key").notNull(),
     // Attribution holds an org user id OR a guest principal id (U9) — not an FK.
     uploadedBy: c.text("uploaded_by").notNull(),
+    scope: c.text("scope").notNull().default("shared"),
     createdAt: c.epochMs("created_at").notNull(),
   },
   (t) => [index("files_canvas_id_idx").on(t.canvasId)],

@@ -101,6 +101,8 @@ export interface CreateCanvasInput {
  * re-enabling backend restores the prior per-feature choices (KTD-2).
  */
 export interface CanvasCapabilitiesPatch {
+  aiAudience?: "editors" | "viewers";
+  connectionsAudience?: "editors" | "viewers";
   backendEnabled?: boolean;
   kv?: boolean;
   files?: boolean;
@@ -1432,6 +1434,9 @@ export function canvasesRepository(client: DbClient) {
     async updateCapabilities(id: string, patch: CanvasCapabilitiesPatch): Promise<Canvas> {
       const set: Record<string, unknown> = { updatedAt: nextUpdatedAt() };
       if (patch.backendEnabled !== undefined) set.backendEnabled = patch.backendEnabled;
+      if (patch.aiAudience !== undefined) set.aiAudience = patch.aiAudience;
+      if (patch.connectionsAudience !== undefined)
+        set.connectionsAudience = patch.connectionsAudience;
       // Map each present feature flag to its column via the shared taxonomy, so the
       // cap→column mapping has one source of truth (FEATURE_COLUMN).
       for (const cap of FEATURE_CAPABILITIES) {

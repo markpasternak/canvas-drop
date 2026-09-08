@@ -551,10 +551,20 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const updated = payload(
       await mcp.callTool({
         name: "set_capabilities",
-        arguments: { id: cv.id, backendEnabled: true, kv: true, ai: false, authoring: true },
+        arguments: {
+          id: cv.id,
+          backendEnabled: true,
+          kv: true,
+          ai: false,
+          authoring: true,
+          aiAudience: "viewers",
+          connectionsAudience: "viewers",
+        },
       }),
     );
     expect(updated.id).toBe(cv.id);
+    expect(updated.aiAudience).toBe("viewers");
+    expect(updated.connectionsAudience).toBe("viewers");
     // Parity: an agent can flip `authoring` (default-off) over MCP just like the Backend tab.
     expect((await canvasesRepository(client).findById(cv.id))?.capAuthoring).toBe(true);
     // No-op call (no fields) returns the canvas without error.

@@ -66,6 +66,7 @@ export interface ConnUser {
 }
 
 export interface Conn {
+  runtimeRole?: "owner" | "editor" | "viewer";
   readonly socket: Socket;
   readonly canvasId: string;
   readonly user: ConnUser;
@@ -271,7 +272,7 @@ export function createHub(deps: HubDeps) {
       channel,
       event,
       data,
-      from: { id: conn.user.id, name: conn.user.name },
+      from: { id: conn.user.id, name: conn.user.name, canvasRole: conn.runtimeRole ?? "viewer" },
     });
   }
 
@@ -330,7 +331,7 @@ export function createHub(deps: HubDeps) {
     presence,
 
     /** Handle one inbound frame (raw string). The full protocol lives here. */
-    handleMessage(conn: Conn, raw: string, now: number = Date.now()): void {
+    async handleMessage(conn: Conn, raw: string, now: number = Date.now()): Promise<void> {
       if (conn.closed) return;
       if (Buffer.byteLength(raw) > MAX_MESSAGE_BYTES) {
         send(conn, { type: "error", code: "MESSAGE_TOO_LARGE", message: "frame exceeds 16KB" });
@@ -370,6 +371,22 @@ export function createHub(deps: HubDeps) {
           break;
         case "publish":
           if (channel) {
+            await this.revalidateCanvas(conn.canvasId, conn);
+            if (conn.closed) return;
+            if (
+              !channel.startsWith("participants:") &&
+              conn.runtimeRole !== "owner" &&
+              conn.runtimeRole !== "editor"
+            ) {
+              send(conn, {
+                type: "error",
+                code: "PERMISSION_DENIED",
+                channel,
+                message:
+                  "Only owners and editors can publish to shared channels. Use a participants: channel for participant messages.",
+              });
+              return;
+            }
             doPublish(
               conn,
               channel,
@@ -395,8 +412,8 @@ export function createHub(deps: HubDeps) {
      * the periodic heartbeat. Drops sockets that lost canvas access (4401), lost the
      * realtime capability (4403), or whose user is no longer active (4401).
      */
-    async revalidateCanvas(canvasId: string): Promise<void> {
-      const live = [...conns(canvasId)];
+    async revalidateCanvas(canvasId: string, only?: Conn): Promise<void> {
+      const live = only ? [only] : [...conns(canvasId)];
       if (live.length === 0) return;
       // Fail closed: if the canvas lookup errors, drop every live socket rather than
       // abandoning the sweep and leaving stale grants alive.
@@ -465,7 +482,9 @@ export function createHub(deps: HubDeps) {
         }
         // Editors stay connected at any rung (editor-roles plan, KD6/R22) — resolved
         // through the shared role resolver; a demoted editor is dropped by this sweep.
-        const editorMatch = (await roleOf(canvas, conn)) === "editor";
+        const role = await roleOf(canvas, conn);
+        conn.runtimeRole = role === "none" ? "viewer" : role;
+        const editorMatch = role === "editor";
         const decision = decideCanvasAccess(canvas, principal, now, {
           isAllowed,
           teamMatch,
