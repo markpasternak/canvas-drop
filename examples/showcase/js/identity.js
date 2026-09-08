@@ -32,6 +32,7 @@ function renderMeOut(me) {
   const out = $("#me-out");
   if (!me) return;
   out.innerHTML = [
+    `<span class="line"><span class="key">role </span>${escapeHtml(me.canvasRole)}</span>`,
     `<span class="line"><span class="key">name </span>${escapeHtml(me.name || "—")}</span>`,
     `<span class="line"><span class="key">email </span>${escapeHtml(me.email)}</span>`,
     `<span class="line"><span class="key">id </span>${escapeHtml(me.id)}</span>`,

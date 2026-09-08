@@ -9,13 +9,41 @@ list, serve, and delete files, and handle every error the primitive returns.
 The canvas needs **Enable backend** on and the **File storage** toggle on (it is
 pre-enabled) in its **Backend** tab; see
 [Capabilities](/docs/authoring/capabilities). There is nothing to configure in
-the page and no key to hold.
+the page for the built-in shared/submission scopes and no key to hold. File groups
+and record attachments use the resource configuration described below.
+
+## File groups and attachments
+
+A **file group** is a named group of standalone uploads within one canvas, such
+as `documents` or `images`. It belongs to the Files primitive. Each group has its
+own permission policy: two groups can have different access rules, or use the
+same preset while containing separate files. Configure the group in **Backend →
+Participation and permissions**, then use the same name in your canvas code:
+
+```js
+await canvasdrop.files.upload(file, { group: "documents" });
+```
+
+A file attached to a collection record follows that record's permissions instead.
+Create the parent record first, then upload with its collection name and record
+ID. No separate file group is needed. Uploading requires read/update access to the
+parent, even if a different person originally created that record:
+
+```js
+await canvasdrop.files.upload(file, { collection: "comments", recordId: comment.id });
+```
+
+Changing a group or parent collection's policy changes access to existing files;
+it does not move them into another group. Content URLs enforce the same rights.
+See [Permissions and defaults](/docs/sdk/permissions) for presets and operation rules.
+
+## Built-in shared and submission scopes
 
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">
   // <input type="file" id="picker"> and <img id="img"> are on the page
-  const f = await canvasdrop.files.upload(picker.files[0]); // { id, name, size, url }
+  const f = await canvasdrop.files.upload(picker.files[0], { scope: "submission" }); // { id, name, size, url }
   img.src = f.url;                                           // absolute content URL
 
   const all = await canvasdrop.files.list();                 // FileMeta[]
@@ -24,11 +52,21 @@ the page and no key to hold.
 </script>
 ```
 
-Files belong to the canvas, not to the viewer who uploaded them: every viewer
-who can open the canvas can list, read, and delete every file in it. There is no
-per-viewer scope for files (KV has `kv.user`; files has no equivalent). The
-server records who uploaded each file for its audit trail, but the API does not
-expose or filter by uploader.
+The built-in scopes have fixed rules. **Shared** (the default) files are readable by admitted
+viewers; only owners/editors upload or delete them. **Submission** files are
+visible to their authenticated uploader and owners/editors. The uploader can
+delete their own submission file; owners/editors can manage all submission files.
+Other viewers receive `404 NOT_FOUND` for private files, including content URLs.
+Existing files remain shared. List metadata includes `scope` and `uploadedBy`.
+
+New uploads can instead use `{group: "uploads"}` for a configured file-group policy
+or `{collection: "comments", recordId: comment.id}` to inherit the parent record's
+permissions. These options are mutually exclusive with `scope`. Personal files remain
+hidden from owners/editors; shared contributions allow authors and owners/editors to
+manage items. `list()` returns only visible files under all policies, and content URLs
+enforce the same rules. Bound metadata includes `recordId`; its scope is
+`record:<collection>` or `group:<group>`. `files.rename(id, name)` requires read and
+update permission; replacing bytes requires a new upload. See [Permissions and defaults](/docs/sdk/permissions).
 
 ## Methods
 
@@ -37,19 +75,28 @@ API call each one makes:
 
 | Method | Signature | HTTP call |
 | --- | --- | --- |
-| `upload` | `upload(file: File): Promise<{ id: string; name: string; size: number; url: string }>` | `POST {base}/v1/c/{slug}/files` |
+| `upload` | `upload(file: File, options?: FileUploadOptions): Promise<{ id: string; name: string; size: number; url: string }>` | `POST {base}/v1/c/{slug}/files` |
 | `list` | `list(): Promise<FileMeta[]>` | `GET {base}/v1/c/{slug}/files` |
 | `delete` | `delete(id: string): Promise<void>` | `DELETE {base}/v1/c/{slug}/files/{id}` |
+| `rename` | `rename(id: string, name: string): Promise<void>` | `PATCH {base}/v1/c/{slug}/files/{id}` |
 | `url` | `url(id: string): string` | none (builds `{base}/v1/c/{slug}/files/{id}/content`) |
 
 ```ts
 interface FileMeta {
+  scope?: string; // shared, submission, group:<name>, or record:<collection>
+  recordId?: string | null; // parent record for attachments
+  uploadedBy?: string; // server-resolved author
   id: string;
   name: string;
   size: number;      // bytes
   mime?: string;     // always sent by the server
   createdAt?: number; // Unix ms; always sent by the server
 }
+
+type FileUploadOptions =
+  | { scope?: "shared" | "submission" }
+  | { group: string }
+  | { collection: string; recordId: string };
 ```
 
 ### upload
@@ -62,17 +109,21 @@ replaces it with the absolute content URL before resolving, so `f.url` is
 correct in both URL modes. The result carries no `mime` or `createdAt`; call
 `list()` when you need them.
 
-There is no progress callback and no upload option. For a large file, show your
+Pass `{ scope: "submission" }` for standalone private submissions; the SDK sends a
+multipart field `scope`. An omitted scope is `shared`. There is no progress callback. For a large file, show your
 own pending state around the `await`. Ids are server-assigned UUIDs.
 
 ### list
 
-`list()` resolves to every file in the canvas, with its metadata, in one array.
+For the built-in scopes, `list()` resolves to shared files plus your own submission files;
+owners/editors receive all shared/submission files. Group files and record attachments
+are included only when their policies allow the caller to read them.
 There is no paging and no filter.
 
 ### delete
 
-`delete(id)` removes the file row and its bytes. It rejects with `NotFoundError`
+`delete(id)` removes the file row and its bytes when your role permits it.
+A viewer deleting a shared file receives `403 PERMISSION_DENIED`. It rejects with `NotFoundError`
 when `id` is not a file of this canvas, so deleting the same id twice rejects
 the second call. After a delete, the file's content URL returns `404`.
 
@@ -108,7 +159,9 @@ const res = await fetch(canvasdrop.files.url(id), { credentials: "include" });
 const blob = await res.blob();
 ```
 
-A content URL for an id that does not exist returns `404` with
+Content responses use `Cache-Control: private, no-store`. A URL is not an access
+grant: the same file visibility rule is checked on each request. A content URL
+for an id that does not exist or a private file hidden from you returns `404` with
 `{ "code": "NOT_FOUND" }`.
 
 Content requests count toward the same per-viewer runtime rate limit as every

@@ -142,7 +142,13 @@ async function connect(
       canvases,
       versions,
       engine,
-      versionHistory: versionHistoryService({ versions, storage, engine, audit }),
+      versionHistory: versionHistoryService({
+        versions,
+        drafts: draftsRepository(client),
+        storage,
+        engine,
+        audit,
+      }),
       upload: uploadService({
         config,
         canvases,
@@ -536,6 +542,55 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     ).toBe(true);
   });
 
+  it("set_capabilities configures resource policies with stale-save protection", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const runtimePolicy = {
+      defaultMode: "participation",
+      collections: { comments: { preset: "contributions" } },
+      fileGroups: {},
+      channels: {},
+      connections: {},
+    };
+    const updated = payload(
+      await mcp.callTool({
+        name: "set_capabilities",
+        arguments: { id: cv.id, runtimePolicy, expectedRuntimePolicy: null },
+      }),
+    );
+    expect(updated.runtimePolicy).toEqual(runtimePolicy);
+    expect(typeof updated.runtimePolicyRevision).toBe("string");
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "set_capabilities",
+          arguments: { id: cv.id, runtimePolicy, expectedRuntimePolicy: null },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isError(
+        await mcp.callTool({ name: "set_capabilities", arguments: { id: cv.id, runtimePolicy } }),
+      ),
+    ).toBe(true);
+    const readback = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }));
+    expect(readback.runtimePolicy).toEqual(runtimePolicy);
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "set_capabilities",
+          arguments: {
+            id: cv.id,
+            runtimePolicy: { ...runtimePolicy, defaultMode: "read_only" },
+            expectedRuntimePolicy: readback.runtimePolicyRevision,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("set_capabilities toggles backend + features (mirrors the Backend tab)", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
@@ -545,10 +600,20 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const updated = payload(
       await mcp.callTool({
         name: "set_capabilities",
-        arguments: { id: cv.id, backendEnabled: true, kv: true, ai: false, authoring: true },
+        arguments: {
+          id: cv.id,
+          backendEnabled: true,
+          kv: true,
+          ai: false,
+          authoring: true,
+          aiAudience: "viewers",
+          connectionsAudience: "viewers",
+        },
       }),
     );
     expect(updated.id).toBe(cv.id);
+    expect(updated.aiAudience).toBe("viewers");
+    expect(updated.connectionsAudience).toBe("viewers");
     // Parity: an agent can flip `authoring` (default-off) over MCP just like the Backend tab.
     expect((await canvasesRepository(client).findById(cv.id))?.capAuthoring).toBe(true);
     // No-op call (no fields) returns the canvas without error.
@@ -3246,6 +3311,8 @@ describe.each(DIALECTS)(
       get_canvas_usage: ({ id }) => ({ id }),
       list_versions: ({ id }) => ({ id }),
       delete_version: ({ id }) => ({ id, version: 99 }),
+      preview_version_prune: ({ id }) => ({ id, versions: "previous" }),
+      prune_versions: ({ id }) => ({ id, versions: [99], expectedVersionIds: {} }),
       rollback_canvas: ({ id }) => ({ id, version: 99 }),
       get_canvas_file: ({ id }) => ({ id }),
       deploy_canvas: ({ id }) => ({ id, zipBase64: zip({ "index.html": "<h1>m</h1>" }) }),

@@ -6,6 +6,9 @@ import {
   type CapabilityGlobals,
   type Config,
   effectiveCapabilities,
+  PolicyConflictError,
+  parseRuntimePolicy,
+  runtimePolicySchema,
   storedCapabilities,
   validateSlug,
 } from "@canvas-drop/shared";
@@ -166,8 +169,12 @@ const createSchema = z.object({
   orgId: z.string().nullable().optional(),
 });
 
-/** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
+/** Capability flags and runtime audiences. Absent fields remain unchanged. */
 const capabilitiesSchema = z.object({
+  runtimePolicy: runtimePolicySchema.optional(),
+  expectedRuntimePolicy: z.string().max(65536).nullable().optional(),
+  aiAudience: z.enum(["editors", "viewers"]).optional(),
+  connectionsAudience: z.enum(["editors", "viewers"]).optional(),
   backendEnabled: z.boolean().optional(),
   kv: z.boolean().optional(),
   files: z.boolean().optional(),
@@ -271,6 +278,10 @@ function ownerCanvasView(
     // and the effective state after ANDing operator globals (so the dashboard can
     // explain a feature that's off because the operator disabled it).
     backendEnabled: cv.backendEnabled,
+    aiAudience: cv.aiAudience,
+    runtimePolicy: parseRuntimePolicy(cv.runtimePolicy),
+    runtimePolicyRevision: cv.runtimePolicy,
+    connectionsAudience: cv.connectionsAudience,
     capabilities: storedCapabilities(cv),
     // Effective state ANDs in the operator globals — resolved per request so an
     // admin's DB override of the AI key / realtime switch is reflected here too.
@@ -1110,7 +1121,14 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const patch = body.data;
     if (Object.keys(patch).length === 0) return c.json(await canvasView(cv, roleOf(c)));
-    const updated = await deps.canvases.updateCapabilities(cv.id, patch);
+    let updated: Canvas;
+    try {
+      updated = await deps.canvases.updateCapabilities(cv.id, patch);
+    } catch (error) {
+      if (error instanceof PolicyConflictError)
+        return c.json({ code: error.code, message: error.message }, 409);
+      throw error;
+    }
     deps.audit.recordAudit({
       action: "capabilities_update",
       actorId: c.get("user").id,
@@ -1352,6 +1370,43 @@ export function managementRoutes(deps: ManagementDeps) {
       }
       throw err;
     }
+  });
+
+  app.post("/:id/versions/prune-preview", sameOrigin, async (c) => {
+    const cv = await managedCanvas(c);
+    if (!cv) return c.json({ code: "NOT_FOUND" }, 404);
+    const body = z
+      .object({
+        versions: z.union([
+          z.literal("previous"),
+          z.array(z.number().int().positive()).min(1).max(100),
+        ]),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "INVALID_BODY" }, 400);
+    return c.json(await deps.versionHistory.previewPrune(cv, body.data.versions));
+  });
+
+  app.post("/:id/versions/prune", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const body = z
+      .object({
+        versions: z.array(z.number().int().positive()).min(1).max(100),
+        expectedVersionIds: z.record(z.string(), z.string().uuid()),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "INVALID_BODY" }, 400);
+    return c.json(
+      await deps.versionHistory.prune(
+        cv.id,
+        body.data.versions,
+        c.get("user").id,
+        body.data.expectedVersionIds,
+      ),
+    );
   });
 
   // Delete one historical ready version. The service's repository operation

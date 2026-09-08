@@ -2,11 +2,51 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { formatBytes } from "../lib/format.js";
 import { useAdminAccessExplanation, useAdminInspection } from "../lib/queries.js";
+import { type DataPolicy, PRESETS, RIGHT_LABELS } from "../lib/runtime-policy.js";
+
 import { AdminActivityList } from "./AdminActivityList.js";
 import { AccessBadge, Badge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
 import { Field } from "./Field.js";
+
+function ResourcePolicyDetails({
+  name,
+  policy,
+  files = false,
+}: {
+  name: string;
+  policy: DataPolicy;
+  files?: boolean;
+}) {
+  const rules = { ...PRESETS[policy.preset].rules, ...policy.overrides };
+  return (
+    <details className="rounded-md border border-border p-3">
+      <summary className="cursor-pointer">
+        {name}: {PRESETS[policy.preset].label}
+        {policy.overrides ? " (custom operations)" : ""}
+      </summary>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+        {Object.entries(rules)
+          .filter(([operation]) => !files || operation !== "increment")
+          .map(([operation, right]) => (
+            <div key={operation} className="contents">
+              <dt className="capitalize">
+                {files && operation === "update" ? "Rename" : operation}
+              </dt>
+              <dd>{RIGHT_LABELS[right]}</dd>
+            </div>
+          ))}
+        {!files && (
+          <>
+            <dt>Total count</dt>
+            <dd>{RIGHT_LABELS[policy.aggregateCount ?? "none"]}</dd>
+          </>
+        )}
+      </dl>
+    </details>
+  );
+}
 
 function AccessCheck({ canvasId }: { canvasId: string }) {
   const [email, setEmail] = useState("");
@@ -154,6 +194,63 @@ export function AdminCanvasInspector({
               )}
             </section>
             <AccessCheck key={canvasId} canvasId={canvasId} />
+            <section className="space-y-2" aria-label="Runtime permissions">
+              <h3 className="font-semibold">Runtime permissions</h3>
+              <p className="text-sm text-muted">
+                Owners and editors manage shared content. Authored resources use their configured
+                policies.
+              </p>
+              <p className="text-sm">
+                AI: {RIGHT_LABELS[data.canvas.aiAudience ?? "editors"]}. Connections:{" "}
+                {RIGHT_LABELS[data.canvas.connectionsAudience ?? "editors"]} unless a profile policy
+                overrides it. Feature switches and administrator grants still apply.
+              </p>
+              {data.canvas.runtimePolicy && (
+                <>
+                  <p className="text-sm">
+                    Default for new resources:{" "}
+                    {data.canvas.runtimePolicy.defaultMode.replaceAll("_", " ")}
+                  </p>
+                  <div className="space-y-2 text-sm text-muted">
+                    {Object.entries(data.canvas.runtimePolicy.collections).map(([name, policy]) => (
+                      <ResourcePolicyDetails
+                        key={`collection:${name}`}
+                        name={`Collection ${name}`}
+                        policy={policy}
+                      />
+                    ))}
+                    {Object.entries(data.canvas.runtimePolicy.fileGroups).map(([name, policy]) => (
+                      <ResourcePolicyDetails
+                        key={`file:${name}`}
+                        files
+                        name={`File group ${name}`}
+                        policy={policy}
+                      />
+                    ))}
+                    {Object.entries(data.canvas.runtimePolicy.channels).map(([name, policy]) => (
+                      <p key={`channel:${name}`}>
+                        Channel {name}: receive — {RIGHT_LABELS[policy.subscribe]}; publish —{" "}
+                        {RIGHT_LABELS[policy.publish]}; see presence —{" "}
+                        {RIGHT_LABELS[policy.seePresence]}; appear in presence —{" "}
+                        {RIGHT_LABELS[policy.participatePresence]}.
+                      </p>
+                    ))}
+                    {Object.entries(data.canvas.runtimePolicy.connections).map(([name, policy]) => (
+                      <p key={`connection:${name}`}>
+                        Connection {name}: {RIGHT_LABELS[policy.audience]};{" "}
+                        {policy.methods?.join(", ") ||
+                          (policy.methods ? "no methods" : "administrator-approved methods")}
+                        . Administrator grants still apply.
+                      </p>
+                    ))}
+                  </div>
+                </>
+              )}
+              <p className="text-sm text-muted">
+                Policy changes belong to the canvas's Backend tab. Admin status does not grant
+                permission to read private participant records.
+              </p>
+            </section>
             <section className="space-y-2" aria-label="People and teams">
               <h3 className="font-semibold">People and teams</h3>
               {!data.people.length && !data.teams.length && !data.pending.length && (

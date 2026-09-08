@@ -13,7 +13,7 @@ There are three ways in. Pick by what you hold.
 | You hold | Use | Reach |
 |---|---|---|
 | A per-canvas secret key (`cd_...`) | Deploy API at `{base}/v1/canvases/{id}/...` | that one canvas: deploy, read back, roll back, unpublish |
-| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 47 tools |
+| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 49 tools |
 | Code running inside a canvas page | Browser SDK at `{base}/sdk/v1.js`, global `canvasdrop` | the six fixed primitives for that canvas: KV, files, AI, identity, realtime, Connections |
 
 Two verbs recur below. **Publish** turns the editor draft into an immutable
@@ -122,7 +122,7 @@ deploy and publish with `NOT_ACTIVE`.
 | Identity, lists, create (`any`) | `whoami`, `list_canvases`, `list_shared_canvases`, `create_canvas`, `clone_canvas` |
 | Read (`editor`) | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_access`, `search_people` |
 | Deploy (`editor`; publishes live immediately) | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` |
-| Lifecycle (`editor` unless marked) | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) |
+| Lifecycle (`editor` unless marked) | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `preview_version_prune`, `prune_versions`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) |
 | Settings (`editor`) | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key`; `list_canvas_connections` reads the admin-granted profiles |
 | Sharing (`editor`) | `grant_access`, `invite_to_canvas`, `revoke_access`, `set_access_role` |
 | Draft loop (`editor`) | `get_draft`, `read_draft_file`, `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft` |
@@ -202,9 +202,9 @@ Parameters and return shapes for every tool: [MCP server](/docs/agents/mcp).
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">
-  const me = await canvasdrop.me();                     // { id, email, name, avatarUrl, kind }
-  await canvasdrop.kv.set("last-viewer", me.name);
-  const views = await canvasdrop.kv.increment("views"); // 1 on the first call, then 2, 3, ...
+  const me = await canvasdrop.me();                     // { id, email, name, avatarUrl, kind, canvasRole, permissions }
+  await canvasdrop.kv.user.set("last-visit", Date.now());
+  const views = await canvasdrop.kv.user.increment("visits"); // 1 on the first call, then 2, 3, ...
 </script>
 ```
 
@@ -216,7 +216,7 @@ page. The root-relative `src` resolves on the canvas's own origin in both modes.
 The canvas must have Backend switched on (see Capabilities below); `/sdk/v1.js`
 sits behind the same sign-in as the canvas.
 
-- `me()` returns `{ id, email, name, avatarUrl, kind }`. `kind` is `"member"`;
+- `me()` returns `{ id, email, name, avatarUrl, kind, canvasRole, permissions }`. `kind` is `"member"`;
   `"guest"` appears only for retained legacy guest sessions, since new Add person
   grants materialize as signed-in users.
 - `kv` (shared) and `kv.user` (per viewer, keyed server-side) have the same five
@@ -238,7 +238,7 @@ sits behind the same sign-in as the canvas.
   The provider key stays server-side.
 - `realtime.channel(name)` returns a handle with `publish(event, data)` (fire and
   forget, buffered while reconnecting), `subscribe(handler)` where `handler`
-  receives `{ event, data, from: { id, name } }` and the call returns `void`,
+  receives `{ event, data, from: { id, name, canvasRole } }` and the call returns `void`,
   `unsubscribe()` (clears every handler on the channel), `presence()` resolving to
   `[{ id, name }]`, `onPresence`, `onJoin`, `onLeave`, and `close()`. One shared
   socket per page with automatic reconnect; 30 connections per canvas, 16 KiB per
@@ -329,3 +329,31 @@ Defaults; each is an env var the operator can change.
 
 For a packaged, installable version of this guidance, see the
 [Agent skill](/docs/agents/skill).
+
+## Runtime permission contract
+
+`canvasdrop.me()` exposes server-derived `canvasRole` and `permissions`.
+Shared `kv.set/delete/increment` and shared file mutations require owner/editor.
+Use `kv.user` for private preferences and `submissions.get/set/delete(collection)`
+for the caller's own vote/form; `submissions.list/remove/clear` require owner/editor.
+Do not use client-supplied author IDs or shared counters for viewer votes.
+Private attachments use `files.upload(file, { scope: "submission" })`.
+AI and Connections default to owner/editor audiences; opt viewers in using
+`set_capabilities` fields `aiAudience` / `connectionsAudience: "viewers"`.
+Unconfigured realtime shared publishing requires owner/editor; `participants:` channels allow
+attributed viewer messages, visible to all subscribers. Role denials are
+`PERMISSION_DENIED` and never disappear by hiding UI controls.
+For cleanup use `preview_version_prune` then `prune_versions` with the exact
+returned numbers and `expectedVersionIds`; never infer bytes recovered from an estimate.
+
+For multiple authored items use `kv.collection(name)` after configuring the resource
+through `set_capabilities.runtimePolicy`. Five data/file presets: personal,
+submissions, contributions, managed, collaborative. Default modes initialize newly
+added resources; existing policies remain explicit. `expectedRuntimePolicy` must
+match `get_canvas.runtimePolicyRevision` (initially null), or saving fails with
+POLICY_CONFLICT. Author identity is immutable and server-derived. Read/create/update/
+delete/increment can be customized; mutations also require read. File attachments
+use `{collection, recordId}` and inherit the record's rights. Named channels configure
+subscribe/publish/seePresence/participatePresence, and Connections configure audience
+and methods. `me().resources` exposes effective rights. Full schema and examples:
+`/docs/sdk/permissions`.

@@ -32,6 +32,8 @@ export interface CreateFileInput {
   mime: string;
   bytes: Uint8Array;
   userId: string;
+  scope?: string;
+  recordId?: string;
 }
 
 /** The per-canvas storage key for a file blob (shared with purge via storage-keys). */
@@ -77,6 +79,8 @@ export function filesService(deps: {
           sizeBytes: input.bytes.byteLength,
           storageKey,
           uploadedBy: input.userId,
+          scope: input.scope ?? "shared",
+          recordId: input.recordId,
         });
       } catch (err) {
         // Row insert failed after the blob landed — clean up the orphan blob. The
@@ -94,13 +98,13 @@ export function filesService(deps: {
       }
     },
 
-    list(canvasId: string): Promise<FileRow[]> {
-      return files.list(canvasId);
+    list(canvasId: string, viewerId?: string): Promise<FileRow[]> {
+      return files.list(canvasId, viewerId);
     },
 
     /** Remove the file (row + blob). Returns false if it didn't exist for this canvas. */
-    async delete(canvasId: string, id: string): Promise<boolean> {
-      const row = await files.remove(canvasId, id);
+    async delete(canvasId: string, id: string, submissionAuthor?: string): Promise<boolean> {
+      const row = await files.remove(canvasId, id, submissionAuthor);
       if (!row) return false;
       // The DB row is authoritative, so a failed blob delete is best-effort — but
       // it must not be silent: the orphaned blob no longer maps to any row, so the
@@ -116,13 +120,21 @@ export function filesService(deps: {
       return true;
     },
 
+    metadata(canvasId: string, id: string) {
+      return files.findById(canvasId, id);
+    },
+    rename(canvasId: string, id: string, filename: string) {
+      return files.rename(canvasId, id, filename);
+    },
+
     /** The row + bytes for serving, or null if the id isn't this canvas's. */
     async content(
       canvasId: string,
       id: string,
+      viewerId?: string,
     ): Promise<{ row: FileRow; bytes: Uint8Array } | null> {
       const row = await files.findById(canvasId, id);
-      if (!row) return null;
+      if (!row || (viewerId && row.scope !== "shared" && row.uploadedBy !== viewerId)) return null;
       const bytes = await storage.get(row.storageKey);
       if (!bytes) return null;
       return { row, bytes };

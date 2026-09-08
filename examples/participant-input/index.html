@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poll and feedback</title>
+  <script src="/sdk/v1.js"></script>
+  <style>
+    body { font: 17px/1.5 system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1rem; color: #172335; }
+    section { border-top: 1px solid #ccd3dc; padding: 1rem 0; }
+    label { display: block; margin: .8rem 0; }
+    input, textarea, select, button { font: inherit; max-width: 100%; padding: .5rem; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 6rem; }
+    button { cursor: pointer; margin: .3rem; } pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>Poll and feedback</h1>
+  <p id="identity">Loading your access…</p>
+  <p id="status" role="status" aria-live="polite"></p>
+  <main hidden id="app">
+    <section>
+      <h2 id="question">The editors have not set a question yet.</h2>
+      <p>Your vote is visible to you and the owner and editors. Other viewers see only results an editor publishes.</p>
+      <form id="vote-form">
+        <label>Your choice <select id="choice" required disabled></select></label>
+        <button type="submit" id="vote" disabled>Save vote</button>
+        <button id="withdraw-vote" type="button">Withdraw vote</button>
+      </form>
+      <h3>Published results</h3><pre id="results">No results published.</pre>
+    </section>
+    <section>
+      <h2>Feedback</h2>
+      <p>Your feedback is visible to you and the owner and editors.</p>
+      <form id="feedback-form">
+        <label>Your response <textarea id="feedback" maxlength="8000" required></textarea></label>
+        <button type="submit">Save feedback</button><button id="withdraw-feedback" type="button">Withdraw feedback</button>
+      </form>
+    </section>
+    <section id="manage" hidden>
+      <h2>Manage this round</h2>
+      <form id="question-form">
+        <label>Question <input id="question-input" required maxlength="160"></label>
+        <label>Choices, one per line <textarea id="options-input" required></textarea></label>
+        <button type="submit">Save question</button>
+      </form>
+      <button id="publish" type="button">Publish vote totals</button>
+      <button id="review" type="button">Review feedback</button>
+      <pre id="responses"></pre>
+    </section>
+  </main>
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const cd = canvasdrop;
+    // A round id keeps answers to a previous question separate. For a new poll,
+    // publish a new round id; changing shared question text alone retains answers.
+    const round = "round-1";
+    const votes = `votes-${round}`;
+    const feedback = `feedback-${round}`;
+    const questionKey = `question-${round}`;
+    const resultsKey = `results-${round}`;
+    let question;
+    async function run(action) {
+      try { await action(); $("status").textContent = "Saved."; }
+      catch (err) { $("status").textContent = err.code === "PERMISSION_DENIED" ? "Your access changed. Reload to refresh the controls." : err.message; }
+    }
+    async function readAll(collection) {
+      const entries = [];
+      let cursor;
+      do {
+        const page = await cd.submissions.list(collection, { cursor, limit: 500 });
+        entries.push(...page.entries);
+        cursor = page.nextCursor || undefined;
+      } while (cursor);
+      return entries;
+    }
+    async function refresh() {
+      question = await cd.kv.get(questionKey);
+      $("choice").replaceChildren();
+      if (question) {
+        $("question").textContent = question.text;
+        for (const choice of question.choices) $("choice").add(new Option(choice, choice));
+        $("choice").disabled = false;
+        $("vote").disabled = false;
+        $("question-input").value = question.text;
+        $("options-input").value = question.choices.join("\n");
+      }
+      const mine = await cd.submissions.get(votes);
+      if (mine) $("choice").value = mine.value.choice;
+      const note = await cd.submissions.get(feedback);
+      $("feedback").value = note?.value.text ?? "";
+      const published = await cd.kv.get(resultsKey);
+      $("results").textContent = published ? JSON.stringify(published, null, 2) : "No results published.";
+    }
+    $("vote-form").onsubmit = (event) => { event.preventDefault(); run(() => cd.submissions.set(votes, { choice: $("choice").value })); };
+    $("feedback-form").onsubmit = (event) => { event.preventDefault(); run(() => cd.submissions.set(feedback, { text: $("feedback").value })); };
+    $("withdraw-vote").onclick = () => run(() => cd.submissions.delete(votes));
+    $("withdraw-feedback").onclick = () => run(async () => { await cd.submissions.delete(feedback); $("feedback").value = ""; });
+    $("question-form").onsubmit = (event) => {
+      event.preventDefault();
+      run(async () => {
+        const choices = [...new Set($("options-input").value.split("\n").map(s => s.trim()).filter(Boolean))];
+        if (choices.length < 2 || choices.length > 20) throw new Error("Enter 2–20 choices.");
+        await cd.kv.set(questionKey, { text: $("question-input").value, choices });
+        await refresh();
+      });
+    };
+    $("publish").onclick = () => run(async () => {
+      if (!question) throw new Error("Save a question first.");
+      const totals = Object.fromEntries(question.choices.map(choice => [choice, 0]));
+      for (const row of await readAll(votes)) {
+        const choice = row.value?.choice;
+        if (Object.hasOwn(totals, choice)) totals[choice]++;
+      }
+      await cd.kv.set(resultsKey, totals);
+      await refresh();
+    });
+    $("review").onclick = () => run(async () => {
+      $("responses").textContent = (await readAll(feedback)).map(row => `${row.userId}: ${row.value?.text ?? ""}`).join("\n\n") || "No feedback yet.";
+    });
+    try {
+      const me = await cd.me();
+      $("identity").textContent = `${me.name} · ${me.canvasRole}`;
+      if (!me.permissions.canSubmit) throw new Error("Enable Key-value storage in the Backend tab to use this example.");
+      await refresh();
+      $("manage").hidden = !me.permissions.canManageSubmissions;
+      $("app").hidden = false;
+    } catch (err) { $("status").textContent = err.message; }
+  </script>
+</body>
+</html>

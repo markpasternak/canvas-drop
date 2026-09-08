@@ -1,5 +1,11 @@
 import { Buffer } from "node:buffer";
-import { CANVAS_MAX_TAG_LENGTH, CANVAS_MAX_TAGS, type Config } from "@canvas-drop/shared";
+import {
+  CANVAS_MAX_TAG_LENGTH,
+  CANVAS_MAX_TAGS,
+  type Config,
+  PolicyConflictError,
+  runtimePolicySchema,
+} from "@canvas-drop/shared";
 import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -605,6 +611,53 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   );
 
   server.registerTool(
+    "preview_version_prune",
+    {
+      description:
+        "Preview deleting selected historical versions, or all previous versions. Returns explicit version numbers and deduplicated estimated reclaimable bytes, protecting the live version, draft and active uploads. Pass the returned numbers to prune_versions after reviewing; this tool changes nothing.",
+      inputSchema: {
+        id: z.string(),
+        versions: z.union([
+          z.literal("previous"),
+          z.array(z.number().int().positive()).min(1).max(100),
+        ]),
+      },
+    },
+    async ({ id, versions }) => {
+      const gate = await requireRole("preview_version_prune", id);
+      if ("error" in gate) return gate.error;
+      return ok(await deps.versionHistory.previewPrune(gate.canvas, versions));
+    },
+  );
+
+  server.registerTool(
+    "prune_versions",
+    {
+      description:
+        "Permanently delete an explicit selection of historical versions after preview_version_prune. Current versions are protected even after a concurrent rollback. Returns deleted and skipped numbers; storage cleanup is best-effort and no reclaimed byte count is claimed.",
+      inputSchema: {
+        id: z.string(),
+        versions: z.array(z.number().int().positive()).min(1).max(100),
+        expectedVersionIds: z
+          .record(z.string(), z.string().uuid())
+          .describe("Copy from the preview; protects against reused version numbers."),
+      },
+    },
+    async ({ id, versions, expectedVersionIds }) => {
+      const gate = await requireMutable("prune_versions", id);
+      if ("error" in gate) return gate.error;
+      return ok(
+        await deps.versionHistory.prune(
+          gate.canvas.id,
+          versions,
+          caller.userId,
+          expectedVersionIds,
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
     "delete_version",
     {
       description:
@@ -997,6 +1050,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {
         id: z.string().describe("The canvas id."),
         backendEnabled: z.boolean().optional(),
+        runtimePolicy: runtimePolicySchema
+          .optional()
+          .describe(
+            "Complete resource policy document. Defaults initialize new resources; preserve existing entries. Requires expectedRuntimePolicy from get_canvas.runtimePolicyRevision.",
+          ),
+        expectedRuntimePolicy: z.string().max(65536).nullable().optional(),
+        aiAudience: z
+          .enum(["editors", "viewers"])
+          .optional()
+          .describe("Who can use AI; defaults to editors (includes owner)."),
+        connectionsAudience: z
+          .enum(["editors", "viewers"])
+          .optional()
+          .describe("Who can use admin-granted connections; defaults to editors."),
         kv: z.boolean().optional(),
         files: z.boolean().optional(),
         ai: z.boolean().optional(),
@@ -1010,7 +1077,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const cv = gate.canvas;
       const fields = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
       if (Object.keys(fields).length === 0) return ok(await viewWithIdentity(cv, gate.role));
-      const updated = await deps.canvases.updateCapabilities(cv.id, fields);
+      let updated: Canvas;
+      try {
+        updated = await deps.canvases.updateCapabilities(cv.id, fields);
+      } catch (error) {
+        if (error instanceof PolicyConflictError) return fail(`${error.code}: ${error.message}`);
+        throw error;
+      }
       deps.audit.recordAudit({
         action: "capabilities_update",
         actorId: caller.userId,

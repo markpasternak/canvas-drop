@@ -27,6 +27,46 @@ const fetchMock = (impl?: FetchLike) => vi.fn<FetchLike>(impl ?? (async () => re
 
 const ctx: CanvasContext = { slug: "foo", apiBase: "https://canvases.example.com" };
 
+it("uses authored collection routes and sends attachment bindings without changing scope", async () => {
+  const fetch = fetchMock(async () =>
+    res(200, { id: "record-1", authorId: "server-user", value: 1, count: 3 }),
+  );
+  const client = createClient({ context: ctx, fetch });
+  const comments = client.kv.collection("comments");
+  await comments.create({ text: "hello" });
+  expect(fetch.mock.calls.at(-1)?.[0]).toBe(
+    "https://canvases.example.com/v1/c/foo/collections/comments",
+  );
+  expect(fetch.mock.calls.at(-1)?.[1]).toMatchObject({
+    method: "POST",
+    body: JSON.stringify({ text: "hello" }),
+  });
+  await comments.update("record-1", { text: "changed" });
+  expect(fetch.mock.calls.at(-1)?.[1]?.method).toBe("PUT");
+  await comments.increment("record-1", 2);
+  expect(fetch.mock.calls.at(-1)?.[0]).toContain("/record-1/increment");
+  expect(await comments.count()).toBe(3);
+  await comments.list({ limit: 1, cursor: "next" });
+  expect(fetch.mock.calls.at(-1)?.[0]).toContain("?cursor=next&limit=1");
+  await comments.permissions();
+  expect(fetch.mock.calls.at(-1)?.[0]).toContain("/comments/permissions");
+  await comments.clear();
+  expect(fetch.mock.calls.at(-1)?.[1]?.method).toBe("DELETE");
+  await client.files.upload(new File(["image"], "image.txt"), {
+    collection: "comments",
+    recordId: "record-1",
+  });
+  const form = fetch.mock.calls.at(-1)?.[1]?.body as FormData;
+  expect(form.get("collection")).toBe("comments");
+  expect(form.get("recordId")).toBe("record-1");
+  expect(form.has("scope")).toBe(false);
+  await client.files.rename("file-1", "new.txt");
+  expect(fetch.mock.calls.at(-1)?.[1]).toMatchObject({
+    method: "PATCH",
+    body: JSON.stringify({ name: "new.txt" }),
+  });
+});
+
 describe("detectContext", () => {
   it("path mode: /c/{slug}/ → slug + same-origin API base", () => {
     expect(
@@ -795,5 +835,92 @@ describe("realtime", () => {
     ch.close();
     await expect(p).rejects.toBeInstanceOf(CanvasdropError);
     await expect(p).rejects.toMatchObject({ code: "CHANNEL_CLOSED" });
+  });
+});
+
+it("sends participant upload scope and exposes typed role denials", async () => {
+  const { PermissionDeniedError } = await import("./index.js");
+  const fetch = fetchMock()
+    .mockResolvedValueOnce(res(200, { id: "f1", name: "answer.txt", size: 1 }))
+    .mockResolvedValueOnce(
+      res(403, {
+        code: "PERMISSION_DENIED",
+        message: "Editors only",
+        hint: "Request editor access",
+      }),
+    );
+  const client = createClient({ context: ctx, fetch });
+  await client.files.upload(new File(["x"], "answer.txt"), { scope: "submission" });
+  const body = fetch.mock.calls[0]?.[1]?.body;
+  if (!(body instanceof FormData)) throw new Error("expected form data");
+  expect(body.get("scope")).toBe("submission");
+  await expect(client.kv.set("question", "changed")).rejects.toBeInstanceOf(PermissionDeniedError);
+});
+
+it("surfaces a realtime role denial through the channel error callback", () => {
+  const client = realtimeClient();
+  const channel = client.realtime.channel("slides");
+  const onError = vi.fn();
+  channel.onError(onError);
+  channel.subscribe(() => {});
+  const ws = lastWs();
+  ws.open();
+  ws.emit({ type: "error", channel: "slides", code: "PERMISSION_DENIED", message: "Editors only" });
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: "PermissionDeniedError",
+      code: "PERMISSION_DENIED",
+      status: 403,
+    }),
+  );
+  channel.close();
+});
+
+describe("submissions", () => {
+  it("uses caller-scoped endpoints and preserves attribution and null values", async () => {
+    const fetch = fetchMock(async () =>
+      res(200, { userId: "server-user", value: null, updatedAt: 42 }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    expect(await client.submissions.set("poll", null)).toEqual({
+      userId: "server-user",
+      value: null,
+      updatedAt: 42,
+    });
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll/mine"),
+      expect.objectContaining({ method: "PUT", body: "null", credentials: "include" }),
+    );
+    expect((await client.submissions.get("poll"))?.userId).toBe("server-user");
+    await client.submissions.delete("poll");
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll/mine"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    fetch.mockResolvedValueOnce(res(404, { code: "NOT_FOUND" }));
+    expect(await client.submissions.get("missing")).toBeNull();
+    fetch.mockResolvedValueOnce(res(403, { code: "PERMISSION_DENIED" }));
+    await expect(client.submissions.list("poll")).rejects.toMatchObject({
+      name: "PermissionDeniedError",
+    });
+  });
+  it("encodes review pagination and targeted removal separately from withdrawal", async () => {
+    const fetch = fetchMock();
+    const client = createClient({ context: ctx, fetch });
+    await client.submissions.list("poll", { cursor: "author-id", limit: 3 });
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll?cursor=author-id&limit=3"),
+      expect.objectContaining({ method: "GET" }),
+    );
+    await client.submissions.remove("poll", "author/id");
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/submissions/poll/author%2Fid"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    await client.submissions.clear("poll");
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringMatching(/\/submissions\/poll$/),
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });

@@ -95,7 +95,7 @@ declares, or inflates to, more than 25 MB is rejected before it can exhaust memo
 
 - `url`: the canvas URL (`{scheme}//{slug}.{host}/` in `subdomain` mode,
   `{base}/c/{slug}/` in `path` mode).
-- `version`: the new version number; it only ever increases for a canvas.
+- `version`: the new version number; use the immutable version ID to identify a historical snapshot: a number can be reused after its row is deleted.
 - `fileCount` / `totalBytes`: files and bytes in the version, after stripping.
 - `warnings[]`: non-fatal notices. Three exist: `<path> will be served as text/plain`
   (the extension is unknown, or is a server-side script type such as `.php`, so the

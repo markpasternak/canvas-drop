@@ -1,4 +1,9 @@
-import { computeSearchText, searchTextPatterns } from "@canvas-drop/shared";
+import {
+  computeSearchText,
+  PolicyConflictError,
+  runtimePolicySchema,
+  searchTextPatterns,
+} from "@canvas-drop/shared";
 import { FEATURE_CAPABILITIES, FEATURE_COLUMN } from "@canvas-drop/shared/capabilities";
 import {
   type AccessRole,
@@ -101,6 +106,10 @@ export interface CreateCanvasInput {
  * re-enabling backend restores the prior per-feature choices (KTD-2).
  */
 export interface CanvasCapabilitiesPatch {
+  runtimePolicy?: import("@canvas-drop/shared").RuntimePolicy;
+  expectedRuntimePolicy?: string | null;
+  aiAudience?: "editors" | "viewers";
+  connectionsAudience?: "editors" | "viewers";
   backendEnabled?: boolean;
   kv?: boolean;
   files?: boolean;
@@ -1431,14 +1440,35 @@ export function canvasesRepository(client: DbClient) {
      */
     async updateCapabilities(id: string, patch: CanvasCapabilitiesPatch): Promise<Canvas> {
       const set: Record<string, unknown> = { updatedAt: nextUpdatedAt() };
+      if (patch.runtimePolicy !== undefined) {
+        if (patch.expectedRuntimePolicy === undefined) throw new PolicyConflictError();
+        set.runtimePolicy = JSON.stringify(runtimePolicySchema.parse(patch.runtimePolicy));
+      }
       if (patch.backendEnabled !== undefined) set.backendEnabled = patch.backendEnabled;
+      if (patch.aiAudience !== undefined) set.aiAudience = patch.aiAudience;
+      if (patch.connectionsAudience !== undefined)
+        set.connectionsAudience = patch.connectionsAudience;
       // Map each present feature flag to its column via the shared taxonomy, so the
       // cap→column mapping has one source of truth (FEATURE_COLUMN).
       for (const cap of FEATURE_CAPABILITIES) {
         const value = patch[cap];
         if (value !== undefined) set[FEATURE_COLUMN[cap]] = value;
       }
-      const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
+      const rows = await db
+        .update(t)
+        .set(set)
+        .where(
+          and(
+            eq(t.id, id),
+            patch.runtimePolicy === undefined
+              ? undefined
+              : patch.expectedRuntimePolicy === null
+                ? sql`${t.runtimePolicy} is null`
+                : sql`${t.runtimePolicy} = ${patch.expectedRuntimePolicy}`,
+          ),
+        )
+        .returning();
+      if (!rows[0]) throw new PolicyConflictError();
       return rows[0] as Canvas;
     },
 

@@ -164,7 +164,11 @@ export function versionsRepository(client: DbClient) {
      * belongs to another canvas, or is current. Storage is intentionally left
      * alone; the caller runs the per-canvas mark-sweep after row deletion.
      */
-    async deleteReadyNonCurrent(canvasId: string, number: number): Promise<Version | null> {
+    async deleteReadyNonCurrent(
+      canvasId: string,
+      number: number,
+      expectedId?: string,
+    ): Promise<Version | null> {
       const liveCurrent = db
         .select({ id: canvasesT.currentVersionId })
         .from(canvasesT)
@@ -175,6 +179,7 @@ export function versionsRepository(client: DbClient) {
           and(
             eq(t.canvasId, canvasId),
             eq(t.number, number),
+            expectedId ? eq(t.id, expectedId) : undefined,
             eq(t.status, "ready"),
             notInArray(t.id, liveCurrent),
           ),

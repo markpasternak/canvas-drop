@@ -127,7 +127,7 @@ remediation string.
 Capability: `identity` (on whenever the canvas backend is on).
 
 ```
-GET {base}/v1/c/{slug}/me   → 200 { id, email, name, avatarUrl, kind }
+GET {base}/v1/c/{slug}/me   → 200 { id, email, name, avatarUrl, kind, canvasRole, permissions }
 ```
 
 `avatarUrl` may be `null`. `kind` is `"member"` for a signed-in org member; `"guest"` is
@@ -139,7 +139,8 @@ visitor never reaches this handler: a Public link canvas answers `STATIC_ONLY` f
 
 Capability: `kv`. Two scopes with the same five routes:
 
-- Shared at `/kv`: one namespace for every viewer of the canvas.
+- Shared at `/kv`: admitted viewers read; owners/editors alone set, delete or increment.
+  A viewer mutation returns `403 PERMISSION_DENIED`.
 - Per-viewer at `/kv/user`: scoped to the caller's server-resolved user id. The client
   never names the scope, and `user` is never read as a key.
 
@@ -176,7 +177,7 @@ Capability: `files`.
 
 ```
 POST   {base}/v1/c/{slug}/files              upload   → 201 { id, name, size, url }
-GET    {base}/v1/c/{slug}/files              list     → 200 { files: [{ id, name, size, mime, createdAt }] }
+GET    {base}/v1/c/{slug}/files              list     → 200 { files: [{ id, name, size, mime, createdAt, scope, uploadedBy }] }
 GET    {base}/v1/c/{slug}/files/{id}/content download → 200 raw bytes          404 NOT_FOUND
 DELETE {base}/v1/c/{slug}/files/{id}         delete   → 200 { ok: true }       404 NOT_FOUND
 ```
@@ -329,7 +330,7 @@ Server to client:
 | Frame | Meaning |
 |---|---|
 | `{"type":"subscribed","channel"}` | Subscription confirmed. |
-| `{"type":"message","channel","event","data","from":{id,name}}` | A published message. `from` is resolved server-side; a client cannot spoof it. |
+| `{"type":"message","channel","event","data","from":{id,name,canvasRole}}` | A published message. `from` is resolved server-side; a client cannot spoof it. |
 | `{"type":"presence","channel","users":[{id,name}]}` | Current members. |
 | `{"type":"join"\|"leave","channel","user":{id,name}}` | Membership change. |
 | `{"type":"error","code","message"}` | `MESSAGE_TOO_LARGE` (> 16 KiB), `INVALID_FRAME` (not JSON), `CHANNEL_NAME_TOO_LARGE` (> 128 bytes), `CHANNEL_LIMIT` (> 64 channels on one connection), `RATE_LIMITED` (> 100 publishes per minute on one connection), `UNKNOWN_FRAME`. |
@@ -458,3 +459,97 @@ capability-gated and uses the `management` rate-limit class
 
 Every `code` is stable; branch on it, never on message text. The full list, with the
 SDK's exception classes, is on [Error codes](/docs/api/errors).
+
+## Submissions and operation permissions
+
+The runtime identity adds `canvasRole: "owner" | "editor" | "viewer"` and
+[`permissions`](/docs/sdk/identity). Both come from the live server-side access
+context. Admin status never implies a runtime owner/editor role. Permission
+checks remain authoritative on each operation; changing the identity JSON or
+request body cannot grant a role.
+
+Submissions use the `kv` capability and its usage/rate-limit bucket, with a
+separate internal scope. `{collection}` is 1–80 ASCII letters, digits, dots,
+underscores or hyphens, starting with a letter or digit.
+
+| Request under `/v1/c/{slug}` | Allowed caller | Response |
+|---|---|---|
+| `PUT /submissions/{collection}/mine` | Admitted viewer | Raw JSON body, ≤64 KiB including transport; `200 { userId, value, updatedAt }`. Upsert one response per authenticated user and collection. JSON `null` is a valid value. |
+| `GET /submissions/{collection}/mine` | Admitted viewer | Own `{ userId, value, updatedAt }`, or `404 NOT_FOUND`. |
+| `DELETE /submissions/{collection}/mine` | Admitted viewer | Withdraw own response; `200 { ok: true }`, idempotent. |
+| `GET /submissions/{collection}?cursor=&limit=` | Owner/editor | `{ entries: [{ userId, value, updatedAt }], nextCursor }`; default 100, integer limit 1–1000. Pass a returned cursor unchanged. |
+| `DELETE /submissions/{collection}/{userId}` | Owner/editor | Remove that author's response; `200 { ok: true }`. |
+| `DELETE /submissions/{collection}` | Owner/editor | Clear that collection; `200 { ok: true }`. |
+
+Pagination cursors and removal user IDs accept up to 128 ASCII letters, digits,
+colons or hyphens (including retained `guest:` identities). Malformed collections,
+IDs, cursors or limits return `400 INVALID_BODY`. Values over 64 KiB return
+`413 VALUE_TOO_LARGE`; new submissions over a key-count quota return `409 KEY_LIMIT`.
+Across collections the defaults are 10,000 submissions/canvas and 1,000/author;
+the existing `kv.keys.shared` and `kv.keys.user` admin limits apply separately to
+this scope. Updates and withdrawals remain possible at the count limit.
+Submissions never expose `kv.user` preferences. Reads are `private, no-store`;
+mutation audit records contain metadata, not response values.
+
+File upload accepts multipart `scope=shared|submission` (omitted means shared).
+Shared upload/delete require owner/editor. Submission files can be uploaded by
+viewers, and listed/read/deleted by their author or owners/editors. A viewer list
+includes shared files and their own submissions. Another person's private file
+returns `404 NOT_FOUND`, including its content URL. Stored files from before the
+upgrade remain shared; content responses are `private, no-store`.
+
+AI and Connections additionally require their canvas audience to allow the
+caller: `aiAudience` and `connectionsAudience` default to `"editors"`; `"viewers"`
+opts in admitted signed-in viewers. Existing feature, provider, admin grant,
+legacy guest and static-only gates still apply. A role denial is
+`403 PERMISSION_DENIED`, represented by SDK `PermissionDeniedError`.
+
+Without an explicit channel policy, realtime publishing is owner/editor-only on ordinary channels. Channels prefixed
+`participants:` permit admitted viewers to publish attributed events. Everyone
+admitted can subscribe; these are not private submission channels. Before each
+publish the server revalidates access and stamps `from.canvasRole`. A disallowed
+publish returns `{ type: "error", code: "PERMISSION_DENIED", channel, message }`;
+the SDK delivers it through `channel.onError`.
+
+## Authored collections and resource permissions
+
+A collection is a named group of authored JSON records within the KV primitive.
+Its name identifies the group, while its policy controls access to the records.
+Different collections can have different policies or share a preset without
+sharing data. Changing a policy preserves record membership and authorship.
+The [Data storage guide](/docs/sdk/kv#what-a-collection-is) explains the model and
+when to use collections instead of shared or personal key-value pairs.
+
+The [complete policy guide](/docs/sdk/permissions) defines the five presets,
+defaults, overrides and management/MCP configuration. Runtime routes require a
+configured collection, effective KV and the live caller's resource rights. All
+responses are `private, no-store`; author identity is immutable and server-derived.
+
+| Route (under `/v1/c/{slug}`) | Behavior |
+|---|---|
+| `POST /collections/{name}` | JSON value → `201 {id, authorId, value, updatedAt}` |
+| `GET /collections/{name}?limit=&cursor=` | Visible records, `{entries, nextCursor}`; pagination 1–1000, default 100 |
+| `GET /collections/{name}/{id}` | Visible record or 404 |
+| `PUT /collections/{name}/{id}` | Replace value; require read/update, preserve author |
+| `DELETE /collections/{name}/{id}` | Require read/delete; `{ok, attachmentCleanupFailed}` |
+| `DELETE /collections/{name}` | Delete only readable/deletable records; `{deleted, attachmentCleanupFailed}` |
+| `POST /collections/{name}/{id}/increment` | `{by: number}` → numeric record, atomic; no upsert |
+| `GET /collections/{name}/permissions` | Effective operation rights, each `{own, any}` |
+| `GET /collections/{name}/count` | `{count}` only with explicit aggregateCount audience |
+
+Unknown collection → `404 COLLECTION_NOT_CONFIGURED`; invalid name/pagination/JSON
+→ `400 INVALID_BODY`; inaccessible record → `404 NOT_FOUND`; forbidden operation
+→ `403 PERMISSION_DENIED`; oversized value → `413 VALUE_TOO_LARGE`; creation quota
+→ `409 KEY_LIMIT`; nonnumeric increment → `409 NOT_NUMERIC`. JSON null is supported.
+
+File uploads additionally accept either multipart `group`, or `collection` plus
+`recordId`, mutually exclusive with legacy `scope`. Bound files inherit record
+rights; standalone groups use file policies. `PATCH /files/{id}` with `{name}`
+renames a readable/updatable file (nonempty name, at most 255 characters).
+Lists and content URLs honor the same read policy. Deleted parents hide their
+attachments immediately and trigger cleanup.
+
+`me()` adds `resources` for named collections, groups, channels and Connections,
+plus `permissions.canCreateCanvas`. Channel policies separately gate receiving,
+publishing and presence; configured policies override prefix defaults and apply to
+open sockets. Per-Connection audiences/methods intersect administrator grants.

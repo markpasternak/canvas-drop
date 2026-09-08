@@ -7,6 +7,24 @@ Internal status ledger, moved from the README so its entry point stays focused o
 
 Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usage stats, server-side list filters and search, the docs system (`/docs`, `/llms.txt`, `/skill.zip`), clone-as-template, custom slugs, the MCP server (47 tools, dashboard parity), the staged content-addressed upload, the signed-out landing page, preview covers with an optional screenshot pipeline, admin-flippable [design skins](site/self-hosting/configuration.md#design-skins), the org boundary (tenancy) with teams and auth-delegated invites, the [authoring capability](site/sdk/authoring.md) and managed shares, prompt caching for the AI proxy, version download and delete, the org-scoped gallery, popularity sort and bulk actions, **editor roles with ownership transfer**, the simplified **Sharing and permissions** hierarchy with direct/team viewer clone parity, and admin-granted [outbound Connections](site/sdk/connections.md).
 
+The [participant permissions and version cleanup round](plans/2026-09-08-001-feat-runtime-permissions-version-pruning-plan.md)
+is in review under [issue #116](https://github.com/markpasternak/canvas-drop/issues/116).
+It adds selected/all-previous version cleanup, runtime identity roles/permissions,
+authored collections and inherited attachments, five data/file presets, easy defaults,
+advanced operation rights, per-channel realtime rights and per-Connection policies.
+The [policy extension plan](plans/2026-09-08-002-feat-primitive-policy-defaults-plan.md)
+supersedes the initial narrow submissions model. Its two pruning tools bring the
+proposed MCP surface to 49. This round is **not merged or deployed**. A read-only
+production impact audit was completed; app adaptations and production validation
+remain deployment preparation. See the [upgrade guide](site/self-hosting/runtime-upgrade.md).
+The [rollout-readiness follow-up](plans/2026-09-08-003-feat-permission-admin-and-rollout-readiness-plan.md)
+adds read-only permission details to the admin inspector and updates marketing,
+README and administration guidance. There is one permission model; affected apps
+must be adapted to preserve their intended interactions before rollout.
+The [resource-model documentation follow-up](plans/2026-09-08-004-docs-resource-model-explanation-plan.md)
+introduces the feature/resource/policy distinction, storage choices and per-resource
+settings across the docs, agent skill, examples and Backend help text.
+
 **M10 ops/packaging is the one open milestone.**
 
 The [admin operations round](plans/2026-09-06-001-feat-admin-operations-plan.md), tracked

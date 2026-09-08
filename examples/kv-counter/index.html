@@ -33,7 +33,8 @@
     <button id="bump" type="button" disabled>Count +1</button>
     <p>
       Backed by the KV primitive: <code>canvasdrop.kv.increment("count")</code>.
-      The value is shared and atomic — open this canvas in two tabs and watch it agree.
+      Everyone admitted can read the value. Owners and editors can increment it.
+      For viewer votes and forms, use the participant-input example.
     </p>
   </main>
 
@@ -58,7 +59,9 @@
 
     try {
       await refresh();
-      btn.disabled = false;
+      const me = await canvasdrop.me();
+      btn.disabled = !me.permissions.canWriteSharedData;
+      if (btn.disabled) btn.textContent = "Only owners and editors can count";
     } catch (err) {
       out.textContent = "—";
       btn.textContent = "KV unavailable";

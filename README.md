@@ -91,14 +91,34 @@ Create the canvas first and copy its deploy key from the dashboard. Each key pub
 
 ## Give a canvas a backend
 
-In the canvas's **Backend** tab, enable the capabilities it needs. Load the SDK from the canvas page:
+In the canvas's **Backend** tab, enable the capabilities it needs.
+
+The backend features (primitives) provide different kinds of named resources:
+**Data storage (KV) → collections** of authored records, **Files → file groups**
+of uploads, and **Realtime → channels** for messages and presence. Each resource
+has its own permission settings. A collection groups data; a policy controls access
+to that data. Two collections can have the same or different policies. See
+[Data storage](docs/site/sdk/kv.md) to choose shared values, private preferences or collections.
+
+Choose Read only, Participation or Collaboration as the default for new resources.
+Collections and file groups have five presets; advanced controls customize individual
+operations, realtime channels and Connections. Viewers can contribute and manage their
+own items without becoming canvas editors. See [Permissions and defaults](docs/site/sdk/permissions.md).
+
+The Backend tab manages these policies; the admin inspector shows their configuration.
+`me()` exposes the caller's role and effective permissions. Existing interactive
+canvases need their code, data and policies adapted before rollout so comments,
+forms and live signals keep their intended behavior. There is one permission model;
+see the [upgrade guide](docs/site/self-hosting/runtime-upgrade.md).
+
+Load the SDK from the canvas page:
 
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">
   const viewer = await canvasdrop.me();
-  const votes = await canvasdrop.kv.increment("votes", 1);
-  document.body.textContent = `${viewer.name}: ${votes} votes so far`;
+  const response = await canvasdrop.submissions.set("poll", { choice: "blue" });
+  document.body.textContent = `${viewer.name}: your ${response.value.choice} vote is saved`;
 </script>
 ```
 
@@ -131,7 +151,7 @@ People, public-link availability, usage, quotas, AI providers, and appearance re
 manageable from the dashboard. Configured AI providers and outbound Connections can send
 data to the services you choose.
 
-A canvas can contain up to **100 MB**, **2,000 files**, and **25 MB per file**. The last **10 published versions** are retained. Version recovery restores the published files; live backend data has its own lifecycle. Use the instance backup tools to protect the full database and stored files.
+A canvas can contain up to **100 MB**, **2,000 files**, and **25 MB per file**. The last **10 published versions** are retained. Owners and editors can delete selected history or all previous versions after reviewing a deduplicated space estimate. The current version and retained file references are protected. Version recovery restores the published files; live backend data has its own lifecycle. Use the instance backup tools to protect the full database and stored files.
 
 - [Configuration reference](https://canvas-drop.com/docs/self-hosting/configuration)
 - [Sharing and access](https://canvas-drop.com/docs/authoring/sharing)

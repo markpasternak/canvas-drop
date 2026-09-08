@@ -1,7 +1,7 @@
 /* Realtime — one channel, ephemeral presence + pub/sub (chat) + a live poll. */
 import { $, cd, escapeHtml, guard, logLine, onAct, showState } from "./lib.js";
 
-const CHANNEL = "lobby";
+const CHANNEL = "participants:lobby";
 const POLL_OPTS = ["kv", "files", "ai", "realtime"];
 const votes = Object.fromEntries(POLL_OPTS.map((o) => [o, 0]));
 
@@ -46,6 +46,9 @@ export function mount() {
   renderPoll();
 
   channel = cd().realtime.channel(CHANNEL);
+  channel.onError((err) => {
+    $("#rt-msg").placeholder = err.message;
+  });
   channel.onPresence(renderPresence);
   channel.onJoin((u) =>
     logLine($("#rt-log"), `<span class="key">→ ${escapeHtml(u.name || u.id)} joined</span>`),

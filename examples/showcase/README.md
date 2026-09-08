@@ -47,3 +47,9 @@ the full demo.
 
 **Presence** lists *distinct* signed-in people, so opening two tabs as the same
 user counts once. Broadcasts and the poll still sync across every connection.
+
+Shared KV edits require owner/editor. Viewers use private file submissions; the
+file list contains shared files plus their own uploads. Chat/reactions use the
+`participants:lobby` channel and are visible to all its subscribers. AI defaults
+to owners/editors; select All signed-in viewers in Backend for a viewer AI demo.
+For durable private polls/forms and editor-published totals see `../participant-input/`.

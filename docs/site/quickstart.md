@@ -131,7 +131,7 @@ and the SDK works out which canvas it is running in from the page URL:
 <script src="/sdk/v1.js"></script>
 <script type="module">
   const me = await canvasdrop.me();
-  const views = await canvasdrop.kv.increment("views"); // 1, then 2, ...
+  await canvasdrop.kv.user.set("theme", "dark"); // this person's private preference
 </script>
 ```
 
@@ -145,6 +145,12 @@ needs `CANVAS_DROP_AI_API_KEY` set on the server, realtime needs
 `CANVAS_DROP_REALTIME=on` (the default). A call to a primitive that is not live
 throws `CapabilityDisabledError`. See the [SDK overview](/docs/sdk/overview) and
 [Capabilities](/docs/authoring/capabilities).
+
+For comments or other authored items, configure a named **collection** inside
+Key-value storage. Each collection has its own access policy. Files can use named
+**file groups**; Realtime uses named **channels**. See [Data storage](/docs/sdk/kv)
+to choose shared values, private preferences or collections, and
+[Permissions and defaults](/docs/sdk/permissions) for the resource mapping.
 
 Connections are granted separately by an administrator. They let a canvas call one
 pre-approved HTTPS origin with controlled methods and protected headers—for example, a

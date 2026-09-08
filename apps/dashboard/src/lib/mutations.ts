@@ -149,6 +149,9 @@ export function useUpdateCapabilities(id: string) {
   return useMutation({
     scope: { id: `capabilities-${id}` },
     mutationFn: (patch: CanvasCapabilitiesPatch) => api.updateCapabilities(id, patch),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.canvas(id), data);
+    },
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: keys.canvas(id) });
       const prev = qc.getQueryData<Canvas>(keys.canvas(id));
@@ -173,6 +176,8 @@ export function useUpdateCapabilities(id: string) {
         const optimistic: Canvas = {
           ...prev,
           backendEnabled,
+          aiAudience: patch.aiAudience ?? prev.aiAudience,
+          connectionsAudience: patch.connectionsAudience ?? prev.connectionsAudience,
           capabilities,
           effective: {
             identity: backendEnabled,
@@ -237,18 +242,6 @@ export function useRollback(id: string) {
       qc.invalidateQueries({ queryKey: keys.canvas(id) });
       qc.invalidateQueries({ queryKey: keys.versions(id) });
       qc.invalidateQueries({ queryKey: keys.canvases });
-    },
-  });
-}
-
-/** Permanently remove a non-current published version. */
-export function useDeleteVersion(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (version: number) => api.deleteVersion(id, version),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.versions(id) });
-      qc.invalidateQueries({ queryKey: keys.draft(id) });
     },
   });
 }

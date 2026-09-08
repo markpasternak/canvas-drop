@@ -8,6 +8,7 @@ import { costUsd, isPricedModel } from "../ai/pricing.js";
 import type { ChatUsage, ModelProvider } from "../ai/provider.js";
 import { checkQuota, dayStartUtc, monthStartUtc } from "../ai/quota.js";
 import { requireCapability } from "../canvas/capability-guard.js";
+import { permissionDenied, runtimeAudienceAllows } from "../canvas/runtime-permissions.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
@@ -149,6 +150,8 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
     if (isGuest && canvas.guestAiCap > 0 && canvasSpend >= canvas.guestAiCap) {
       return c.json({ code: "GUEST_AI_CAP", scope: "guest" }, 429);
     }
+    if (!runtimeAudienceAllows(c, canvas.aiAudience)) return permissionDenied(c, "use AI");
+
     // USD caps are admin-tunable defaults (DB override ?? env), resolved per call so
     // an admin lowering the spend cap to halt runaway cost takes effect immediately.
     const [userDailyUsd, canvasMonthlyUsd] = settings

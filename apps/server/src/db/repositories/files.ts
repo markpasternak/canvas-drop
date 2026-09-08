@@ -1,5 +1,5 @@
 import { type FileRow, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 export interface NewFileInput {
@@ -10,6 +10,8 @@ export interface NewFileInput {
   sizeBytes: number;
   storageKey: string;
   uploadedBy: string;
+  scope?: string;
+  recordId?: string;
 }
 
 /**
@@ -24,6 +26,12 @@ export function filesRepository(client: DbClient) {
   const t = client.dialect === "sqlite" ? sqliteSchema.files : pgSchema.files;
 
   return {
+    async rename(canvasId: string, id: string, filename: string): Promise<void> {
+      await db
+        .update(t)
+        .set({ filename })
+        .where(and(eq(t.canvasId, canvasId), eq(t.id, id)));
+    },
     async insert(input: NewFileInput): Promise<FileRow> {
       const rows = await db
         .insert(t)
@@ -32,11 +40,16 @@ export function filesRepository(client: DbClient) {
       return rows[0] as FileRow;
     },
 
-    async list(canvasId: string): Promise<FileRow[]> {
+    async list(canvasId: string, viewerId?: string): Promise<FileRow[]> {
       return (await db
         .select()
         .from(t)
-        .where(eq(t.canvasId, canvasId))
+        .where(
+          and(
+            eq(t.canvasId, canvasId),
+            viewerId ? or(eq(t.scope, "shared"), eq(t.uploadedBy, viewerId)) : undefined,
+          ),
+        )
         .orderBy(desc(t.createdAt))) as FileRow[];
     },
 
@@ -55,10 +68,18 @@ export function filesRepository(client: DbClient) {
     },
 
     /** Delete the row if it belongs to the canvas; returns it (for blob cleanup) or null. */
-    async remove(canvasId: string, id: string): Promise<FileRow | null> {
+    async remove(canvasId: string, id: string, submissionAuthor?: string): Promise<FileRow | null> {
       const rows = (await db
         .delete(t)
-        .where(and(eq(t.canvasId, canvasId), eq(t.id, id)))
+        .where(
+          and(
+            eq(t.canvasId, canvasId),
+            eq(t.id, id),
+            submissionAuthor
+              ? and(eq(t.scope, "submission"), eq(t.uploadedBy, submissionAuthor))
+              : undefined,
+          ),
+        )
         .returning()) as FileRow[];
       return rows[0] ?? null;
     },

@@ -36,7 +36,7 @@ describe("docs routes", () => {
     const res = await app().request("/docs/sdk/kv");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Key–value storage");
+    expect(html).toContain("Data storage (KV)");
     expect(html).toContain('href="/docs/sdk/kv" aria-current="page"');
   });
 

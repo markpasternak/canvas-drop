@@ -129,3 +129,22 @@ also restrict the Canvas Drop server's network egress as defense in depth.
 
 Public-link visitors can never use Connections. If an audience needs this
 backend, use Restricted or Whole org access and grant people or teams as needed.
+
+## Audience permission
+
+A named Connection policy can override the canvas audience and restrict HTTP
+methods. In `runtimePolicy.connections`, set `{audience: "viewers", methods: ["GET"]}`
+for the intended profile key. Administrator grants and approved methods remain an
+upper bound. `none` denies invocation, including owners/editors; omit methods to
+use the administrator's allowed set, or use `[]` to deny every method. Read effective
+rights from `me().resources.connections[key]`. External item ownership must be
+enforced by the upstream service. See [Permissions and defaults](/docs/sdk/permissions).
+
+This feature defaults to owners and editors (`connectionsAudience: "editors"`). To allow
+signed-in viewers, an owner or editor selects **All signed-in viewers** under
+**Connection access** in the Backend tab, or sets `connectionsAudience: "viewers"` with
+`set_capabilities` / `PATCH /api/canvases/{id}/capabilities`.
+A disallowed caller receives `403 PERMISSION_DENIED` (`PermissionDeniedError`)
+before a provider or upstream request starts. The setting leaves existing
+capability, public/static-only, quota and operator policy gates in place.
+Check `me().permissions` when rendering the feature's controls.

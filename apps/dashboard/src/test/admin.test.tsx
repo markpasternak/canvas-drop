@@ -416,7 +416,19 @@ describe("admin dashboard", () => {
     expect(calls.some((c) => c.path.endsWith("operations/execute"))).toBe(false);
   });
   const inspection = {
-    canvas: { ...ROW, ownerId: "u1", orgId: null, backendEnabled: true },
+    canvas: {
+      ...ROW,
+      ownerId: "u1",
+      orgId: null,
+      backendEnabled: true,
+      runtimePolicy: {
+        defaultMode: "participation",
+        collections: { comments: { preset: "contributions" } },
+        fileGroups: {},
+        channels: {},
+        connections: {},
+      },
+    },
     owner: { ...ROW.owner, blocked: false },
     people: [],
     teams: [],
@@ -454,6 +466,11 @@ describe("admin dashboard", () => {
       inspect: "c1",
     });
     expect(within(dialog).getByText("alice@example.com")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Collection comments: Shared contributions"),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByText("Collection comments: Shared contributions"));
+    expect(within(dialog).getAllByText("Author, owners and editors").length).toBeGreaterThan(0);
     await user.type(within(dialog).getByLabelText("Person's email"), "guest@example.com");
     await user.click(within(dialog).getByRole("button", { name: "Check access" }));
     expect(await within(dialog).findByText("Password required")).toBeInTheDocument();

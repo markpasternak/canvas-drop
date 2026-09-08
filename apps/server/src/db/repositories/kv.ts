@@ -1,5 +1,5 @@
 import { type Json, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 /** Thrown by `increment` when the existing value is present but not a number. */
@@ -15,6 +15,13 @@ export interface KvListResult {
   entries: Array<{ key: string; value: Json }>;
   /** Pass back as `cursor` to fetch the next page; null when exhausted. */
   nextCursor: string | null;
+}
+
+export interface CollectionRecord {
+  id: string;
+  authorId: string;
+  value: Json;
+  updatedAt: number;
 }
 
 /**
@@ -33,14 +40,193 @@ export function kvRepository(client: DbClient) {
   const db = client.db as any;
   const isSqlite = client.dialect === "sqlite";
   const t = isSqlite ? sqliteSchema.kvEntries : pgSchema.kvEntries;
+  const recordFields = { id: t.key, authorId: t.authorId, value: t.value, updatedAt: t.updatedAt };
+  const recordWhere = (
+    canvasId: string,
+    collection: string,
+    author: string | null | false,
+    id?: string,
+  ) =>
+    and(
+      eq(t.canvasId, canvasId),
+      eq(t.scope, `records:${collection}`),
+      id === undefined ? undefined : eq(t.key, id),
+      author === false ? sql`false` : author === null ? undefined : eq(t.authorId, author),
+    );
 
   return {
+    async createRecord(
+      canvasId: string,
+      collection: string,
+      id: string,
+      value: Json,
+      authorId: string,
+    ): Promise<CollectionRecord> {
+      const rows = await db
+        .insert(t)
+        .values({
+          canvasId,
+          scope: `records:${collection}`,
+          key: id,
+          value,
+          authorId,
+          updatedBy: authorId,
+          updatedAt: Date.now(),
+        })
+        .returning(recordFields);
+      return rows[0];
+    },
+    async getRecord(
+      canvasId: string,
+      collection: string,
+      id: string,
+    ): Promise<CollectionRecord | null> {
+      const rows = await db
+        .select(recordFields)
+        .from(t)
+        .where(recordWhere(canvasId, collection, null, id))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+    async listRecords(
+      canvasId: string,
+      collection: string,
+      author: string | null | false,
+      limit = 100,
+      cursor?: string,
+    ): Promise<{ entries: CollectionRecord[]; nextCursor: string | null }> {
+      const rows: CollectionRecord[] = await db
+        .select(recordFields)
+        .from(t)
+        .where(
+          and(recordWhere(canvasId, collection, author), cursor ? gt(t.key, cursor) : undefined),
+        )
+        .orderBy(asc(t.key))
+        .limit(limit + 1);
+      const entries = rows.slice(0, limit);
+      return { entries, nextCursor: rows.length > limit ? (entries.at(-1)?.id ?? null) : null };
+    },
+    /** Batched parent lookup for file visibility; never crosses canvas/collection boundaries. */
+    async getRecordsByIds(
+      canvasId: string,
+      collection: string,
+      ids: string[],
+    ): Promise<CollectionRecord[]> {
+      const uniqueIds = [...new Set(ids)];
+      const records: CollectionRecord[] = [];
+      for (let offset = 0; offset < uniqueIds.length; offset += 200) {
+        records.push(
+          ...(await db
+            .select(recordFields)
+            .from(t)
+            .where(
+              and(
+                recordWhere(canvasId, collection, null),
+                inArray(t.key, uniqueIds.slice(offset, offset + 200)),
+              ),
+            )),
+        );
+      }
+      return records;
+    },
+    async countRecords(canvasId: string, collection?: string, author?: string): Promise<number> {
+      const rows = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(t)
+        .where(
+          and(
+            eq(t.canvasId, canvasId),
+            collection === undefined
+              ? sql`${t.scope} like 'records:%'`
+              : eq(t.scope, `records:${collection}`),
+            author === undefined ? undefined : eq(t.authorId, author),
+          ),
+        );
+      return Number(rows[0]?.count ?? 0);
+    },
+    async updateRecord(
+      canvasId: string,
+      collection: string,
+      id: string,
+      value: Json,
+      actorId: string,
+      author: string | null | false,
+    ): Promise<CollectionRecord | null> {
+      const rows = await db
+        .update(t)
+        .set({ value, updatedBy: actorId, updatedAt: Date.now() })
+        .where(recordWhere(canvasId, collection, author, id))
+        .returning(recordFields);
+      return rows[0] ?? null;
+    },
+    async incrementRecord(
+      canvasId: string,
+      collection: string,
+      id: string,
+      by: number,
+      actorId: string,
+      author: string | null | false,
+    ): Promise<CollectionRecord | null> {
+      const numeric = isSqlite
+        ? sql`json_type(${t.value}) in ('integer', 'real')`
+        : sql`jsonb_typeof(${t.value}) = 'number'`;
+      // CASE protects the PG cast even if the planner evaluates this before the type filter.
+      const sum = isSqlite
+        ? sql`CAST(${t.value} AS REAL) + ${by}`
+        : sql`CASE WHEN ${numeric} THEN (${t.value}::text::numeric) + ${by} END`;
+      const next = isSqlite ? sum : sql`to_jsonb(${sum})`;
+      const rows = await db
+        .update(t)
+        .set({ value: next, updatedBy: actorId, updatedAt: Date.now() })
+        .where(
+          and(
+            recordWhere(canvasId, collection, author, id),
+            numeric,
+            sql`${sum} BETWEEN ${-Number.MAX_VALUE} AND ${Number.MAX_VALUE}`,
+          ),
+        )
+        .returning(recordFields);
+      return rows[0] ?? null;
+    },
+    async deleteRecords(
+      canvasId: string,
+      collection: string,
+      author: string | null | false,
+      id?: string,
+    ): Promise<string[]> {
+      const rows = await db
+        .delete(t)
+        .where(recordWhere(canvasId, collection, author, id))
+        .returning({ id: t.key });
+      return rows.map((row: { id: string }) => row.id);
+    },
     async countByCanvas(canvasId: string): Promise<number> {
       const rows = await db
         .select({ count: sql<number>`count(*)` })
         .from(t)
         .where(eq(t.canvasId, canvasId));
       return Number(rows[0]?.count ?? 0);
+    },
+
+    /** Reserved submissions scopes are unreachable through shared or personal KV. */
+    async countSubmissions(canvasId: string, userId?: string): Promise<number> {
+      const rows = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(t)
+        .where(
+          and(
+            eq(t.canvasId, canvasId),
+            sql`${t.scope} like 'submissions:%'`,
+            userId === undefined ? undefined : eq(t.key, userId),
+          ),
+        );
+      return Number(rows[0]?.count ?? 0);
+    },
+
+    async clearSubmissions(canvasId: string, collection: string): Promise<void> {
+      await db
+        .delete(t)
+        .where(and(eq(t.canvasId, canvasId), eq(t.scope, `submissions:${collection}`)));
     },
     /**
      * Row-aware lookup: `null` means the key is absent; `{ value }` means it exists

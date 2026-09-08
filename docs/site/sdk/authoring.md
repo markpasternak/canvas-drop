@@ -1,5 +1,10 @@
 # Authoring
 
+`me().permissions.canCreateCanvas` reports whether page-driven creation is enabled
+for this member. It does not grant permission to edit or publish an existing canvas;
+target-canvas management roles still apply. Resource participation defaults do not
+enable authoring. See [Permissions and defaults](/docs/sdk/permissions).
+
 Let a signed-in viewer of your canvas create and **manage** canvases from the page —
 as themselves, with real ownership and no secret in the browser. A share created here
 is a **managed artifact**: you `publish` it once, `update` it in place (same URL) as its

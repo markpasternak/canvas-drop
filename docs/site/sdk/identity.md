@@ -19,7 +19,9 @@ const me = await canvasdrop.me();
 //   email: "someone@example.com",
 //   name: "Alex Rivera",
 //   avatarUrl: null,
-//   kind: "member"
+//   kind: "member",
+//   canvasRole: "viewer",
+//   permissions: { canSubmit: true, canWriteSharedData: false, /* … */ }
 // }
 document.querySelector("#greeting").textContent = `Hi, ${me.name}`;
 ```
@@ -40,6 +42,8 @@ interface Me {
   name: string;
   avatarUrl: string | null;
   kind: "member" | "guest";
+  canvasRole: "owner" | "editor" | "viewer";
+  permissions: RuntimePermissions;
 }
 ```
 
@@ -128,4 +132,47 @@ Most canvases do not need `me().id` at all. `canvasdrop.kv.user` scopes every
 key to the current viewer on the server, so per-person state is
 `await canvasdrop.kv.user.set("draft", text)` with no id in sight. Reach for
 `me()` when you want to show the viewer's name or avatar, or when the shared
-namespace needs a per-user key (`votes:${me.id}`) that other viewers can read.
+page needs to show controls for the current role. Use
+[`submissions`](/docs/sdk/submissions) for votes or forms that editors should review.
+Private `kv.user` preferences remain unreadable by other users, including editors.
+
+## Canvas role and permissions
+
+`me().resources` additionally exposes configured collections and file groups as
+operation rights `{read, create, update, delete, increment}`, each `{own, any}`.
+Channels expose `{subscribe, publish, seePresence, participatePresence}` booleans;
+granted Connections expose `{invoke, methods}` after audience/admin restrictions.
+`permissions.canCreateCanvas` describes enabled page-driven authoring for members,
+separate from editing existing canvases. For per-record controls, compare `me().id`
+with the server-derived `record.authorId`. See [Permissions and defaults](/docs/sdk/permissions).
+
+`canvasRole` is the effective role on this canvas. Ownership wins, followed by a
+live direct or team editor grant; everyone else admitted by the access rules is
+`viewer`. A platform admin does not gain a canvas role through their admin flag.
+The role is independent of whether backend features are enabled.
+
+`permissions` contains these boolean fields, after applicable feature switches,
+instance availability, lifecycle, and audience settings are applied:
+
+| Fields | Meaning |
+|---|---|
+| `canEditContent`, `canManageVersions` | Owner/editor management of content and version history. |
+| `canReadSharedData`, `canWriteSharedData` | Shared KV reads for admitted viewers; writes only for owners/editors. |
+| `canSavePreferences` | Caller-only `kv.user` data. |
+| `canSubmit`, `canManageSubmissions` | Own submissions for viewers; review and management for owners/editors. |
+| `canUploadSharedFiles`, `canUploadSubmissionFiles` | Shared uploads for owners/editors; private submission uploads for viewers. |
+| `canUseAi`, `canUseConnections` | Current audience allows this caller and the feature is available. Connections also needs an available admin grant. |
+| `canPublishSharedEvents`, `canPublishParticipantEvents` | Shared-channel publishing for owners/editors; `participants:` publishing for admitted viewers. |
+
+These are a snapshot for rendering controls, not a credential. Refresh after a
+permission error or a known access change; every server operation rechecks access.
+A permission being true does not promise success: quotas, model/profile-specific
+rules, validation and legacy guest AI restrictions still apply. `me()` is returned
+with `Cache-Control: private, no-store`.
+
+```js
+const { canvasRole, permissions } = await canvasdrop.me();
+editButton.hidden = !permissions.canWriteSharedData;
+submitButton.disabled = !permissions.canSubmit;
+roleLabel.textContent = canvasRole;
+```

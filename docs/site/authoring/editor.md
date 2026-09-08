@@ -242,3 +242,31 @@ needs the owner or editor role; a canvas you hold no role on reads 404.
 See also [Create & publish](/docs/authoring/create-and-publish) for the direct deploy
 paths (folder, ZIP, paste, Deploy API) and [Sharing & access](/docs/authoring/sharing)
 for adding editors.
+
+## Delete selected versions or all previous versions
+
+Owners and editors can select historical rows and choose **Delete selected**, or
+choose **Delete all previous versions**. The confirmation lists the exact version
+numbers and estimates bytes that could be freed. It counts each content hash once
+and excludes blobs referenced by surviving versions, the draft or active staged
+uploads. Deleting history does not remove live KV, submissions or runtime files.
+
+The current version cannot be selected or deleted. At confirmation the server
+rechecks each version against the current pointer and the preview's immutable
+version ID, so a concurrent publish/rollback or a reused version number cannot
+expand the approved deletion set. Missing, replaced or current versions are
+reported as skipped. Deletion removes recovery history permanently; download any
+version you want to keep first. The byte estimate is not verified recovered space.
+
+| Session-authenticated management route | Body / result |
+|---|---|
+| `POST /api/canvases/{id}/versions/prune-preview` | `{ versions: "previous" }` or `{ versions: [1, 2] }`; returns `{ versions, expectedVersionIds, skipped, estimatedReclaimableBytes }`. |
+| `POST /api/canvases/{id}/versions/prune` | Send the preview's explicit `{ versions, expectedVersionIds }`; returns `{ deleted, skipped }`. Never send `"previous"` to execute. |
+
+Selections must contain 1–100 positive integer version numbers. The preview's
+`expectedVersionIds` maps those numbers to immutable UUIDs. A batch performs one
+blob sweep after deletions, and reports per-version outcomes. If sweeping fails,
+history may already have been removed; reload history before retrying. No failure
+should be presented as proof that space was recovered. Both operations also exist
+as MCP `preview_version_prune` and `prune_versions`, using the same role gates and
+service. Disabled canvases remain read-only; archived history may be cleaned up.

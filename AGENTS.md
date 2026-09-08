@@ -149,3 +149,24 @@ Institutional learnings live in `docs/solutions/` — skim the index, and especi
   before opening a PR on auth/payment/migration-shaped changes.
 - **Anything touching the DB / dual-dialect schema** → `…dual-dialect-drizzle-seam.md`.
 - **CI / test infra changes** → `…ci-and-test-infra-gotchas.md`.
+
+## Current unmerged work
+
+Issue #116 and `docs/plans/2026-09-08-001-feat-runtime-permissions-version-pruning-plan.md`
+cover version cleanup and runtime roles/participation. The branch adds two MCP
+pruning tools (49 total), `me().canvasRole` / permissions / resource rights, authored
+KV collections with immutable authorship, inherited attachments, five policy presets,
+default modes and advanced controls. The extension plan is
+`docs/plans/2026-09-08-002-feat-primitive-policy-defaults-plan.md`.
+Per-channel realtime policies and per-Connection policies complement AI audiences.
+The user requested one PR with **no merge or deployment**. A read-only production
+impact audit is complete; live adaptations remain deployment preparation.
+The follow-up plan `docs/plans/2026-09-08-003-feat-permission-admin-and-rollout-readiness-plan.md`
+covers admin inspection, marketing and rollout readiness. There is one permission
+model, with explicit app/data adaptations before rollout. See
+`docs/site/self-hosting/runtime-upgrade.md` for cutover requirements.
+The explanation plan `docs/plans/2026-09-08-004-docs-resource-model-explanation-plan.md`
+keeps resource terminology consistent: collections group authored KV records;
+file groups organize Files uploads; channels group Realtime messages/presence.
+Policies are settings attached to these named resources. The SDK collection API
+lives in `docs/site/sdk/kv.md`; configuration belongs in the permissions guide.

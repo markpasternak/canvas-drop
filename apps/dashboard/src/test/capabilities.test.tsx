@@ -151,14 +151,14 @@ describe("capabilities tab", () => {
   it("warns that backend is inert when a public_link canvas has backend enabled", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json({ ...ON, access: "public_link" }) });
     renderCapabilities();
-    expect(await screen.findByText(/won't run for public visitors/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Public-link viewers have static access/i)).toBeInTheDocument();
   });
 
   it("does NOT show the public-backend warning on a non-public canvas", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json({ ...ON, access: "private" }) });
     renderCapabilities();
     await screen.findByRole("switch", { name: "Enable backend" });
-    expect(screen.queryByText(/won't run for public visitors/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Public-link viewers have static access/i)).not.toBeInTheDocument();
   });
 
   it("shows sanitized admin-granted connection authority without mutation controls", async () => {
@@ -184,4 +184,23 @@ describe("capabilities tab", () => {
     expect(screen.getByText("Methods: GET")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /grant|revoke|edit/i })).not.toBeInTheDocument();
   });
+});
+
+it("lets an editor explicitly enable AI for viewers and preserves the connection audience", async () => {
+  const calls = mockFetch({
+    "GET /api/canvases/c1": () =>
+      json({ ...ON, role: "editor", aiAudience: "editors", connectionsAudience: "editors" }),
+    "PATCH /api/canvases/c1/capabilities": () =>
+      json({ ...ON, aiAudience: "viewers", connectionsAudience: "editors" }),
+  });
+  renderCapabilities();
+  const select = await screen.findByRole("combobox", { name: "AI access" });
+  expect(select).toHaveValue("editors");
+  await userEvent.selectOptions(select, "viewers");
+  await vi.waitFor(() =>
+    expect(calls.find((call) => call.method === "PATCH")?.body).toBe(
+      JSON.stringify({ aiAudience: "viewers" }),
+    ),
+  );
+  expect(screen.getByRole("combobox", { name: "Connection access" })).toHaveValue("editors");
 });

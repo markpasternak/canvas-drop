@@ -64,6 +64,10 @@ export type EffectiveCapabilities = Record<FeatureCapability | "identity", boole
 
 /** Capability patch sent to PATCH /:id/capabilities (all optional). */
 export interface CanvasCapabilitiesPatch {
+  runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
+  expectedRuntimePolicy?: string | null;
+  aiAudience?: "editors" | "viewers";
+  connectionsAudience?: "editors" | "viewers";
   backendEnabled?: boolean;
   kv?: boolean;
   files?: boolean;
@@ -109,6 +113,8 @@ export type PreviewMode = "auto" | "off" | "custom";
 export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
 
 export interface Canvas {
+  runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
+  runtimePolicyRevision?: string | null;
   id: string;
   slug: string;
   /** Whose canvas it is (editor-roles plan): the owner's account and display identity.
@@ -159,6 +165,8 @@ export interface Canvas {
   /** Backend-group master switch (plan 006). */
   backendEnabled: boolean;
   /** Raw stored feature flags (what the toggles control). */
+  aiAudience?: "editors" | "viewers";
+  connectionsAudience?: "editors" | "viewers";
   capabilities: StoredCapabilities;
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;
@@ -212,6 +220,17 @@ export interface CanvasOwnerSummary {
 export type RootEntry =
   | { path: string; reason: "index" | "single" }
   | { path: null; reason: "ambiguous" | "none" };
+
+export interface VersionPrunePreview {
+  versions: number[];
+  expectedVersionIds: Record<string, string>;
+  estimatedReclaimableBytes: number;
+  skipped: Array<{ version: number; reason: string }>;
+}
+export interface VersionPruneResult {
+  deleted: number[];
+  skipped: Array<{ version: number; reason: string }>;
+}
 
 export interface VersionInfo {
   number: number;
@@ -1014,6 +1033,9 @@ export interface AdminInspection {
     updatedAt: number;
     backendEnabled: boolean;
     publicLinkEffective: boolean;
+    runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
+    aiAudience?: "editors" | "viewers";
+    connectionsAudience?: "editors" | "viewers";
   };
   owner: {
     id: string;
@@ -1536,6 +1558,20 @@ export const api = {
 
   listVersions: (id: string) =>
     request<{ versions: VersionInfo[] }>(`/api/canvases/${id}/versions`).then((r) => r.versions),
+
+  previewVersionPrune: (id: string, versions: number[]) =>
+    request<VersionPrunePreview>(`/api/canvases/${id}/versions/prune-preview`, {
+      method: "POST",
+      body: JSON.stringify({ versions }),
+    }),
+  pruneVersions: (id: string, preview: VersionPrunePreview) =>
+    request<VersionPruneResult>(`/api/canvases/${id}/versions/prune`, {
+      method: "POST",
+      body: JSON.stringify({
+        versions: preview.versions,
+        expectedVersionIds: preview.expectedVersionIds,
+      }),
+    }),
 
   deleteVersion: (id: string, version: number) =>
     request<{ ok: true; version: number }>(`/api/canvases/${id}/versions/${version}`, {

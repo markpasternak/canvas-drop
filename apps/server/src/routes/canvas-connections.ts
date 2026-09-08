@@ -1,7 +1,8 @@
-import type { Config } from "@canvas-drop/shared";
+import { type Config, parseRuntimePolicy, rightAllows } from "@canvas-drop/shared";
 import type { ConnectionMethod, Json } from "@canvas-drop/shared/db";
 import { type Context, Hono } from "hono";
 import type { StatusCode } from "hono/utils/http-status";
+import { permissionDenied, runtimeAudienceAllows } from "../canvas/runtime-permissions.js";
 import { ConnectionLimitError, type ConnectionLimits } from "../connections/limits.js";
 import { SecretCipherError } from "../connections/secret-cipher.js";
 import { type ConnectionService, ConnectionServiceError } from "../connections/service.js";
@@ -174,6 +175,15 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
           403,
         );
       }
+      const policy = parseRuntimePolicy(canvas.runtimePolicy).connections[key];
+      if (
+        policy
+          ? !rightAllows(policy.audience, c.get("runtimeRole") ?? "viewer", user.id)
+          : !runtimeAudienceAllows(c, canvas.connectionsAudience)
+      )
+        return permissionDenied(c, "use outbound connections");
+      if (policy?.methods && !policy.methods.includes(method as ConnectionMethod))
+        return permissionDenied(c, "use this connection method");
       if (!(CONNECTION_METHODS as readonly string[]).includes(method)) {
         throw new ConnectionTransportError(
           "METHOD_NOT_ALLOWED",

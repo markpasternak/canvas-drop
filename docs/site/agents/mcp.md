@@ -104,7 +104,7 @@ Refusal codes you will meet across tools:
 
 ## Tools
 
-47 tools: 13 open to any signed-in account, 32 at minimum role editor, 2 owner-only.
+49 tools: 13 open to any signed-in account, 32 at minimum role editor, 2 owner-only.
 Optional inputs are marked `?`. "View" is the canvas projection described under Return
 shapes below.
 
@@ -380,3 +380,33 @@ and [Deploy](/docs/self-hosting/deploy).
   for the bytes of any large deploy, even from an MCP session.
 - The packaged **[Agent skill](/docs/agents/skill)** documents both for a coding agent,
   and **[`/llms.txt`](/llms.txt)** is the single-file quick reference.
+
+## Version cleanup and runtime audiences
+
+`preview_version_prune(id, versions)` accepts `"previous"` or an explicit numeric
+selection. Review its `{ versions, expectedVersionIds, skipped,
+estimatedReclaimableBytes }` with the user. `prune_versions(id, versions,
+expectedVersionIds)` deletes only the explicit immutable selection and returns
+`{ deleted, skipped }`. Both require owner/editor, as does single `delete_version`.
+The estimate excludes references retained by current/history/draft/active uploads;
+it does not promise recovered bytes. See [version cleanup](/docs/authoring/editor).
+
+`set_capabilities` additionally accepts `aiAudience` and `connectionsAudience`,
+each `"editors"` (default) or `"viewers"`. Canvas views expose both. Runtime canvas
+code reads its own role and permissions from [`me()`](/docs/sdk/identity).
+`set_capabilities` also accepts a full `runtimePolicy` document and
+`expectedRuntimePolicy`, copied exactly from `get_canvas.runtimePolicyRevision`
+(initially null). Preserve existing entries when adding resources. Stale/missing
+revisions fail with `POLICY_CONFLICT`; reload and reconcile. Policies support
+collection/file presets and overrides, channel rights, and per-Connection audiences
+and methods. Defaults initialize new resources; they do not change existing ones.
+See [Permissions and defaults](/docs/sdk/permissions) for the complete schema.
+Collections group authored records inside KV, file groups organize standalone
+uploads inside Files, and channels carry messages/presence inside Realtime. Each
+name identifies a resource with its own policy. Match configured names in canvas
+code; settings do not generate application features or migrate raw keys. The
+[Data storage guide](/docs/sdk/kv) explains the storage choices and collection API.
+
+Viewers use configured authored collections, private preferences or the
+[`submissions`](/docs/sdk/submissions) convenience API. Raw shared KV mutations
+retain owner/editor gates. Runtime code cannot configure resource policies.

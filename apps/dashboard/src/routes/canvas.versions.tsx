@@ -9,10 +9,11 @@ import { DeployButton } from "../components/DeployButton.js";
 import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
+import { VersionPruneDialog } from "../components/VersionPruneDialog.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
-import { useDeleteVersion, useRestoreToDraft, useRollback } from "../lib/mutations.js";
+import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
 
 /** Versions tab: version history (newest first), forward "Publish files", and
@@ -24,13 +25,13 @@ export default function Versions() {
   const { data: canvas } = useCanvas(id);
   const rollback = useRollback(id);
   const restore = useRestoreToDraft(id);
-  const deleteVersion = useDeleteVersion(id);
   const navigate = useNavigate();
   const toast = useToast();
   const [target, setTarget] = useState<VersionInfo | null>(null);
   // Version awaiting a "this overwrites your unpublished draft" confirmation.
   const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<number[] | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
   // Deploy + make-live target the live canvas. Disabled while archived/disabled.
   const isActive = canvas?.status === "active";
   const isDisabled = canvas?.status === "disabled";
@@ -88,17 +89,6 @@ export default function Versions() {
     }
   }
 
-  async function confirmDelete() {
-    if (deleteTarget === null) return;
-    try {
-      await deleteVersion.mutateAsync(deleteTarget);
-      toast(`Version ${deleteTarget} deleted`);
-      setDeleteTarget(null);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't delete the version", "error");
-    }
-  }
-
   return (
     <TabContentFrame>
       <Section
@@ -110,6 +100,29 @@ export default function Versions() {
             : " Unarchive to publish or change the current version."
         }`}
       >
+        {!isDisabled && versions.some((v) => !v.current && v.status === "ready") && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!selected.length}
+              onClick={() => setDeleteTarget([...selected])}
+            >
+              Delete selected{selected.length ? ` (${selected.length})` : ""}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setDeleteTarget(
+                  versions.filter((v) => !v.current && v.status === "ready").map((v) => v.number),
+                )
+              }
+            >
+              Delete all previous versions
+            </Button>
+          </div>
+        )}
         <ul className="space-y-2">
           {versions.map((v) => (
             <li
@@ -119,6 +132,21 @@ export default function Versions() {
                 v.current ? "border-border-strong bg-surface-raised" : "border-border bg-surface",
               )}
             >
+              {!isDisabled && !v.current && v.status === "ready" && (
+                <input
+                  type="checkbox"
+                  aria-label={`Select version ${v.number}`}
+                  checked={selected.includes(v.number)}
+                  onChange={(e) =>
+                    setSelected(
+                      e.target.checked
+                        ? [...selected, v.number]
+                        : selected.filter((n) => n !== v.number),
+                    )
+                  }
+                  className="h-4 w-4 shrink-0 accent-[var(--color-accent)]"
+                />
+              )}
               <div className="min-w-0 flex-1 space-y-1">
                 {/* Primary line: version identity + status, baseline-aligned on one row. */}
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -181,7 +209,7 @@ export default function Versions() {
                       variant="ghost"
                       size="sm"
                       className="text-danger hover:bg-danger-subtle hover:text-danger"
-                      onClick={() => setDeleteTarget(v.number)}
+                      onClick={() => setDeleteTarget([v.number])}
                     >
                       <Trash size={15} aria-hidden />
                       Delete
@@ -226,18 +254,17 @@ export default function Versions() {
         then publish when ready.
       </ConfirmDialog>
 
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={confirmDelete}
-        title={`Delete version ${deleteTarget ?? ""}?`}
-        actionLabel="Delete version"
-        destructive
-        loading={deleteVersion.isPending}
-      >
-        This permanently removes version {deleteTarget} from history. Files still used by another
-        version or the draft are kept.
-      </ConfirmDialog>
+      {deleteTarget && (
+        <VersionPruneDialog
+          canvasId={id}
+          versions={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null);
+            setSelected([]);
+          }}
+        />
+      )}
     </TabContentFrame>
   );
 }

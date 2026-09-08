@@ -591,25 +591,25 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
       const alice = track(connectWs(server.port, "room-a", { "x-test-user": MEMBER }));
       const bob = track(connectWs(server.port, "room-a", { "x-test-user": OTHER }));
       await Promise.all([alice.opened, bob.opened]);
-      alice.send({ type: "subscribe", channel: "poll" });
+      alice.send({ type: "subscribe", channel: "participants:poll" });
       await alice.waitFor((m) => m.type === "subscribed");
-      bob.send({ type: "subscribe", channel: "poll" });
+      bob.send({ type: "subscribe", channel: "participants:poll" });
       await bob.waitFor((m) => m.type === "subscribed");
       // alice sees bob join + a presence snapshot listing both members.
       await alice.waitFor((m) => m.type === "join");
       const presence = bob.messages.find((m) => m.type === "presence");
       expect(((presence?.users ?? []) as Array<{ id: string }>).length).toBe(2);
       // a publish fans out to subscribers.
-      alice.send({ type: "publish", channel: "poll", event: "vote", data: { n: 1 } });
+      alice.send({ type: "publish", channel: "participants:poll", event: "vote", data: { n: 1 } });
       const got = await bob.waitFor((m) => m.type === "message");
       expect(got).toMatchObject({ event: "vote", data: { n: 1 } });
 
       // cross-canvas isolation: a publish in room-a never reaches room-b.
       const onB = track(connectWs(server.port, "room-b", { "x-test-user": MEMBER }));
       await onB.opened;
-      onB.send({ type: "subscribe", channel: "poll" });
+      onB.send({ type: "subscribe", channel: "participants:poll" });
       await onB.waitFor((m) => m.type === "subscribed");
-      alice.send({ type: "publish", channel: "poll", event: "leak", data: 1 });
+      alice.send({ type: "publish", channel: "participants:poll", event: "leak", data: 1 });
       await delay(100);
       expect(onB.messages.some((m) => m.type === "message")).toBe(false);
 

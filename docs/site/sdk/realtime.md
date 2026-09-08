@@ -12,12 +12,31 @@ stored; put anything that must survive a reload in [KV](/docs/sdk/kv).
 URL. The `from` on every message and every entry in the presence list come from
 the viewer's server-side session, never from the page, so names are trustworthy.
 
+## Channels and their permissions
+
+A **channel** is a named stream of messages and presence within one canvas. It is
+the resource type inside the Realtime primitive. Each configured channel has its
+own receive, publish, see-presence and appear-in-presence permissions.
+
+For example, `activity` can allow all participants to send and receive editing
+signals, while `presentation-navigation` allows everyone to receive and only
+owners/editors to publish. Both use Realtime with independent policies. Changing
+a channel's settings changes access to that channel; it does not rename it or move
+subscribers to another channel. Messages are ephemeral, so a channel is not a
+collection of stored records. Data writes do not automatically publish messages.
+
+Configure exact channel names in **Backend → Participation and permissions** and
+use those names in `realtime.channel(name)`. See
+[Permissions and defaults](/docs/sdk/permissions) for configuration and defaults
+for unconfigured channels. The example below uses the built-in `participants:`
+prefix, which permits participant publishing unless an explicit policy overrides it.
+
 ```js
-const room = canvasdrop.realtime.channel("room-1");
+const room = canvasdrop.realtime.channel("participants:room");
 
 // Receive what anyone on the channel publishes, including yourself.
 room.subscribe((msg) => {
-  // msg = { event, data, from: { id, name } }
+  // msg = { event, data, from: { id, name, canvasRole } }
   console.log(msg.from.name, msg.event, msg.data);
 });
 
@@ -57,6 +76,7 @@ in the SDK:
 
 | Method | Signature | What it does |
 | --- | --- | --- |
+| `onError` | `onError(handler: (error: CanvasdropError) => void): void` | Receive channel-specific errors, including `PermissionDeniedError`. |
 | `publish` | `publish(event: string, data: unknown): void` | Send `{ event, data }` to every current subscriber. Returns nothing; there is no delivery receipt. You do not need to be subscribed to publish, but see [How the connection works](#how-the-connection-works) for when the socket opens. |
 | `subscribe` | `subscribe(handler: (msg: RealtimeMessage) => void): void` | Join the channel and run `handler` for each message. Calling it again adds another handler; it does not return an unsubscribe function. |
 | `unsubscribe` | `unsubscribe(): void` | Leave the channel and drop every message handler. `onPresence`, `onJoin`, and `onLeave` handlers stay registered, but no join or leave reaches you until you subscribe again. |
@@ -71,7 +91,7 @@ hooks above are the whole surface.
 
 ```ts
 type RealtimeUser = { id: string; name: string };
-type RealtimeMessage = { event: string; data: unknown; from: RealtimeUser };
+type RealtimeMessage = { event: string; data: unknown; from: RealtimeUser & { canvasRole: "owner" | "editor" | "viewer" } };
 ```
 
 ## What presence and messages mean
@@ -138,7 +158,9 @@ Limits enforced by the server:
 
 The error frames (`RATE_LIMITED`, `MESSAGE_TOO_LARGE`, `CHANNEL_NAME_TOO_LARGE`,
 `CHANNEL_LIMIT`, `INVALID_FRAME`, `UNKNOWN_FRAME`) keep the socket open, and the
-SDK does not surface them to your code: a rejected publish is dropped silently.
+SDK surfaces channel-specific errors through `channel.onError(handler)`.
+Frames without a channel, such as the connection-wide rate limit, are not routed
+to a channel callback; rejected publishes are dropped.
 Keep high-frequency publishers such as cursors under 100 sends a minute per
 tab, and keep payloads small.
 
@@ -169,3 +191,36 @@ try {
 
 See the [error codes reference](/docs/api/errors) for the full code table and
 the [Runtime API](/docs/api/runtime-api) for the wire protocol behind the SDK.
+
+## Who can publish
+
+On unconfigured ordinary channels (for example `results`), only owners and editors publish;
+admitted viewers may subscribe and use presence. Prefix a channel with
+`participants:` for attributed viewer messages, such as `participants:cursors`.
+These channels are visible to any admitted subscriber. Use submissions for
+private votes or forms; never broadcast individual responses on a participant channel.
+
+The server derives `from.canvasRole` from live grants before publishing. A role
+inside `data` has no authority. Access and role are rechecked on every publish,
+and receiving operation, as well as the existing access-change and heartbeat checks. A demoted editor
+who still has viewing access can keep receiving shared updates but cannot
+publish them (`PERMISSION_DENIED`); loss of viewing access closes the socket.
+
+Configured channel policies override the legacy prefix defaults. Set separate
+subscribe, publish, seePresence and participatePresence audiences in **Advanced
+permissions**, via the management API, or MCP `set_capabilities`. All use `none`,
+`editors`, or `viewers`. Viewers can receive updates while only owners/editors publish;
+activity channels can allow everyone to publish. Presence visibility is independent
+of message visibility. Receivers are revalidated before fan-out, so changing a
+subscription policy also stops an already-open viewer socket receiving that channel.
+See [Permissions and defaults](/docs/sdk/permissions).
+
+```js
+const results = canvasdrop.realtime.channel("results");
+results.subscribe(renderPublishedResult);
+results.onError(err => {
+  if (err.code === "PERMISSION_DENIED") showAccessChanged();
+});
+// Owner/editor only; use shared KV for durable results as well.
+// results.publish("updated", { total: 12 });
+```

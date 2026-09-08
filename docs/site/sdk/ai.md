@@ -203,3 +203,14 @@ try {
 See [error codes](/docs/api/errors) for the full list, and the
 [Runtime API](/docs/api/runtime-api#ai) for the `POST /v1/c/{slug}/ai/chat`
 endpoint and its SSE wire format.
+
+## Audience permission
+
+This feature defaults to owners and editors (`aiAudience: "editors"`). To allow
+signed-in viewers, an owner or editor selects **All signed-in viewers** under
+**AI access** in the Backend tab, or sets `aiAudience: "viewers"` with
+`set_capabilities` / `PATCH /api/canvases/{id}/capabilities`.
+A disallowed caller receives `403 PERMISSION_DENIED` (`PermissionDeniedError`)
+before a provider or upstream request starts. The setting leaves existing
+capability, public/static-only, quota and operator policy gates in place.
+Check `me().permissions` when rendering the feature's controls.

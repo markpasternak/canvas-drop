@@ -3,7 +3,7 @@ import { $, cd, escapeHtml, fmtBytes, guard, onAct } from "./lib.js";
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif)$/i;
 
-function row(f) {
+function row(f, me) {
   const li = document.createElement("li");
   const isImg = f.mime?.startsWith("image/") || IMAGE_RE.test(f.name);
   const thumb = isImg
@@ -16,7 +16,7 @@ function row(f) {
       <span class="sub">${fmtBytes(f.size)}${f.mime ? ` · ${escapeHtml(f.mime)}` : ""}</span>
     </span>
     <button class="ghost" data-act="file-open">Open</button>
-    <button class="ghost" data-act="file-del">Delete</button>`;
+    <button class="ghost" data-act="file-del" ${me.permissions.canUploadSharedFiles || (f.scope === "submission" && f.uploadedBy === me.id) ? "" : "hidden"}>Delete</button>`;
   li.dataset.id = f.id;
   li.dataset.url = cd().files.url(f.id);
   return li;
@@ -31,7 +31,9 @@ async function refresh() {
     list.innerHTML = `<li><span class="meta"><span class="sub">No files yet — upload one above.</span></span></li>`;
     return;
   }
-  for (const f of files) list.appendChild(row(f));
+  const me = await guard(() => cd().me(), $("#files-state"));
+  if (!me) return;
+  for (const f of files) list.appendChild(row(f, me));
 }
 
 export function mount() {
@@ -49,7 +51,7 @@ export function mount() {
       btn.disabled = true;
       const old = btn.textContent;
       btn.textContent = "Uploading…";
-      await guard(() => cd().files.upload(file), $("#files-state"));
+      await guard(() => cd().files.upload(file, { scope: "submission" }), $("#files-state"));
       btn.disabled = false;
       btn.textContent = old;
       input.value = "";

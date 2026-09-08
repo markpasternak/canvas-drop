@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import type { QuotaResolver } from "../admin/settings-service.js";
 import type { AuditLog } from "../audit/audit-log.js";
 import { requireCapability } from "../canvas/capability-guard.js";
+import { canEditRuntime, permissionDenied } from "../canvas/runtime-permissions.js";
 import { KvNotNumericError, type KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
@@ -95,6 +96,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
     });
 
     app.put(`${prefix}/:key`, async (c) => {
+      if (prefix === "" && !canEditRuntime(c)) return permissionDenied(c, "change shared data");
       const key = c.req.param("key");
       if (Buffer.byteLength(key) > KV_MAX_KEY_BYTES) {
         return c.json({ code: "KEY_TOO_LARGE" }, 413);
@@ -126,6 +128,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
     });
 
     app.delete(`${prefix}/:key`, async (c) => {
+      if (prefix === "" && !canEditRuntime(c)) return permissionDenied(c, "change shared data");
       const scope = scopeOf(c);
       await deps.kv.delete(canvasId(c), scope, c.req.param("key"));
       meter(c, "delete");
@@ -134,6 +137,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
     });
 
     app.post(`${prefix}/:key/increment`, async (c) => {
+      if (prefix === "" && !canEditRuntime(c)) return permissionDenied(c, "change shared data");
       const key = c.req.param("key");
       if (Buffer.byteLength(key) > KV_MAX_KEY_BYTES) {
         return c.json({ code: "KEY_TOO_LARGE" }, 413);

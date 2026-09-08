@@ -14,7 +14,7 @@ One script tag, then call the global:
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">
-  const me = await canvasdrop.me();                     // { id, email, name, avatarUrl, kind }
+  const me = await canvasdrop.me();                     // { id, email, name, avatarUrl, kind, canvasRole, permissions }
   await canvasdrop.kv.set("last-viewer", me.name);
   const views = await canvasdrop.kv.increment("views"); // 1 on the first call, then 2, 3, ...
 </script>
@@ -97,13 +97,20 @@ The [Capabilities](/docs/authoring/capabilities) page covers the tab.
 
 ## The surface
 
+Features and their named resources are separate: Data storage provides collections,
+Files provides file groups, and Realtime provides channels. Each named resource
+has its own permissions. A collection groups records; a policy controls who can
+use those records. See [the model and resource mapping](/docs/sdk/permissions#features-resources-and-permissions)
+before choosing presets, or [choose how to store your data](/docs/sdk/kv#choose-how-to-store-your-data).
+
 | Namespace | What it does | Reference |
 | --- | --- | --- |
-| `canvasdrop.me()` | The signed-in viewer: `{ id, email, name, avatarUrl, kind }`. `kind` is `"member"`, or `"guest"` for a retained legacy guest session. | [Identity](/docs/sdk/identity) |
-| `canvasdrop.kv` | `get`, `set`, `delete`, `list`, `increment`. The same five on `canvasdrop.kv.user` store per viewer. `get` resolves `null` for a missing key. | [KV](/docs/sdk/kv) |
-| `canvasdrop.files` | `upload(file)`, `list()`, `delete(id)`, and the synchronous `url(id)`. | [Files](/docs/sdk/files) |
+| `canvasdrop.me()` | The signed-in viewer: `{ id, email, name, avatarUrl, kind, canvasRole, permissions }`. `kind` is `"member"`, or `"guest"` for a retained legacy guest session. | [Identity](/docs/sdk/identity) |
+| `canvasdrop.kv` | Shared values, private preferences through `kv.user`, and named authored records through `kv.collection(name)`. | [Data storage](/docs/sdk/kv) |
+| `canvasdrop.submissions` | Own `get/set/delete`; owner/editor `list/remove/clear` for reviewable participant input. | [Submissions](/docs/sdk/submissions) |
+| `canvasdrop.files` | Upload to a configured file group, attach to a collection record, or use a built-in scope. List, rename, delete and serve permitted files. | [Files](/docs/sdk/files) |
 | `canvasdrop.ai` | `chat(messages, { model })` resolves `{ text, usage, cost }`; `stream(messages, { model })` yields text chunks. `model` is required; `system` and `maxTokens` are optional. | [AI](/docs/sdk/ai) |
-| `canvasdrop.realtime` | `channel(name)` returns a channel with `publish`, `subscribe`, `unsubscribe`, `presence`, `onPresence`, `onJoin`, `onLeave`, `close`, over one shared WebSocket that reconnects on its own. | [Realtime](/docs/sdk/realtime) |
+| `canvasdrop.realtime` | `channel(name)` returns a channel with `publish`, `subscribe`, `unsubscribe`, `presence`, `onPresence`, `onJoin`, `onLeave`, `onError`, `close`, over one shared WebSocket that reconnects on its own. | [Realtime](/docs/sdk/realtime) |
 | `canvasdrop.connections` | `fetch(profile, relativePath, init?)` returns a native upstream `Response` through one exact origin an admin granted to the canvas. Protected headers stay server-side. | [Connections](/docs/sdk/connections) |
 | `canvasdrop.canvases` | `publish`, `update`, `list`, `revoke`: a signed-in viewer creates and manages canvases from the page, as themselves (the authoring capability). | [Authoring](/docs/sdk/authoring) |
 
@@ -129,7 +136,7 @@ base `CanvasdropError`; branch on `.code`. The full list is on the
 
 ```js
 try {
-  await canvasdrop.kv.increment("votes");
+  await canvasdrop.kv.user.increment("visits");
 } catch (err) {
   if (err.code === "CAPABILITY_DISABLED") {
     // ask the owner to enable KV in the Backend tab; err.hint says what is off
@@ -149,3 +156,14 @@ Three cases do not throw the way the rest do:
   you have `close()`d throws `CHANNEL_CLOSED` (status 0).
 - With the module import, the error classes are exported for `instanceof`
   checks; with the global script, branch on `.code` or `.name`.
+
+## Reading, editing and participating
+
+Feature availability does not grant write access. Owners/editors change shared
+raw KV and files. Configured collections and file groups support five presets,
+including shared contributions that participants can create and manage as authors.
+Attachments inherit record rights; personal preferences remain caller-only.
+Defaults make setup simple, with advanced operation and channel rights available
+when needed. AI and Connections have explicit audiences. Render controls from
+`me().permissions` and `me().resources` and handle typed `PermissionDeniedError` if
+access changes. See [Permissions and defaults](/docs/sdk/permissions).

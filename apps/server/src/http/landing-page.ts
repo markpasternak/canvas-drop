@@ -49,13 +49,15 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
   {
     name: "Key-value",
     tag: "kv",
-    blurb: "Get, set, and increment keys, shared or per user. No database to run.",
+    blurb:
+      "Store shared values, private preferences and collections of authored records. Each collection has its own permissions.",
     glyph: "M4 7h16M4 12h16M4 17h10",
   },
   {
     name: "Files",
     tag: "files",
-    blurb: "Upload, list, and serve files from the canvas itself.",
+    blurb:
+      "Upload and share files with resource permissions. Comment attachments follow their parent record's access.",
     glyph: "M6 3h8l4 4v14H6zM14 3v4h4",
   },
   {
@@ -68,13 +70,15 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
   {
     name: "Identity",
     tag: "identity",
-    blurb: "Know who is viewing. me() returns the signed-in org member, resolved server-side.",
+    blurb:
+      "Know who is viewing, their canvas role and what they can do. Identity and permissions are resolved server-side.",
     glyph: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M5 20a7 7 0 0 1 14 0",
   },
   {
     name: "Realtime",
     tag: "realtime",
-    blurb: "Publish, subscribe, and see who's present over a managed socket. No server to run.",
+    blurb:
+      "Choose who receives messages, publishes and appears in presence, separately for each channel.",
     glyph: "M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0M12 12h.01",
   },
   {
@@ -110,7 +114,7 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Keep building on it",
-    body: "Edit and preview a draft while the current version stays available. Publish updates to the same link, restore an earlier version, or offer your canvas as a template.",
+    body: "Edit and preview a draft while the current version stays available. Restore an earlier version, review and prune old history to free space, or offer your canvas as a template.",
   },
 ];
 

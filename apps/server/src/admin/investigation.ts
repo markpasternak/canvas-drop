@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { type Config, parseRuntimePolicy } from "@canvas-drop/shared";
 import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
 import { isEmailAllowed } from "../auth/identity-mapping.js";
 import type { OrgMembershipResolver } from "../auth/org-membership.js";
@@ -96,6 +96,9 @@ export function adminInvestigation(deps: InvestigationDeps) {
           createdAt: canvas.createdAt,
           updatedAt: canvas.updatedAt,
           backendEnabled: canvas.backendEnabled,
+          runtimePolicy: parseRuntimePolicy(canvas.runtimePolicy),
+          aiAudience: canvas.aiAudience,
+          connectionsAudience: canvas.connectionsAudience,
           publicLinkEffective:
             canvas.access === "public_link" &&
             publicEnabled &&

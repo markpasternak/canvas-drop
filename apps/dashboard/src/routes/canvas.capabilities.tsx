@@ -1,6 +1,7 @@
 import { useParams } from "@tanstack/react-router";
 import { Badge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { RuntimePolicySettings } from "../components/RuntimePolicySettings.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
@@ -19,7 +20,7 @@ const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: st
   {
     key: "kv",
     label: "Key-value storage",
-    description: "Per-canvas and per-user durable state.",
+    description: "Shared content, private preferences, and participant submissions.",
   },
   {
     key: "files",
@@ -87,7 +88,8 @@ export default function Capabilities() {
         {publicBackendInert && (
           <InlineNotice tone="warning" className="py-2 text-xs">
             This canvas is shared as a public link, which serves static files only. The backend
-            primitives below won't run for public visitors — only for you and signed-in org members.
+            primitives below run only for the canvas owner and editors. Public-link viewers have
+            static access.
           </InlineNotice>
         )}
         <Toggle
@@ -128,6 +130,49 @@ export default function Capabilities() {
         >
           <span className="text-xs font-medium text-muted">{backendOn ? "Always on" : "Off"}</span>
         </Row>
+      </Section>
+      <Section
+        id="runtime-permissions"
+        title="Who can use the backend"
+        description="Choose who can use AI and external services. Resource permissions below control participation in data, files and realtime."
+      >
+        {(
+          [
+            {
+              key: "aiAudience",
+              title: "AI access",
+              description: "AI requests use the canvas's budget.",
+            },
+            {
+              key: "connectionsAudience",
+              title: "Connection access",
+              description:
+                "Connections can send requests and trigger actions in external services. Admin grants and allowed methods still apply.",
+            },
+          ] as const
+        ).map((setting) => (
+          <Row key={setting.key} title={setting.title} description={setting.description}>
+            <select
+              aria-label={setting.title}
+              value={canvas[setting.key] ?? "editors"}
+              disabled={!backendOn || update.isPending || canvas.status === "disabled"}
+              className="max-w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg"
+              onChange={(event) =>
+                update.mutate(
+                  { [setting.key]: event.target.value as "editors" | "viewers" },
+                  { onError: onSaveError },
+                )
+              }
+            >
+              <option value="editors">Owners and editors</option>
+              <option value="viewers">All signed-in viewers</option>
+            </select>
+          </Row>
+        ))}
+        <p className="text-xs text-muted">
+          Private file submissions are visible to their uploader and the canvas's owners and
+          editors. Public visitors have no backend access.
+        </p>
       </Section>
       <Section
         id="connections"
@@ -172,6 +217,12 @@ export default function Capabilities() {
           </div>
         ))}
       </Section>
+      <RuntimePolicySettings
+        canvas={canvas}
+        save={(patch) => update.mutateAsync(patch)}
+        pending={update.isPending}
+        connectionKeys={connections.data?.map((connection) => connection.key) ?? []}
+      />
     </TabContentFrame>
   );
 }
