@@ -566,12 +566,26 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const teamIds = await deps.teams.listTeamIdsForCanvas(cv.id);
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
+      // Deployment coordination readback (R2 / R6 / KTD9): the token a coordinated deploy
+      // passes back as its precondition, and the live version's release identity.
+      const current = cv.currentVersionId
+        ? await deps.versions.findById(cv.currentVersionId)
+        : null;
       return ok({
         ...(await viewWithIdentity(cv, gate.role, hasPreview, teamIds)),
         // What only the owner may do (R7) — so an agent acting as an editor knows in
         // advance which tools will refuse with OWNER_ONLY.
         ownerOnlyActs: OWNER_ONLY_ACTS,
         deploy: deployEndpoints(deps.config, cv.id),
+        publicationToken: cv.publicationToken,
+        currentVersion: current
+          ? {
+              id: current.id,
+              number: current.number,
+              releaseId: current.releaseId ?? null,
+              createdAt: current.createdAt,
+            }
+          : null,
       });
     },
   );
@@ -591,6 +605,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const creators = await resolveVersionCreators(deps.users, versions);
       return ok({
         versions: versions.map((v) => ({
+          // The immutable id identifies a snapshot even after its number is reused (R2).
+          id: v.id,
           number: v.number,
           source: v.source,
           status: v.status,
@@ -600,6 +616,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           createdAt: v.createdAt,
           fileCount: v.fileCount,
           totalBytes: v.totalBytes,
+          releaseId: v.releaseId ?? null,
           current: v.id === cv.currentVersionId,
           downloadUrl: new URL(
             `/mcp/canvases/${cv.id}/versions/${v.number}/download`,
@@ -711,7 +728,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "base64) — not both. The entire payload travels in this call, so prefer " +
         "begin_deploy/add_files/finalize_deploy for ANY re-deploy of a canvas that already has " +
         "content, or when it has many/large/binary files: that flow reports exactly which files " +
-        "changed so you resend only those (far fewer tokens) and can chunk big uploads.",
+        "changed so you resend only those (far fewer tokens) and can chunk big uploads. " +
+        "Optional coordination when several publishers may ship the same build: pass an opaque " +
+        "releaseId (a release already live answers outcome already_current and creates nothing; " +
+        "one that exists only in history fails RELEASE_NOT_CURRENT) and/or the publicationToken " +
+        "from get_canvas as expectedPublicationToken (a publication that changed since you read " +
+        "it fails PUBLICATION_CHANGED with the current publication). Both are reassess signals: " +
+        "read back and decide, never refresh the token and retry blindly.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         zipBase64: z
@@ -728,9 +751,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           )
           .optional()
           .describe("Inline files: text as utf8 (default), binary as base64."),
+        releaseId: z
+          .string()
+          .optional()
+          .describe(
+            "Opaque release identity (1–200 chars) stored on the version; never parsed or ordered.",
+          ),
+        expectedPublicationToken: z
+          .string()
+          .optional()
+          .describe("The publicationToken read from get_canvas; activate only if unchanged."),
       },
     },
-    async ({ id, zipBase64, files }) => {
+    async ({ id, zipBase64, files, releaseId, expectedPublicationToken }) => {
       // Mirror publish_draft + the HTTP deploy routes: a deploy on an archived/disabled
       // canvas would silently pre-position content that goes live the moment it's
       // restored, defeating the admin freeze. A disabled canvas rejects with the shared
@@ -751,23 +784,33 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         return fail("INVALID_REQUEST: provide zipBase64 or a non-empty files array");
       }
       try {
+        const commit = { coordination: { releaseId, expectedPublicationToken } };
         let result: Awaited<ReturnType<typeof deps.engine.deploy>>;
         if (files != null) {
-          result = await deps.engine.deploy(cv, "upload", fromFilesArray(files), caller.userId);
+          result = await deps.engine.deploy(
+            cv,
+            "upload",
+            fromFilesArray(files),
+            caller.userId,
+            commit,
+          );
         } else {
           // Buffer.from(..,"base64") never throws — it drops invalid chars — so a bad
           // string just yields fewer/zero bytes; the empty guard and the downstream
           // DeployError (caught below) cover malformed input.
           const buffer = Buffer.from(zipBase64 as string, "base64");
           if (buffer.byteLength === 0) return fail("empty deploy");
-          result = await deps.engine.deploy(cv, "api", fromZip(buffer), caller.userId);
+          result = await deps.engine.deploy(cv, "api", fromZip(buffer), caller.userId, commit);
         }
-        deps.audit.recordAudit({
-          action: "deploy",
-          actorId: caller.userId,
-          targetId: cv.id,
-          meta: { source: "mcp", version: result.version },
-        });
+        // An already_current result created and activated nothing (R3 / KTD7): no audit event.
+        if (result.outcome === "published") {
+          deps.audit.recordAudit({
+            action: "deploy",
+            actorId: caller.userId,
+            targetId: cv.id,
+            meta: { source: "mcp", version: result.version },
+          });
+        }
         return ok(result);
       } catch (e) {
         // A DeployError carries a stable .code → surface it; anything else is a real
@@ -786,7 +829,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "file manifest (path, sha256 hash, size); returns an uploadId and missingHashes — the " +
         "files NOT already stored — so you resend only what changed (a re-deploy of mostly-" +
         "unchanged files sends almost nothing). Then add_files for those hashes, then " +
-        "finalize_deploy.",
+        "finalize_deploy. Optional coordination (see deploy_canvas): a releaseId and/or the " +
+        "expectedPublicationToken from get_canvas are captured on the upload and enforced at " +
+        "finalize_deploy; a release that is live already answers outcome already_current here " +
+        "with no uploadId, so skip the upload.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         manifest: z
@@ -798,9 +844,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
             }),
           )
           .describe("The full set of files this deploy will publish."),
+        releaseId: z.string().optional().describe("Opaque release identity for this upload."),
+        expectedPublicationToken: z
+          .string()
+          .optional()
+          .describe("The publicationToken read from get_canvas; enforced at finalize_deploy."),
       },
     },
-    async ({ id, manifest }) => {
+    async ({ id, manifest, releaseId, expectedPublicationToken }) => {
       const gate = await requireMutable("begin_deploy", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
@@ -810,7 +861,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         );
       }
       try {
-        return ok(await deps.upload.begin(cv, caller.userId, manifest));
+        const begun = await deps.upload.begin(cv, caller.userId, manifest, {
+          releaseId,
+          expectedPublicationToken,
+        });
+        if (begun.alreadyCurrent) return ok(begun.alreadyCurrent);
+        return ok({ uploadId: begun.uploadId, missingHashes: begun.missingHashes });
       } catch (e) {
         return failDeploy(e);
       }
@@ -863,13 +919,24 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "IMMEDIATELY (the version goes live at once; no draft step). Single-use; fails if any " +
         "manifest blob is still missing. Don't verify by fetching the live URL — it's access-" +
         "controlled and returns a login page to an unauthenticated GET; confirm with the " +
-        "returned {version, fileCount} or get_canvas / list_versions / get_canvas_file instead.",
+        "returned {version, fileCount} or get_canvas / list_versions / get_canvas_file instead. " +
+        "Optional coordination: expectedPublicationToken replaces the token captured at " +
+        "begin_deploy (pass the fresh one after reassessing a PUBLICATION_CHANGED conflict; " +
+        "the handle stays usable); releaseId, if given, must match begin_deploy's.",
       inputSchema: {
         id: z.string().describe("The canvas id (must own it)."),
         uploadId: z.string().describe("The uploadId from begin_deploy."),
+        releaseId: z
+          .string()
+          .optional()
+          .describe("Must equal the releaseId given at begin_deploy."),
+        expectedPublicationToken: z
+          .string()
+          .optional()
+          .describe("Replaces the token captured at begin_deploy."),
       },
     },
-    async ({ id, uploadId }) => {
+    async ({ id, uploadId, releaseId, expectedPublicationToken }) => {
       const gate = await requireMutable("finalize_deploy", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
@@ -879,13 +946,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         );
       }
       try {
-        const result = await deps.upload.finalize(uploadId, caller.userId, cv.id);
-        deps.audit.recordAudit({
-          action: "deploy",
-          actorId: caller.userId,
-          targetId: cv.id,
-          meta: { source: "mcp-upload", version: result.version },
+        const result = await deps.upload.finalize(uploadId, caller.userId, cv.id, {
+          releaseId,
+          expectedPublicationToken,
         });
+        // An already_current result created and activated nothing (R3 / KTD7): no audit event.
+        if (result.outcome === "published") {
+          deps.audit.recordAudit({
+            action: "deploy",
+            actorId: caller.userId,
+            targetId: cv.id,
+            meta: { source: "mcp-upload", version: result.version },
+          });
+        }
         return ok(result);
       } catch (e) {
         return failDeploy(e);
