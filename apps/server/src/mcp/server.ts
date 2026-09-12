@@ -63,6 +63,7 @@ import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { LIMITS } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
+import { currentVersionView } from "../deploy/publication.js";
 import type { DraftService } from "../draft/service.js";
 import type { InviteService } from "../invites/service.js";
 import type { Logger } from "../log/logger.js";
@@ -568,9 +569,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // once, at create. The agent substitutes the key it saved from create_canvas.
       // Deployment coordination readback (R2 / R6 / KTD9): the token a coordinated deploy
       // passes back as its precondition, and the live version's release identity.
-      const current = cv.currentVersionId
-        ? await deps.versions.findById(cv.currentVersionId)
-        : null;
       return ok({
         ...(await viewWithIdentity(cv, gate.role, hasPreview, teamIds)),
         // What only the owner may do (R7) — so an agent acting as an editor knows in
@@ -578,14 +576,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         ownerOnlyActs: OWNER_ONLY_ACTS,
         deploy: deployEndpoints(deps.config, cv.id),
         publicationToken: cv.publicationToken,
-        currentVersion: current
-          ? {
-              id: current.id,
-              number: current.number,
-              releaseId: current.releaseId ?? null,
-              createdAt: current.createdAt,
-            }
-          : null,
+        currentVersion: await currentVersionView(deps.versions, cv),
       });
     },
   );

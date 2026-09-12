@@ -42,6 +42,17 @@ export function versionsRepository(client: DbClient) {
   const t = client.dialect === "sqlite" ? sqliteSchema.versions : pgSchema.versions;
   const canvasesT = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
 
+  /**
+   * The canvas's live pointer as a correlated subquery, evaluated INSIDE the DELETE that
+   * uses it so a concurrent rollback's target is never removed (prune-vs-rollback race).
+   * `isNotNull` avoids NULL-poisoning `notInArray` when the canvas has no current version.
+   */
+  const liveCurrentSubquery = (canvasId: string) =>
+    db
+      .select({ id: canvasesT.currentVersionId })
+      .from(canvasesT)
+      .where(and(eq(canvasesT.id, canvasId), isNotNull(canvasesT.currentVersionId)));
+
   return {
     /** Next per-canvas sequence number (1 for a fresh canvas). */
     async nextNumber(canvasId: string): Promise<number> {
@@ -188,10 +199,6 @@ export function versionsRepository(client: DbClient) {
       number: number,
       expectedId?: string,
     ): Promise<Version | null> {
-      const liveCurrent = db
-        .select({ id: canvasesT.currentVersionId })
-        .from(canvasesT)
-        .where(and(eq(canvasesT.id, canvasId), isNotNull(canvasesT.currentVersionId)));
       const deleted = (await db
         .delete(t)
         .where(
@@ -200,7 +207,7 @@ export function versionsRepository(client: DbClient) {
             eq(t.number, number),
             expectedId ? eq(t.id, expectedId) : undefined,
             eq(t.status, "ready"),
-            notInArray(t.id, liveCurrent),
+            notInArray(t.id, liveCurrentSubquery(canvasId)),
           ),
         )
         .returning()) as Version[];
@@ -215,10 +222,6 @@ export function versionsRepository(client: DbClient) {
      * id is missing, pending, on another canvas, or current.
      */
     async deleteReadyNonCurrentById(canvasId: string, id: string): Promise<Version | null> {
-      const liveCurrent = db
-        .select({ id: canvasesT.currentVersionId })
-        .from(canvasesT)
-        .where(and(eq(canvasesT.id, canvasId), isNotNull(canvasesT.currentVersionId)));
       const deleted = (await db
         .delete(t)
         .where(
@@ -226,7 +229,7 @@ export function versionsRepository(client: DbClient) {
             eq(t.canvasId, canvasId),
             eq(t.id, id),
             eq(t.status, "ready"),
-            notInArray(t.id, liveCurrent),
+            notInArray(t.id, liveCurrentSubquery(canvasId)),
           ),
         )
         .returning()) as Version[];
@@ -258,10 +261,6 @@ export function versionsRepository(client: DbClient) {
         .orderBy(desc(t.number))) as Version[];
       const candidates = ready.slice(keep);
       if (candidates.length === 0) return [];
-      const liveCurrent = db
-        .select({ id: canvasesT.currentVersionId })
-        .from(canvasesT)
-        .where(and(eq(canvasesT.id, canvasId), isNotNull(canvasesT.currentVersionId)));
       const deleted = (await db
         .delete(t)
         .where(
@@ -270,7 +269,7 @@ export function versionsRepository(client: DbClient) {
               t.id,
               candidates.map((v) => v.id),
             ),
-            notInArray(t.id, liveCurrent),
+            notInArray(t.id, liveCurrentSubquery(canvasId)),
           ),
         )
         .returning()) as Version[];

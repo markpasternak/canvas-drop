@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { DeployCommitOptions, DeployEngine } from "../deploy/engine.js";
 import {
+  conflictDetail,
   DeployError,
   type DeployErrorCode,
   LIMITS,
@@ -78,12 +79,7 @@ const COORDINATION_CODES: ReadonlySet<DeployErrorCode> = new Set([
 export function deployErrorResponse(c: Context<AppEnv>, err: DeployError): Response {
   if (err instanceof PublicationConflictError) {
     return c.json(
-      {
-        code: err.code,
-        message: err.message,
-        current: err.current,
-        ...(err.release ? { release: err.release } : {}),
-      },
+      { code: err.code, message: err.message, ...conflictDetail(err) },
       deployErrorStatus(err.code),
     );
   }

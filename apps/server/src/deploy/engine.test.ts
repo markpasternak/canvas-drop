@@ -674,9 +674,8 @@ describe.each(DIALECTS)("deployEngine — deployment coordination [%s]", (dialec
     await conflictOf(
       deploy(t, { "index.html": "y" }, { expectedPublicationToken: "0".repeat(32) }),
     );
-    const hist = await t.readyVersion(S, 120_000);
+    await t.readyVersion(S, 120_000); // a historical holder for S
     await conflictOf(deploy(t, { "index.html": "y" }, { releaseId: S })); // RELEASE_NOT_CURRENT
-    expect(hist.id).toBeDefined();
     expect(t.spies.enqueue).not.toHaveBeenCalled();
     expect(t.spies.markStale).not.toHaveBeenCalled();
     expect(t.spies.resetToBase).not.toHaveBeenCalled();

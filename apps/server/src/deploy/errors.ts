@@ -132,3 +132,11 @@ export class PublicationConflictError extends DeployError {
     this.name = "PublicationConflictError";
   }
 }
+
+/** The `{ current, release? }` body every transport attaches to a coordination conflict. */
+export function conflictDetail(e: PublicationConflictError): {
+  current: CurrentPublication;
+  release?: { versionId: string; version: number };
+} {
+  return { current: e.current, ...(e.release ? { release: e.release } : {}) };
+}

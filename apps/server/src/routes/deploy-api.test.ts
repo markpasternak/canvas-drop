@@ -915,7 +915,6 @@ describe.each(DIALECTS)("deployApiRoutes — deployment coordination [%s]", (dia
     const t = await setup();
     const a = await t.mkCanvas();
     const t1 = a.token;
-    const files = { "index.html": "mine" };
     const begun = await t.json("POST", `/${a.id}/uploads`, a.key, {
       manifest: [{ path: "index.html", hash: t.sha("mine"), size: 4 }],
       releaseId: R,
@@ -975,7 +974,6 @@ describe.each(DIALECTS)("deployApiRoutes — deployment coordination [%s]", (dia
     );
     expect(garbage.status).toBe(400);
     expect(garbage.body.code).toBe("INVALID_REQUEST");
-    expect(files).toBeDefined();
   });
 
   it("an invalid releaseId is 400 INVALID_RELEASE_ID and creates nothing", async () => {

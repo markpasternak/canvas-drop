@@ -23,17 +23,24 @@ import {
 import { DeployError, LIMITS, PublicationConflictError } from "./errors.js";
 import type { DeployEntry } from "./ingest.js";
 import {
+  alreadyCurrentOutcome,
   awaitHolder,
   type Classification,
+  type CommitOutcome,
   type Coordination,
   type CoordinationInput,
   classifyPublication,
+  currentPublication,
+  currentVersionOf,
   holderInFlight,
   normalizeCoordination,
   publicationOf,
+  requireCanvas,
   type WaitOptions,
 } from "./publication.js";
 import { normalizeEntryPath } from "./validate.js";
+
+export type { CommitOutcome } from "./publication.js";
 
 export interface DeployResult {
   /** `published` when this call activated a new version; `already_current` when the
@@ -57,13 +64,6 @@ export interface DeployCommitOptions {
   activateVersion?: (versionId: string) => Promise<void>;
   /** Optional deployment coordination: release identity + expected token (KTD3–KTD5). */
   coordination?: CoordinationInput;
-}
-
-/** What `commitReadyVersion` decided: the version now live and the token after it. */
-export interface CommitOutcome {
-  outcome: "published" | "already_current";
-  version: Version;
-  publicationToken: string;
 }
 
 export interface DeployEngineDeps {
@@ -302,6 +302,8 @@ export function deployEngine(deps: DeployEngineDeps) {
     async precheck(canvas: Canvas, coordination: Coordination): Promise<CommitOutcome | null> {
       const { releaseId, expectedPublicationToken } = coordination;
       if (releaseId === undefined && expectedPublicationToken === undefined) return null;
+      // Every read here is fresh: the caller's `canvas` object may predate an intervening
+      // publish, and the pre-check must judge the pointer and token as they are now.
       let classification: Classification | null = null;
       if (releaseId !== undefined) {
         classification = await classifyPublication(deps, canvas.id, releaseId);
@@ -310,24 +312,17 @@ export function deployEngine(deps: DeployEngineDeps) {
           classification = (await awaitHolder(deps, canvas.id, releaseId, deps.waitOptions))
             .classification;
         }
-        if (classification.kind === "already_current") {
-          return {
-            outcome: "already_current",
-            version: classification.current,
-            publicationToken: classification.canvas.publicationToken,
-          };
-        }
+        if (classification.kind === "already_current") return alreadyCurrentOutcome(classification);
         if (classification.kind === "release_not_current") {
           throw releaseNotCurrent(classification);
         }
       }
       if (expectedPublicationToken !== undefined) {
-        const fresh = classification?.canvas ?? (await deps.canvases.findById(canvas.id));
-        if (!fresh) throw new Error("Canvas is unavailable for publication");
+        const fresh = classification?.canvas ?? (await requireCanvas(deps, canvas.id));
         if (fresh.publicationToken !== expectedPublicationToken) {
-          const current = fresh.currentVersionId
-            ? await deps.versions.findById(fresh.currentVersionId)
-            : null;
+          const current = classification
+            ? classification.current
+            : await currentVersionOf(deps.versions, fresh);
           throw publicationChanged(publicationOf(fresh, current), expectedPublicationToken);
         }
       }
@@ -360,9 +355,10 @@ export function deployEngine(deps: DeployEngineDeps) {
       const { releaseId, expectedPublicationToken } = coordination;
 
       // 1. Mark ready — the partial unique index is where a same-release race is decided.
+      let ready: Version = version;
       for (let attempt = 0; ; attempt++) {
         try {
-          await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
+          ready = await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
           break;
         } catch (err) {
           if (releaseId === undefined || !isUniqueViolation(err, RELEASE_READY_UNIQUE)) throw err;
@@ -374,11 +370,7 @@ export function deployEngine(deps: DeployEngineDeps) {
           );
           if (classification.kind === "already_current") {
             await this.discardPending(canvas.id, version.id);
-            return {
-              outcome: "already_current",
-              version: classification.current,
-              publicationToken: classification.canvas.publicationToken,
-            };
+            return alreadyCurrentOutcome(classification);
           }
           if (classification.kind === "absent" && attempt < 3) continue; // the winner withdrew
           await this.discardPending(canvas.id, version.id);
@@ -395,9 +387,7 @@ export function deployEngine(deps: DeployEngineDeps) {
       let publicationToken: string;
       if (commitOptions?.activateVersion) {
         await commitOptions.activateVersion(version.id);
-        const after = await deps.canvases.findById(canvas.id);
-        if (!after) throw new Error("Canvas is unavailable for publication");
-        publicationToken = after.publicationToken;
+        publicationToken = (await requireCanvas(deps, canvas.id)).publicationToken;
       } else {
         const token = await deps.canvases.activateVersion(canvas.id, version.id, {
           expectedToken: expectedPublicationToken,
@@ -413,20 +403,13 @@ export function deployEngine(deps: DeployEngineDeps) {
             );
           if (releaseId !== undefined) {
             const c = await classifyPublication(deps, canvas.id, releaseId);
-            if (c.kind === "already_current") {
-              return {
-                outcome: "already_current",
-                version: c.current,
-                publicationToken: c.canvas.publicationToken,
-              };
-            }
+            if (c.kind === "already_current") return alreadyCurrentOutcome(c);
+            throw publicationChanged(publicationOf(c.canvas, c.current), expectedPublicationToken);
           }
-          const fresh = await deps.canvases.findById(canvas.id);
-          if (!fresh) throw new Error("Canvas is unavailable for publication");
-          const current = fresh.currentVersionId
-            ? await deps.versions.findById(fresh.currentVersionId)
-            : null;
-          throw publicationChanged(publicationOf(fresh, current), expectedPublicationToken);
+          throw publicationChanged(
+            await currentPublication(deps, canvas.id),
+            expectedPublicationToken,
+          );
         }
         publicationToken = token;
       }
@@ -478,7 +461,6 @@ export function deployEngine(deps: DeployEngineDeps) {
       // rejection if prune throws synchronously.
       this.prune(canvas.id).catch((err) => deps.log.error({ err }, "prune dispatch failed"));
 
-      const ready = (await deps.versions.findById(version.id)) ?? version;
       return { outcome: "published", version: ready, publicationToken };
     },
 

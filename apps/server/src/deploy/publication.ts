@@ -71,16 +71,50 @@ export function publicationOf(canvas: Canvas, current: Version | null): CurrentP
   };
 }
 
-async function loadCanvasAndCurrent(
+/** Load a canvas that must exist for a publication step; a purged/vanished row is a hard error. */
+export async function requireCanvas(deps: PublicationDeps, canvasId: string): Promise<Canvas> {
+  const canvas = await deps.canvases.findById(canvasId);
+  if (!canvas) throw new Error("Canvas is unavailable for publication");
+  return canvas;
+}
+
+/** The live version a canvas points at, or null when unpublished. */
+export function currentVersionOf(
+  versions: Pick<VersionsRepository, "findById">,
+  canvas: Pick<Canvas, "currentVersionId">,
+): Promise<Version | null> {
+  return canvas.currentVersionId
+    ? versions.findById(canvas.currentVersionId)
+    : Promise.resolve(null);
+}
+
+/** The `currentVersion` readback field shared by the keyed API and MCP (R2). */
+export async function currentVersionView(
+  versions: Pick<VersionsRepository, "findById">,
+  canvas: Pick<Canvas, "currentVersionId">,
+): Promise<{ id: string; number: number; releaseId: string | null; createdAt: number } | null> {
+  const current = await currentVersionOf(versions, canvas);
+  return current
+    ? {
+        id: current.id,
+        number: current.number,
+        releaseId: current.releaseId ?? null,
+        createdAt: current.createdAt,
+      }
+    : null;
+}
+
+/**
+ * The canvas and its live version, always read fresh: a caller's `Canvas` object may be
+ * stale (loaded before an intervening publish), and every coordination decision must see
+ * the pointer and token as they are now.
+ */
+export async function loadCanvasAndCurrent(
   deps: PublicationDeps,
   canvasId: string,
 ): Promise<{ canvas: Canvas; current: Version | null }> {
-  const canvas = await deps.canvases.findById(canvasId);
-  if (!canvas) throw new Error("Canvas is unavailable for publication");
-  const current = canvas.currentVersionId
-    ? await deps.versions.findById(canvas.currentVersionId)
-    : null;
-  return { canvas, current };
+  const canvas = await requireCanvas(deps, canvasId);
+  return { canvas, current: await currentVersionOf(deps.versions, canvas) };
 }
 
 export async function currentPublication(
@@ -89,6 +123,24 @@ export async function currentPublication(
 ): Promise<CurrentPublication> {
   const { canvas, current } = await loadCanvasAndCurrent(deps, canvasId);
   return publicationOf(canvas, current);
+}
+
+/** What `commitReadyVersion` decided: the version now live and the token after it. */
+export interface CommitOutcome {
+  outcome: "published" | "already_current";
+  version: Version;
+  publicationToken: string;
+}
+
+/** The `already_current` outcome (R3), built from a classification that found the release live. */
+export function alreadyCurrentOutcome(
+  c: Extract<Classification, { kind: "already_current" }>,
+): CommitOutcome {
+  return {
+    outcome: "already_current",
+    version: c.current,
+    publicationToken: c.canvas.publicationToken,
+  };
 }
 
 export type Classification =

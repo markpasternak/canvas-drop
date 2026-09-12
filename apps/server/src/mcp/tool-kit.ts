@@ -2,7 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import { accessModeOf, parseRuntimePolicy } from "@canvas-drop/shared";
 import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
 import { canvasUrl } from "../canvas/url.js";
-import { DeployError, PublicationConflictError } from "../deploy/errors.js";
+import { conflictDetail, DeployError, PublicationConflictError } from "../deploy/errors.js";
 import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
 
 /** The MCP tool return envelope. `isError` marks a tool-level failure. */
@@ -28,11 +28,7 @@ export function fail(message: string): ToolResult {
  *  an agent can reassess from the same text the HTTP 409 body carries. */
 export function failDeploy(e: unknown): ToolResult {
   if (e instanceof PublicationConflictError) {
-    const detail = JSON.stringify({
-      current: e.current,
-      ...(e.release ? { release: e.release } : {}),
-    });
-    return fail(`${e.code}: ${e.message} ${detail}`);
+    return fail(`${e.code}: ${e.message} ${JSON.stringify(conflictDetail(e))}`);
   }
   if (e instanceof DeployError) return fail(`${e.code}: ${e.message}`);
   throw e;

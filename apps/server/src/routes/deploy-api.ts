@@ -15,6 +15,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { fromZip } from "../deploy/ingest.js";
+import { currentVersionView } from "../deploy/publication.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
@@ -216,9 +217,6 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
     // Deployment coordination readback (R2 / R6): the current release identity and the
     // publication token a publisher passes back as its precondition.
-    const current = auth.currentVersionId
-      ? await deps.versions.findById(auth.currentVersionId)
-      : null;
     return c.json({
       id: auth.id,
       slug: auth.slug,
@@ -234,14 +232,7 @@ export function deployApiRoutes(deps: DeployApiDeps) {
       accessMode: accessModeOf(auth.access),
       currentVersionId: auth.currentVersionId,
       publicationToken: auth.publicationToken,
-      currentVersion: current
-        ? {
-            id: current.id,
-            number: current.number,
-            releaseId: current.releaseId ?? null,
-            createdAt: current.createdAt,
-          }
-        : null,
+      currentVersion: await currentVersionView(deps.versions, auth),
     });
   });
 

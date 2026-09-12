@@ -15,6 +15,7 @@ import type { DeployEngine, DeployResult } from "../deploy/engine.js";
 import { DeployError, LIMITS, PublicationConflictError } from "../deploy/errors.js";
 import { type FileInput, fromFilesArray } from "../deploy/ingest.js";
 import {
+  alreadyCurrentOutcome,
   type Coordination,
   type CoordinationInput,
   normalizeCoordination,
@@ -91,12 +92,26 @@ export function uploadService(deps: UploadServiceDeps) {
     callerId: string,
     canvasId: string,
   ): Promise<UploadSession> {
+    const s = await requireBound(handleHash, callerId, canvasId);
+    if (s.consumedAt) throw new DeployError("UPLOAD_ALREADY_FINALIZED", "already finalized");
+    return requireUnexpired(s);
+  }
+
+  /** The session bound to this actor and canvas, whatever its lifecycle state. */
+  async function requireBound(
+    handleHash: string,
+    callerId: string,
+    canvasId: string,
+  ): Promise<UploadSession> {
     const s = await deps.uploadSessions.findByHandleHash(handleHash);
     // One opaque code for unknown / wrong-actor / wrong-canvas — no existence leak.
     if (!s || s.actorId !== callerId || s.canvasId !== canvasId) {
       throw new DeployError("UPLOAD_HANDLE_INVALID", "no such upload session");
     }
-    if (s.consumedAt) throw new DeployError("UPLOAD_ALREADY_FINALIZED", "already finalized");
+    return s;
+  }
+
+  function requireUnexpired(s: UploadSession): UploadSession {
     if (s.expiresAt <= now()) throw new DeployError("UPLOAD_EXPIRED", "upload session expired");
     return s;
   }
@@ -312,26 +327,17 @@ export function uploadService(deps: UploadServiceDeps) {
       const supplied = normalizeCoordination(coordination);
 
       // Binding + liveness pre-check before claiming (clear errors for the common cases).
-      const existing = await deps.uploadSessions.findByHandleHash(handleHash);
-      if (!existing || existing.actorId !== callerId || existing.canvasId !== canvasId) {
-        throw new DeployError("UPLOAD_HANDLE_INVALID", "no such upload session");
-      }
+      const existing = await requireBound(handleHash, callerId, canvasId);
       if (existing.consumedAt) {
         if (existing.releaseId) {
           const c = await deps.engine.classifyRelease(canvasId, existing.releaseId);
           if (c.kind === "already_current") {
-            return deps.engine.toResult(c.canvas, {
-              outcome: "already_current",
-              version: c.current,
-              publicationToken: c.canvas.publicationToken,
-            });
+            return deps.engine.toResult(c.canvas, alreadyCurrentOutcome(c));
           }
         }
         throw new DeployError("UPLOAD_ALREADY_FINALIZED", "already finalized");
       }
-      if (existing.expiresAt <= now()) {
-        throw new DeployError("UPLOAD_EXPIRED", "upload session expired");
-      }
+      requireUnexpired(existing);
 
       // Merge the coordination fields: begin's values are the floor, finalize may
       // refresh the token after reassessing; the release identity is fixed at begin.
