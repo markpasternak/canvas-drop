@@ -11,6 +11,7 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
 import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { isUniqueViolation, RELEASE_READY_UNIQUE } from "../db/unique-violation.js";
 import { stampAll } from "../draft/service.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -19,13 +20,33 @@ import {
   KEEP_VERSIONS,
   PENDING_VERSION_TTL_MS,
 } from "./constants.js";
-import { DeployError, LIMITS } from "./errors.js";
+import { DeployError, LIMITS, PublicationConflictError } from "./errors.js";
 import type { DeployEntry } from "./ingest.js";
+import {
+  awaitHolder,
+  type Classification,
+  type Coordination,
+  type CoordinationInput,
+  classifyPublication,
+  holderInFlight,
+  normalizeCoordination,
+  publicationOf,
+  type WaitOptions,
+} from "./publication.js";
 import { normalizeEntryPath } from "./validate.js";
 
 export interface DeployResult {
+  /** `published` when this call activated a new version; `already_current` when the
+   *  requested release was live already and nothing was created (R3). */
+  outcome: "published" | "already_current";
   url: string;
   version: number;
+  /** The immutable id of the version this result describes (new, or the live one). */
+  versionId: string;
+  /** The release identity on that version, when one was supplied (R1 / R2). */
+  releaseId: string | null;
+  /** The canvas's publication token after this call (R6 / R8). */
+  publicationToken: string;
   fileCount: number;
   totalBytes: number;
   warnings: string[];
@@ -34,6 +55,15 @@ export interface DeployResult {
 export interface DeployCommitOptions {
   /** Replace the normal live-pointer swap with a caller-owned atomic activation. */
   activateVersion?: (versionId: string) => Promise<void>;
+  /** Optional deployment coordination: release identity + expected token (KTD3–KTD5). */
+  coordination?: CoordinationInput;
+}
+
+/** What `commitReadyVersion` decided: the version now live and the token after it. */
+export interface CommitOutcome {
+  outcome: "published" | "already_current";
+  version: Version;
+  publicationToken: string;
 }
 
 export interface DeployEngineDeps {
@@ -48,6 +78,8 @@ export interface DeployEngineDeps {
   /** Screenshot capture trigger (plan 004 / U13) — effective-gated + best-effort; a
    *  deploy schedules a preview of the new version. Optional (absent in tests/when off). */
   screenshots?: import("../screenshots/trigger.js").ScreenshotTrigger;
+  /** The KTD4 wait's clock, injectable for deterministic tests (defaults: 20 × 100 ms). */
+  waitOptions?: WaitOptions;
 }
 
 // KEEP_VERSIONS now lives in ./constants.js (neutral home shared with the draft
@@ -64,6 +96,35 @@ export { KEEP_VERSIONS };
  */
 const PUT_CONCURRENCY = 8;
 
+/** R4: the release exists on a kept version that is not live. Names that version + the current publication. */
+function releaseNotCurrent(
+  c: Extract<Classification, { kind: "release_not_current" }>,
+  timedOut = false,
+): PublicationConflictError {
+  const where = c.current ? `version ${c.current.number} is live` : "the canvas is unpublished";
+  return new PublicationConflictError(
+    "RELEASE_NOT_CURRENT",
+    `Release ${c.holder.releaseId} exists as version ${c.holder.number} but is not live (${where}${
+      timedOut ? "; its publisher never activated it" : ""
+    }); roll back to it or publish a new release.`,
+    publicationOf(c.canvas, c.current),
+    { versionId: c.holder.id, version: c.holder.number },
+  );
+}
+
+/** R9: the token the caller observed no longer matches the publication. */
+function publicationChanged(
+  current: import("./errors.js").CurrentPublication,
+  expected: string | undefined,
+): PublicationConflictError {
+  const seen = expected ? `token ${expected.slice(0, 8)}…` : "the observed publication";
+  return new PublicationConflictError(
+    "PUBLICATION_CHANGED",
+    `Publication changed since ${seen} was read; reassess before retrying.`,
+    current,
+  );
+}
+
 /**
  * The deploy engine (§9.5, KTD-3/4). Turns a stream of entries (from any of the
  * three ingestion adapters) into a new immutable version with an atomic pointer
@@ -79,10 +140,24 @@ export function deployEngine(deps: DeployEngineDeps) {
       actorId: string,
       commitOptions?: DeployCommitOptions,
     ): Promise<DeployResult> {
+      // Deployment coordination (KTD4 / KTD6 / R12): validate the optional fields and
+      // answer the cheap cases BEFORE any bytes are ingested — a release that is live
+      // already, a release that only exists in history, or a token that is already
+      // stale. The atomic activation below remains authoritative for every outcome.
+      const coordination = normalizeCoordination(commitOptions?.coordination);
+      const early = await this.precheck(canvas, coordination);
+      if (early) return this.toResult(canvas, early);
+      const options: DeployCommitOptions = { ...commitOptions, coordination };
+
       // Concurrent deploys to one canvas can race nextNumber; the unique index on
       // (canvas_id, number) makes a collision a constraint error — retry rather
       // than surface a raw 500.
-      const version = await this.createVersionWithRetry(canvas.id, actorId, source);
+      const version = await this.createVersionWithRetry(
+        canvas.id,
+        actorId,
+        source,
+        coordination.releaseId,
+      );
 
       const manifest: Manifest = {};
       const warnings: string[] = [];
@@ -184,22 +259,79 @@ export function deployEngine(deps: DeployEngineDeps) {
         throw err;
       }
 
-      await this.commitReadyVersion(
+      const committed = await this.commitReadyVersion(
         canvas,
         version,
         manifest,
         fileCount,
         totalBytes,
-        commitOptions,
+        options,
       );
+      return this.toResult(canvas, committed, warnings);
+    },
 
+    /**
+     * Build the machine-readable result (§9.5.4 + KTD5). An `already_current` result
+     * describes the version that is live — its counts, release and the current token —
+     * with no warnings, because nothing of the caller's was ingested or kept.
+     */
+    toResult(canvas: Canvas, committed: CommitOutcome, warnings: string[] = []): DeployResult {
+      const v = committed.version;
       return {
+        outcome: committed.outcome,
         url: canvasUrl(deps.config, canvas.slug),
-        version: version.number,
-        fileCount,
-        totalBytes,
-        warnings,
+        version: v.number,
+        versionId: v.id,
+        releaseId: v.releaseId ?? null,
+        publicationToken: committed.publicationToken,
+        fileCount: v.fileCount,
+        totalBytes: v.totalBytes,
+        warnings: committed.outcome === "published" ? warnings : [],
       };
+    },
+
+    /**
+     * The pre-check (KTD4, R12). Returns an `already_current` outcome when the release is
+     * live, throws `RELEASE_NOT_CURRENT` when it exists only in history, throws
+     * `PUBLICATION_CHANGED` when the expected token is already stale, and returns null
+     * when the deploy should proceed. When the release sits on an in-flight holder
+     * (ready, newer than the live version) it waits per KTD4 first, so a publisher racing
+     * a winner that is between its markReady and its swap sees `already_current` rather
+     * than a misleading conflict.
+     */
+    async precheck(canvas: Canvas, coordination: Coordination): Promise<CommitOutcome | null> {
+      const { releaseId, expectedPublicationToken } = coordination;
+      if (releaseId === undefined && expectedPublicationToken === undefined) return null;
+      let classification: Classification | null = null;
+      if (releaseId !== undefined) {
+        classification = await classifyPublication(deps, canvas.id, releaseId);
+        const w = deps.waitOptions;
+        if (holderInFlight(classification, w?.now?.() ?? Date.now(), w?.inFlightWindowMs)) {
+          classification = (await awaitHolder(deps, canvas.id, releaseId, deps.waitOptions))
+            .classification;
+        }
+        if (classification.kind === "already_current") {
+          return {
+            outcome: "already_current",
+            version: classification.current,
+            publicationToken: classification.canvas.publicationToken,
+          };
+        }
+        if (classification.kind === "release_not_current") {
+          throw releaseNotCurrent(classification);
+        }
+      }
+      if (expectedPublicationToken !== undefined) {
+        const fresh = classification?.canvas ?? (await deps.canvases.findById(canvas.id));
+        if (!fresh) throw new Error("Canvas is unavailable for publication");
+        if (fresh.publicationToken !== expectedPublicationToken) {
+          const current = fresh.currentVersionId
+            ? await deps.versions.findById(fresh.currentVersionId)
+            : null;
+          throw publicationChanged(publicationOf(fresh, current), expectedPublicationToken);
+        }
+      }
+      return null;
     },
 
     /**
@@ -207,6 +339,14 @@ export function deployEngine(deps: DeployEngineDeps) {
      * ready, swap the live pointer, reconcile the draft, and kick async prune.
      * Shared by `deploy()` (blobs written inline) and the two-channel upload
      * finalize (blobs pre-staged, plan 003) — one commit tail, no parallel logic.
+     *
+     * Deployment coordination (KTD3 / KTD4 / KTD7): `markReady` may hit the partial
+     * unique index when another publisher won the same release — the candidate then
+     * stays pending while we wait on the holder, and either the winner lands
+     * (`already_current`), withdraws (we retry), or proves historical / crashed
+     * (`RELEASE_NOT_CURRENT`). The swap itself is the conditional `activateVersion`;
+     * when it matches nothing the candidate is deleted and the caller gets
+     * `already_current` or `PUBLICATION_CHANGED`. Side effects run only after a swap.
      */
     async commitReadyVersion(
       canvas: Canvas,
@@ -215,17 +355,81 @@ export function deployEngine(deps: DeployEngineDeps) {
       fileCount: number,
       totalBytes: number,
       commitOptions?: DeployCommitOptions,
-    ): Promise<void> {
-      // Atomic-ish swap: mark ready, then move the canvas pointer. The pointer
-      // swap is the commit — a crash before it leaves the old version live. If the
-      // swap throws, the version is ready-but-not-current (orphaned): its blobs may
-      // be shared with the live version so they're left for GC, and the orphaned
-      // ready row is pruned by keep-10. Nothing is served from it (never current).
-      // `markReady` asserts exactly one row updated — a finalize whose canvas was
-      // purged between createPending and here fails cleanly (plan 003 guard).
-      await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
-      if (commitOptions?.activateVersion) await commitOptions.activateVersion(version.id);
-      else await deps.canvases.setCurrentVersion(canvas.id, version.id);
+    ): Promise<CommitOutcome> {
+      const coordination = normalizeCoordination(commitOptions?.coordination);
+      const { releaseId, expectedPublicationToken } = coordination;
+
+      // 1. Mark ready — the partial unique index is where a same-release race is decided.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
+          break;
+        } catch (err) {
+          if (releaseId === undefined || !isUniqueViolation(err, RELEASE_READY_UNIQUE)) throw err;
+          const { classification, timedOut } = await awaitHolder(
+            deps,
+            canvas.id,
+            releaseId,
+            deps.waitOptions,
+          );
+          if (classification.kind === "already_current") {
+            await this.discardPending(canvas.id, version.id);
+            return {
+              outcome: "already_current",
+              version: classification.current,
+              publicationToken: classification.canvas.publicationToken,
+            };
+          }
+          if (classification.kind === "absent" && attempt < 3) continue; // the winner withdrew
+          await this.discardPending(canvas.id, version.id);
+          if (classification.kind === "release_not_current") {
+            throw releaseNotCurrent(classification, timedOut);
+          }
+          throw err; // absent yet still violating after retries — surface the real error
+        }
+      }
+
+      // 2. Activate — one conditional UPDATE is the commit (a crash before it leaves the
+      // old version live). A caller-owned hook (the authoring route) performs its own
+      // atomic swap and rotates the token through the repository; we re-read for it.
+      let publicationToken: string;
+      if (commitOptions?.activateVersion) {
+        await commitOptions.activateVersion(version.id);
+        const after = await deps.canvases.findById(canvas.id);
+        if (!after) throw new Error("Canvas is unavailable for publication");
+        publicationToken = after.publicationToken;
+      } else {
+        const token = await deps.canvases.activateVersion(canvas.id, version.id, {
+          expectedToken: expectedPublicationToken,
+        });
+        if (token === null) {
+          // Nothing matched: the token moved, the canvas is being purged, or the row is
+          // gone. The candidate is ready-but-never-current — remove it (its blobs may be
+          // shared with the live version, so they are left to GC) and classify (R9).
+          await deps.versions
+            .deleteReadyNonCurrentById(canvas.id, version.id)
+            .catch((e) =>
+              deps.log.warn({ err: e, canvasId: canvas.id }, "candidate cleanup failed"),
+            );
+          if (releaseId !== undefined) {
+            const c = await classifyPublication(deps, canvas.id, releaseId);
+            if (c.kind === "already_current") {
+              return {
+                outcome: "already_current",
+                version: c.current,
+                publicationToken: c.canvas.publicationToken,
+              };
+            }
+          }
+          const fresh = await deps.canvases.findById(canvas.id);
+          if (!fresh) throw new Error("Canvas is unavailable for publication");
+          const current = fresh.currentVersionId
+            ? await deps.versions.findById(fresh.currentVersionId)
+            : null;
+          throw publicationChanged(publicationOf(fresh, current), expectedPublicationToken);
+        }
+        publicationToken = token;
+      }
 
       // Schedule a preview capture of the freshly deployed version (plan 004 / U13).
       // Effective-gated + best-effort inside the trigger — never fails the deploy.
@@ -273,6 +477,16 @@ export function deployEngine(deps: DeployEngineDeps) {
       // never block or fail the deploy. `.catch` guards against an unhandled
       // rejection if prune throws synchronously.
       this.prune(canvas.id).catch((err) => deps.log.error({ err }, "prune dispatch failed"));
+
+      const ready = (await deps.versions.findById(version.id)) ?? version;
+      return { outcome: "published", version: ready, publicationToken };
+    },
+
+    /** Remove a candidate that lost a same-release race while still pending (best-effort). */
+    async discardPending(canvasId: string, versionId: string): Promise<void> {
+      await deps.versions
+        .deletePending(versionId)
+        .catch((e) => deps.log.warn({ err: e, canvasId }, "pending candidate cleanup failed"));
     },
 
     /** Create the pending version, retrying on a (canvas_id, number) collision. */
@@ -280,10 +494,11 @@ export function deployEngine(deps: DeployEngineDeps) {
       canvasId: string,
       actorId: string,
       source: DeploySource,
+      releaseId?: string | null,
     ): Promise<Version> {
       // Delegates to the shared helper (review server-canvas-10) so the draft
       // service's publish path runs the exact same collision-retry policy.
-      return createPendingVersionWithRetry(deps.versions, canvasId, actorId, source);
+      return createPendingVersionWithRetry(deps.versions, canvasId, actorId, source, releaseId);
     },
 
     /**

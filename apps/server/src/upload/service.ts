@@ -346,15 +346,14 @@ export function uploadService(deps: UploadServiceDeps) {
         // already staged, so a failed commit after this point requires a fresh
         // begin()/stage/finalize cycle — acceptable, and never duplicates a version.
         await deps.uploadSessions.markConsumed(claimed.id);
-        await deps.engine.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
-
-        return {
-          url: canvasUrl(deps.config, canvas.slug),
-          version: version.number,
+        const committed = await deps.engine.commitReadyVersion(
+          canvas,
+          version,
+          manifest,
           fileCount,
           totalBytes,
-          warnings,
-        };
+        );
+        return deps.engine.toResult(canvas, committed, warnings);
       } catch (err) {
         // Release the lease so a legitimate retry (a client that still needs to
         // upload a missing blob, or a pre-markConsumed failure) can re-claim. Once

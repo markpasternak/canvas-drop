@@ -2,9 +2,17 @@ import { randomUUID } from "node:crypto";
 import { S3Client } from "@aws-sdk/client-s3";
 import { loadConfig } from "@canvas-drop/shared";
 import { Client } from "pg";
+import { pino } from "pino";
 import { describe, expect, it } from "vitest";
+import type { DbClient } from "../db/factory.js";
 import { makeDb } from "../db/factory.js";
+import { canvasesRepository } from "../db/repositories/canvases.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
+import { versionsRepository } from "../db/repositories/versions.js";
+import { deployEngine } from "../deploy/engine.js";
+import type { DeployEntry } from "../deploy/ingest.js";
+import { memStorage } from "../storage/mem.js";
 import { S3Driver } from "../storage/s3.js";
 
 /**
@@ -84,6 +92,88 @@ describe.skipIf(!PG_URL)("real Postgres (node-postgres driver)", () => {
         expect((await repo.findById(u.id))?.id).toBe(u.id);
       } finally {
         await client.close();
+      }
+    });
+  });
+});
+
+// Deployment coordination under TRUE concurrency (plan 2026-09-12, KTD2/KTD3, AE2). The
+// in-process PGlite leg serializes statements, so only a networked Postgres exercises the
+// partial unique index and the single-statement compare-and-swap across separate
+// connections. Each engine gets its own node-postgres client (its own connection pool).
+describe.skipIf(!PG_URL)("real Postgres — deployment coordination under concurrency", () => {
+  const silent = pino({ level: "silent" });
+  const enc = (s: string) => new TextEncoder().encode(s);
+  async function* one(body: string): AsyncGenerator<DeployEntry> {
+    yield { path: "index.html", bytes: enc(body) };
+  }
+
+  it("two connections deploying one release keep exactly one ready version; a third with a stale token is refused (AE2, R8)", async () => {
+    await withIsolatedDatabase(PG_URL as string, async (url) => {
+      const config = loadConfig({
+        CANVAS_DROP_AUTH_MODE: "dev",
+        CANVAS_DROP_DB: "postgres",
+        CANVAS_DROP_DATABASE_URL: url,
+      });
+      const clients: DbClient[] = [makeDb(config), makeDb(config), makeDb(config)];
+      try {
+        await clients[0]?.migrate();
+        const storage = memStorage();
+        const engineFor = (client: DbClient) =>
+          deployEngine({
+            config,
+            canvases: canvasesRepository(client),
+            versions: versionsRepository(client),
+            drafts: draftsRepository(client),
+            storage,
+            log: silent,
+            waitOptions: { intervalMs: 20 },
+          });
+        const c0 = clients[0] as DbClient;
+        const owner = await usersRepository(c0).upsert({
+          providerSub: `coord-${RUN_ID}`,
+          email: `coord-${RUN_ID}@example.com`,
+          name: "Coord",
+          isAdmin: false,
+        });
+        const canvases = canvasesRepository(c0);
+        const cv = await canvases.create({
+          ownerId: owner.id,
+          slug: `coord-${RUN_ID}`.slice(0, 40),
+          apiKeyHash: `k-${RUN_ID}`,
+        });
+        const t0 = cv.publicationToken;
+
+        const [a, b] = await Promise.all([
+          engineFor(c0).deploy(cv, "api", one("a"), owner.id, {
+            coordination: { releaseId: "R" },
+          }),
+          engineFor(clients[1] as DbClient).deploy(cv, "api", one("b"), owner.id, {
+            coordination: { releaseId: "R" },
+          }),
+        ]);
+        expect([a.outcome, b.outcome].sort()).toEqual(["already_current", "published"]);
+        expect(a.versionId).toBe(b.versionId);
+        const versions = versionsRepository(c0);
+        const rows = await versions.listByCanvas(cv.id);
+        const ready = rows.filter((v) => v.status === "ready");
+        expect(ready).toHaveLength(1);
+        expect(ready[0]?.releaseId).toBe("R");
+        expect(rows.filter((v) => v.status === "pending")).toHaveLength(0);
+        expect((await canvases.findById(cv.id))?.currentVersionId).toBe(ready[0]?.id);
+
+        // A third publisher holding the pre-publication token is refused atomically.
+        await expect(
+          engineFor(clients[2] as DbClient).deploy(cv, "api", one("c"), owner.id, {
+            coordination: { expectedPublicationToken: t0 },
+          }),
+        ).rejects.toMatchObject({ code: "PUBLICATION_CHANGED" });
+        expect((await canvases.findById(cv.id))?.currentVersionId).toBe(ready[0]?.id);
+        expect(
+          (await versions.listByCanvas(cv.id)).filter((v) => v.status === "ready"),
+        ).toHaveLength(1);
+      } finally {
+        for (const c of clients) await c.close();
       }
     });
   });

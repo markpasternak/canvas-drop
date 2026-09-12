@@ -33,12 +33,20 @@ export async function createPendingVersionWithRetry(
   canvasId: string,
   actorId: string,
   source: DeploySource,
+  /** Caller-supplied release identity to stamp on the row (deployment coordination, R1). */
+  releaseId?: string | null,
 ): Promise<Version> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < VERSION_NUMBER_ATTEMPTS; attempt++) {
     const number = await versions.nextNumber(canvasId);
     try {
-      return await versions.createPending({ canvasId, number, createdBy: actorId, source });
+      return await versions.createPending({
+        canvasId,
+        number,
+        createdBy: actorId,
+        source,
+        releaseId: releaseId ?? null,
+      });
     } catch (err) {
       lastErr = err; // unique-constraint collision from a concurrent deploy — retry
     }
