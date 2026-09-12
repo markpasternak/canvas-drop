@@ -63,6 +63,17 @@ in between (including a human's editor publish).
 - **Blob GC grace for consumed sessions.** `listActiveByCanvas` also returns sessions
   consumed within `CONSUMED_GRACE_MS` (60 s), so a handle a conflict is about to un-consume
   never has its staged blobs swept in between.
+- **Fence `unconsume` on the claimed lease.** `claimForFinalize` returns the row with the
+  `finalizingAt` it stamped; `unconsume(id, leaseStamp)` reopens the handle only while that
+  stamp is still current. A finalize that outlives `FINALIZE_LEASE_MS` (2000 sequential
+  `storage.exists` calls on slow storage) loses its lease to the client's retry; without the
+  fence its own token conflict would reopen the handle the retry had already published
+  (caught by the cross-model review).
+- **Best-effort cleanup is retried, and its final failure is an error log.** A candidate
+  that lost the conditional activation is a ready row still carrying its release id, so a
+  failed `deleteReadyNonCurrentById` makes the next deploy of that release read
+  `RELEASE_NOT_CURRENT` naming a cleanup artifact. `removeLostCandidate` retries three
+  times and logs the orphan's version id at error level; `delete_version` removes it by hand.
 - **`''` is a legal token value in the schema** (`NOT NULL DEFAULT ''`) so both dialects
   can `ADD COLUMN`. The migration backfills, and `mintMissingPublicationTokens()` runs
   inside `runMigrations` and at the end of `restoreBackup`, because the restore CLI
