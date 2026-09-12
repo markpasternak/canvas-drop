@@ -102,11 +102,11 @@ jobs:
           --health-retries 5
     env:
       CANVAS_DROP_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/canvasdrop_test
-      CANVAS_DROP_TEST_S3_ENDPOINT: http://localhost:9000
+      CANVAS_DROP_TEST_S3_ENDPOINT: http://localhost:8333
       CANVAS_DROP_TEST_S3_BUCKET: canvas-drop-test
       CANVAS_DROP_TEST_S3_REGION: us-east-1
-      CANVAS_DROP_TEST_S3_ACCESS_KEY: minioadmin
-      CANVAS_DROP_TEST_S3_SECRET_KEY: minioadmin
+      CANVAS_DROP_TEST_S3_ACCESS_KEY: canvasdrop
+      CANVAS_DROP_TEST_S3_SECRET_KEY: canvasdrop-demo-only-secret
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -117,23 +117,30 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      # MinIO runs as a step (not a service): the MinIO image needs a `server`
-      # command, which service containers can't override. Pulled from quay.io,
-      # pinned to the last community release: the Docker Hub `minio/minio`
-      # repository was removed in 2026 (pulls fail with "pull access denied").
-      - name: Start MinIO and create the test bucket
+      # SeaweedFS is the S3-compatible endpoint the real-infra tests run against (the
+      # MinIO community images were withdrawn from Docker Hub in 2025). It runs as a
+      # step (not a service) because it needs a `server -s3` command, which service
+      # containers can't override; one container hosts master + volume + filer + the
+      # S3 gateway on :8333, with the same demo credentials the compose profile uses.
+      - name: Start SeaweedFS and create the test bucket
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          docker run -d --name seaweedfs -p 8333:8333 \
+            -v "$PWD/docker/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro" \
+            chrislusf/seaweedfs:4.46 \
+            server -s3 -dir=/data -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=1024 -ip.bind=0.0.0.0
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then echo "minio up"; break; fi
+            if curl -s -o /dev/null http://localhost:8333/; then echo "seaweedfs up"; break; fi
             sleep 2
           done
-          aws --endpoint-url http://localhost:9000 s3 mb s3://canvas-drop-test
+          # The gateway answers before the volume server has registered; retry the bucket.
+          for i in $(seq 1 15); do
+            if aws --endpoint-url http://localhost:8333 s3 mb s3://canvas-drop-test; then break; fi
+            sleep 2
+          done
+          aws --endpoint-url http://localhost:8333 s3 ls
         env:
-          AWS_ACCESS_KEY_ID: minioadmin
-          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_ACCESS_KEY_ID: canvasdrop
+          AWS_SECRET_ACCESS_KEY: canvasdrop-demo-only-secret
           AWS_DEFAULT_REGION: us-east-1
 
       - run: pnpm install --frozen-lockfile

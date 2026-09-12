@@ -6,7 +6,7 @@ import { S3Driver } from "./s3.js";
 
 /**
  * In-memory S3 fake exercising the real {@link S3Driver} logic without a live
- * backend. CI runs the same driver against MinIO (U12); this gives fast,
+ * backend. CI runs the same driver against SeaweedFS (U12); this gives fast,
  * deterministic local coverage of the command mapping.
  */
 function fakeS3Client(): S3Client {

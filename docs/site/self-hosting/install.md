@@ -49,7 +49,7 @@ What comes up:
 | `dex` | `dexidp/dex:v2.41.1` | Bundled demo identity provider with one static user, `demo@example.com` / `canvasdrop`. |
 | `app` | built from the repo `Dockerfile` as `canvas-drop:dev` | canvas-drop in `proxy` auth mode, verifying the JWT against Dex's JWKS (`CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL=http://dex:5556/dex/keys`). Path URL mode, Postgres, local storage on the `app-data` volume, a separate `backups` volume. No published port. |
 | `postgres` | `postgres:16-alpine` | Database, on the `pg-data` volume, with a `pg_isready` health check the app waits on. |
-| `minio` | `minio/minio:RELEASE.2024-11-07T00-52-20Z` | Optional S3-compatible storage. Starts only with `--profile minio` (below). |
+| `seaweedfs` | `chrislusf/seaweedfs:4.46` | Optional S3-compatible object storage. Starts only with `--profile s3` (below). |
 
 What to know about the demo:
 
@@ -69,7 +69,7 @@ What to know about the demo:
   `docker compose up -d` again.
 
 Pause the stack with `docker compose stop`. Tear it down and delete every volume
-(`app-data`, `backups`, `pg-data`, `minio-data`) with `docker compose down -v`.
+(`app-data`, `backups`, `pg-data`, `s3-data`) with `docker compose down -v`.
 
 > The Dex and oauth2-proxy secrets in `docker/`, the session secret in
 > `docker-compose.yml`, and the `demo@example.com` login are public, demo-only
@@ -92,30 +92,36 @@ with `authMode: proxy`, and the same user id survives
 KEEP_UP=0 ./scripts/compose-smoke.sh   # same, then `docker compose down -v`
 ```
 
-### Switch the demo to S3-compatible storage (MinIO)
+### Switch the demo to S3-compatible storage (SeaweedFS)
 
-`--profile minio` adds a MinIO container (`minioadmin` / `minioadmin`, data on the
-`minio-data` volume). It does not switch the app over by itself: the `app` service
-keeps `CANVAS_DROP_STORAGE: local` until you change it. Do this on a fresh
-instance; blobs already written to local storage are not moved when the driver
-changes (to move an existing instance, use `backup` and `restore`, below).
+The app's storage driver speaks plain S3, so any S3-compatible endpoint works: AWS S3,
+Cloudflare R2, DigitalOcean Spaces, Backblaze B2, or a store you run yourself. The
+compose file bundles [SeaweedFS](https://github.com/seaweedfs/seaweedfs) (Apache-2.0,
+actively maintained) for trying that mode locally. `--profile s3` adds one SeaweedFS
+container (S3 gateway on port 8333 inside the network, data on the `s3-data` volume)
+whose demo credentials live in `docker/seaweedfs-s3.json` (`canvasdrop` /
+`canvasdrop-demo-only-secret`; change them before exposing anything). It does not
+switch the app over by itself: the `app` service keeps `CANVAS_DROP_STORAGE: local`
+until you change it. Do this on a fresh instance; blobs already written to local
+storage are not moved when the driver changes (to move an existing instance, use
+`backup` and `restore`, below).
 
-1. Start MinIO alongside the stack. Pass `--profile minio` on every later
-   `docker compose` command too, or Compose leaves the MinIO container out.
+1. Start SeaweedFS alongside the stack. Pass `--profile s3` on every later
+   `docker compose` command too, or Compose leaves the container out.
 
    ```bash
-   docker compose --profile minio up -d --build
+   docker compose --profile s3 up -d --build
    ```
 
-2. Create the bucket. Neither MinIO nor the storage driver creates it on first
-   write. The compose file publishes no MinIO port, so either run your S3 client
-   inside the compose network, or add `ports: ["9000:9000"]` to the `minio`
+2. Create the bucket. Neither SeaweedFS nor the storage driver creates it on first
+   write. The compose file publishes no SeaweedFS port, so either run your S3 client
+   inside the compose network, or add `ports: ["8333:8333"]` to the `seaweedfs`
    service and create it from the host (the AWS CLI works, as CI does for its
    own test bucket):
 
    ```bash
-   AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_DEFAULT_REGION=us-east-1 \
-     aws --endpoint-url http://localhost:9000 s3 mb s3://canvas-drop
+   AWS_ACCESS_KEY_ID=canvasdrop AWS_SECRET_ACCESS_KEY=canvasdrop-demo-only-secret AWS_DEFAULT_REGION=us-east-1 \
+     aws --endpoint-url http://localhost:8333 s3 mb s3://canvas-drop
    ```
 
 3. Point the app at it. In `docker-compose.yml`, replace `CANVAS_DROP_STORAGE: local`
@@ -125,15 +131,15 @@ changes (to move an existing instance, use `backup` and `restore`, below).
        environment:
          # …
          CANVAS_DROP_STORAGE: s3
-         CANVAS_DROP_S3_ENDPOINT: http://minio:9000
+         CANVAS_DROP_S3_ENDPOINT: http://seaweedfs:8333
          CANVAS_DROP_S3_BUCKET: canvas-drop
          CANVAS_DROP_S3_REGION: us-east-1
-         CANVAS_DROP_S3_ACCESS_KEY: minioadmin
-         CANVAS_DROP_S3_SECRET_KEY: minioadmin
+         CANVAS_DROP_S3_ACCESS_KEY: canvasdrop
+         CANVAS_DROP_S3_SECRET_KEY: canvasdrop-demo-only-secret
          CANVAS_DROP_S3_FORCE_PATH_STYLE: "true"
    ```
 
-   `CANVAS_DROP_S3_ENDPOINT` is MinIO's in-network address.
+   `CANVAS_DROP_S3_ENDPOINT` is SeaweedFS's in-network address.
    `CANVAS_DROP_S3_FORCE_PATH_STYLE` already defaults to `true`; it is shown for
    clarity. Boot refuses `CANVAS_DROP_STORAGE=s3` without bucket, region, access
    key, and secret key, naming each missing variable.
@@ -141,7 +147,7 @@ changes (to move an existing instance, use `backup` and `restore`, below).
 4. Apply. Compose recreates `app` with the new environment:
 
    ```bash
-   docker compose --profile minio up -d
+   docker compose --profile s3 up -d
    ```
 
 ### Add Chromium for canvas screenshots

@@ -14,7 +14,7 @@ import { type PutOptions, type StorageDriver, StorageError } from "./driver.js";
 const DELETE_BATCH = 1000;
 
 /**
- * S3-compatible storage driver — AWS S3, MinIO, Cloudflare R2, or any
+ * S3-compatible storage driver — AWS S3, Cloudflare R2, SeaweedFS, MinIO, or any
  * S3-compatible endpoint (endpoint-configurable). The {@link S3Client} is
  * injected so the factory owns endpoint/credential config and tests can supply
  * an in-memory fake.

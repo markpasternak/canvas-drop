@@ -226,7 +226,7 @@ demo of the wiring, not a production deployment as-is.
 | `dex` | `dexidp/dex:v2.41.1` | Bundled demo IdP with one static user, `demo@example.com` / `canvasdrop`. |
 | `app` | built from the repo as `canvas-drop:dev` | canvas-drop in real `proxy` mode on the JWKS path: `CANVAS_DROP_AUTH_PROXY_JWT_HEADER=X-Forwarded-Access-Token`, `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL=http://dex:5556/dex/keys`, issuer `http://localhost:8080/dex`, audience `canvas-drop-demo`. `path` URL mode with `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`, Postgres, local storage on the `app-data` volume, plus a `backups` volume. No published port; waits for the Postgres health check. |
 | `postgres` | `postgres:16-alpine` | The database, on the `pg-data` volume, with a `pg_isready` health check. |
-| `minio` | `minio/minio:RELEASE.2024-11-07T00-52-20Z` | Optional S3-compatible storage behind `--profile minio`. Starting it does not switch the app to S3; edit the `app` service's `environment:` block as shown on [Install](/docs/self-hosting/install), and create the bucket yourself. |
+| `seaweedfs` | `chrislusf/seaweedfs:4.46` | Optional S3-compatible object storage behind `--profile s3`. Starting it does not switch the app to S3; edit the `app` service's `environment:` block as shown on [Install](/docs/self-hosting/install), and create the bucket yourself. |
 
 The app verifies a Dex-signed JWT against Dex's JWKS, the same cryptographic trust path
 you run in production. The smoke test boots the stack and asserts the launch invariants:
