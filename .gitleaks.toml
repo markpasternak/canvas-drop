@@ -18,4 +18,10 @@ regexes = [
   '''CANVAS-DROP-DEMO-ONLY-COOKIE-32B''',
   '''demo-only-session-secret-change-me-0123456789''',
   '''\$2y\$10\$TM1QyKyQuSDLfTgXh5oYwOPtfTnI643BEsm4EfJ0jxdh7YzJy7pmm''',
+  # Deployment-coordination publication tokens (deployment-coordination plan): an
+  # opaque compare-and-swap precondition, not a credential — knowing one grants
+  # nothing. These three exact values are the docs examples and test fixtures.
+  '''0123456789abcdef0123456789abcdef''',
+  '''9f2c4e7a1b3d5f60718293a4b5c6d7e8''',
+  '''c0ffee1234567890abcdef1234567890''',
 ]

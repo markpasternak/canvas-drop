@@ -28,7 +28,11 @@ coverage, no Docker, runs everywhere including a daemon-less laptop. Reserve a r
 
 Two traps, both cost a red CI run:
 - **`bitnami/minio:latest` was removed from Docker Hub** (Bitnami deprecated
-  `latest` tags). Use the official `minio/minio`.
+  `latest` tags). Use the official `minio/minio`. **Update (2026-09-12):** the Docker Hub
+  `minio/minio` repository no longer exists (`pull access denied`); CI pulls
+  `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` instead. `docker-compose.yml`'s
+  optional `--profile minio` service still points at the Docker Hub tag and needs the
+  same repoint in its own change.
 - **`minio/minio` needs a `server /data` command**, and Actions **service
   containers cannot override the image command**. So run MinIO as a normal
   **step** (`docker run -d … minio/minio server /data`), health-poll it, and
