@@ -28,6 +28,25 @@ it's the only rung marked `public`. Everything else is `private` so a shared cac
 serve one viewer's bytes to another. See [Sharing & access](../authoring/sharing) for
 the rungs and the [Security model](security-model) for the isolation guarantee.
 
+### Generated asset filenames
+
+Hexadecimal hash suffixes such as `app.a1b2c3d4.js` are recognized throughout a canvas.
+Astro's `_astro/` directory also supports eight-character URL-safe base64 suffixes
+containing an uppercase letter, such as `_astro/sections.B3rvd3pb.js`. This convention
+covers generated JavaScript, CSS, fonts and images. Ambiguous lowercase non-hex
+suffixes and ordinary stable filenames continue to revalidate.
+
+Treat these names as immutable: never publish different bytes at the same recognized
+URL, including manually named files inside `_astro/`. The server recognizes a naming
+convention; it cannot prove that an arbitrary filename contains a content hash.
+HTML entry points such as `index.html` continue to revalidate, so they can point to
+new generated URLs after a publish.
+
+Restricted assets use the browser's **private** cache. Every network request still
+passes current access checks, but bytes already downloaded or cached on a device
+remain available after logout or access removal. Reverting cache headers cannot purge
+an existing fresh browser response; publish a new URL when correcting cached content.
+
 ### Cloudflare specifics
 
 - Cloudflare (like most CDNs) **does not cache HTML by default** — it caches a static

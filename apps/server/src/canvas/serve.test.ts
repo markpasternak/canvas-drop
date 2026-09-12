@@ -14,7 +14,7 @@ import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { LocalDriver } from "../storage/local.js";
-import { serveCanvas } from "./serve.js";
+import { isContentHashed, serveCanvas } from "./serve.js";
 import { blobKey } from "./storage-keys.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
@@ -62,6 +62,7 @@ describe("serveCanvas (integration)", () => {
       "index.html": "<h1>home</h1>",
       "app.js": "console.log(1)",
       "assets/app.abcdef12.js": "hashed",
+      "_astro/sections.B3rvd3pb.js": "astro hashed",
       "danger.php": "<?php echo 1; ?>",
       "logo.svg": '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
     };
@@ -179,7 +180,7 @@ describe("serveCanvas (integration)", () => {
     const html = await app.request("/c/s/index.html");
     expect(html.headers.get("ETag")).toBeTruthy();
     expect(html.headers.get("Cache-Control")).toBe("private, no-cache");
-    const hashed = await app.request("/c/s/assets/app.abcdef12.js");
+    const hashed = await app.request("/c/s/_astro/sections.B3rvd3pb.js");
     expect(hashed.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
   });
 
@@ -189,7 +190,7 @@ describe("serveCanvas (integration)", () => {
     const { app } = await setup({ access: "public_link" });
     const html = await app.request("/c/s/index.html");
     expect(html.headers.get("Cache-Control")).toBe("public, max-age=0, s-maxage=300");
-    const hashed = await app.request("/c/s/assets/app.abcdef12.js");
+    const hashed = await app.request("/c/s/_astro/sections.B3rvd3pb.js");
     expect(hashed.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
   });
 
@@ -207,7 +208,7 @@ describe("serveCanvas (integration)", () => {
     const { app } = await setup({ access: "public_link", passwordHash: "hashed" });
     const html = await app.request("/c/s/index.html");
     expect(html.headers.get("Cache-Control")).toBe("private, no-cache");
-    const hashed = await app.request("/c/s/assets/app.abcdef12.js");
+    const hashed = await app.request("/c/s/_astro/sections.B3rvd3pb.js");
     expect(hashed.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
   });
 
@@ -464,4 +465,29 @@ describe("serveCanvas (integration)", () => {
       expect((await usage.countByType(canvas.id, null)).view ?? 0).toBe(1);
     });
   });
+});
+
+describe("content-hashed filenames", () => {
+  it.each([
+    "assets/app.abcdef12.js",
+    "_astro/sections.B3rvd3pb.js",
+    "_astro/preload-helper.CxFQXtKk.js",
+    "_astro/ItemEditor.CZUfIwGT.css",
+    "_astro/Inter-Regular.CcCsk3RA.woff2",
+    "_astro/nested/image.Abcd-ef_.webp",
+  ])("recognizes %s", (path) => expect(isContentHashed(path)).toBe(true));
+  it.each([
+    "index.html",
+    "app.js",
+    "assets/app.B3rvd3pb.js",
+    "_astro/config.settings.js",
+    "_astro/app.abcdefgh.js",
+    "_astro/app.Abgz123.js",
+    "_astro/app.Abgz12345.js",
+    "_astro/app.Abgz1234.html",
+    "_astro/app.Abgz1234.json",
+    "_astro/app.Abgz1234.js.map",
+    "not_astro/app.Abgz1234.js",
+    "_astro/app.js?hash=B3rvd3pb",
+  ])("revalidates %s", (path) => expect(isContentHashed(path)).toBe(false));
 });
