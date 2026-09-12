@@ -482,6 +482,11 @@ export function deployEngine(deps: DeployEngineDeps) {
       return { outcome: "published", version: ready, publicationToken };
     },
 
+    /** The KTD4 classifier for callers without their own versions repository (the upload service). */
+    classifyRelease(canvasId: string, releaseId: string): Promise<Classification> {
+      return classifyPublication(deps, canvasId, releaseId);
+    },
+
     /** Remove a candidate that lost a same-release race while still pending (best-effort). */
     async discardPending(canvasId: string, versionId: string): Promise<void> {
       await deps.versions
