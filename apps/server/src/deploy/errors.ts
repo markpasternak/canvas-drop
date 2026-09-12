@@ -55,7 +55,9 @@ export type DeployErrorCode =
   // `releaseId` is not 1–200 characters of text without control characters.
   | "INVALID_RELEASE_ID"
   // A staged finalize supplied a `releaseId` different from the one captured at begin.
-  | "RELEASE_ID_MISMATCH";
+  | "RELEASE_ID_MISMATCH"
+  // A coordination field or optional JSON body was malformed (not JSON, wrong type).
+  | "INVALID_REQUEST";
 
 /** What is live right now — attached to every coordination conflict (R9 / KTD5). */
 export interface CurrentPublication {

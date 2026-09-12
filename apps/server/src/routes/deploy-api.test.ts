@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { type Config, loadConfig } from "@canvas-drop/shared";
+import { sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { Hono } from "hono";
 import { pino } from "pino";
@@ -17,6 +18,7 @@ import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
+import { inProcessRateLimitStore } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { uploadService } from "../upload/service.js";
@@ -125,9 +127,11 @@ describe("deployApiRoutes (Bearer key)", () => {
     expect(Object.keys(draftBody).sort()).toEqual(
       [
         "accessMode",
+        "currentVersion",
         "currentVersionId",
         "id",
         "publicationState",
+        "publicationToken",
         "slug",
         "status",
         "title",
@@ -596,5 +600,419 @@ describe("deployApiRoutes — staging upload (plan 003)", () => {
     });
     expect(second.status).toBe(409);
     expect(((await second.json()) as { code: string }).code).toBe("UPLOAD_ALREADY_FINALIZED");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deployment coordination on the keyed HTTP surface (plan 2026-09-12, U4).
+// ---------------------------------------------------------------------------
+describe.each(DIALECTS)("deployApiRoutes — deployment coordination [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const R = "gh:acme/roadmap@3f9c2e1:prod";
+  const S = "gh:acme/roadmap@77aa01b:prod";
+  const HEX32 = /^[0-9a-f]{32}$/;
+  const enc3 = (s: string) => new TextEncoder().encode(s);
+  const sha3 = (s: string) => createHash("sha256").update(enc3(s)).digest("hex");
+  const zipOf = (files: Record<string, string>) =>
+    Buffer.from(zipSync(Object.fromEntries(Object.entries(files).map(([p, b]) => [p, enc3(b)]))));
+
+  async function setup(opts: { deployPerMin?: number } = {}) {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const auditRepo = auditRepository(client);
+    const audit = createAuditLog(auditRepo, silent);
+    const storage = memStorage();
+    const uploadSessions = uploadSessionsRepository(client);
+    // Wired like production: the engine's blob GC must see staged sessions.
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      log: silent,
+      uploadSessions,
+      waitOptions: { intervalMs: 5 },
+    });
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const upload = uploadService({ config, canvases, users, uploadSessions, storage, engine });
+    const cfg = opts.deployPerMin
+      ? loadConfig({
+          CANVAS_DROP_AUTH_MODE: "dev",
+          CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN: String(opts.deployPerMin),
+        })
+      : config;
+    const app = new Hono<AppEnv>();
+    app.route(
+      "/v1/canvases",
+      deployApiRoutes({
+        config: cfg,
+        canvases,
+        versions,
+        engine,
+        audit,
+        storage,
+        upload,
+        rateLimitStore: opts.deployPerMin ? inProcessRateLimitStore() : undefined,
+      }),
+    );
+    async function mkCanvas() {
+      const key = generateApiKey();
+      const cv = await canvases.create({
+        ownerId: owner.id,
+        slug: `s${Math.random()}`.slice(0, 8),
+        apiKeyHash: hashApiKey(key),
+      });
+      return { id: cv.id, key, token: cv.publicationToken };
+    }
+    const get = async (id: string, key: string) => {
+      const res = await app.request(`/v1/canvases/${id}`, {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const put = async (
+      id: string,
+      key: string,
+      files: Record<string, string>,
+      query: Record<string, string> = {},
+    ) => {
+      const qs = new URLSearchParams(query).toString();
+      const res = await app.request(`/v1/canvases/${id}/deploy${qs ? `?${qs}` : ""}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${key}` },
+        body: zipOf(files),
+      });
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const json = async (method: string, path: string, key: string, body?: unknown) => {
+      const res = await app.request(`/v1/canvases${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body:
+          body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
+      });
+      const text = await res.text();
+      return {
+        status: res.status,
+        body: (text ? JSON.parse(text) : null) as Record<string, unknown>,
+      };
+    };
+    const deployAudits = async () => {
+      await audit.flush();
+      return (await auditRepo.recent(500)).filter((r) => r.action === "deploy").length;
+    };
+    const age = async (versionId: string, ms: number) => {
+      const q = sql`update versions set created_at = ${Date.now() - ms} where id = ${versionId}`;
+      if (client.dialect === "sqlite") client.db.run(q);
+      else await client.db.execute(q);
+    };
+    return {
+      app,
+      canvases,
+      versions,
+      storage,
+      mkCanvas,
+      get,
+      put,
+      json,
+      deployAudits,
+      age,
+      sha: sha3,
+    };
+  }
+
+  it("Covers AE1. the same release twice: 200 already_current, same version, and exactly one deploy audit row", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const first = await t.put(a.id, a.key, { "index.html": "one" }, { releaseId: R });
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ outcome: "published", version: 1, releaseId: R });
+    expect(first.body.publicationToken).toMatch(HEX32);
+    const second = await t.put(a.id, a.key, { "index.html": "two" }, { releaseId: R });
+    expect(second.status).toBe(200);
+    expect(second.body).toMatchObject({
+      outcome: "already_current",
+      version: 1,
+      versionId: first.body.versionId,
+      releaseId: R,
+      publicationToken: first.body.publicationToken,
+      fileCount: 1,
+      warnings: [],
+    });
+    expect(await t.deployAudits()).toBe(1);
+    expect((await t.versions.listByCanvas(a.id)).filter((v) => v.status === "ready")).toHaveLength(
+      1,
+    );
+  });
+
+  it("Covers AE3. readback shows the current release and the token the deploy returned", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const before = await t.get(a.id, a.key);
+    expect(before.body.currentVersion).toBeNull();
+    expect(before.body.publicationToken).toBe(a.token);
+    const r = await t.put(a.id, a.key, { "index.html": "one" }, { releaseId: R });
+    const after = await t.get(a.id, a.key);
+    expect(after.body.publicationToken).toBe(r.body.publicationToken);
+    expect(after.body.currentVersion).toEqual({
+      id: r.body.versionId,
+      number: 1,
+      releaseId: R,
+      createdAt: expect.any(Number),
+    });
+    expect(after.body.currentVersionId).toBe(r.body.versionId);
+  });
+
+  it("Covers AE4. a stale expected token is 409 PUBLICATION_CHANGED with the current publication; the live files are unchanged", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const t1 = (await t.get(a.id, a.key)).body.publicationToken as string;
+    const editor = await t.put(a.id, a.key, { "index.html": "editor" }); // an intervening publish
+    const res = await t.put(
+      a.id,
+      a.key,
+      { "index.html": "mine" },
+      { releaseId: R, expectedPublicationToken: t1 },
+    );
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      code: "PUBLICATION_CHANGED",
+      message: expect.stringContaining("reassess"),
+      current: {
+        publicationToken: editor.body.publicationToken,
+        versionId: editor.body.versionId,
+        version: 1,
+        releaseId: null,
+      },
+    });
+    const live = await t.app.request(`/v1/canvases/${a.id}/files?path=index.html`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(await live.text()).toBe("editor");
+  });
+
+  it("Covers AE5. a release that exists only in history is 409 RELEASE_NOT_CURRENT naming that version", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const v1 = await t.put(a.id, a.key, { "index.html": "r" }, { releaseId: R });
+    const v2 = await t.put(a.id, a.key, { "index.html": "s" }, { releaseId: S });
+    const rb = await t.json("POST", `/${a.id}/rollback`, a.key, { version: 1 });
+    expect(rb.status).toBe(200);
+    await t.age(v2.body.versionId as string, 120_000); // history, not a race
+    const res = await t.put(a.id, a.key, { "index.html": "s again" }, { releaseId: S });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      code: "RELEASE_NOT_CURRENT",
+      release: { versionId: v2.body.versionId, version: 2 },
+      current: { versionId: v1.body.versionId, version: 1, releaseId: R },
+    });
+    expect((await t.get(a.id, a.key)).body.currentVersionId).toBe(v1.body.versionId);
+  });
+
+  it("Covers AE8. a rejected ZIP with an expected token changes neither the token nor the pointer", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const live = await t.put(a.id, a.key, { "index.html": "ok" });
+    const bad = await t.put(
+      a.id,
+      a.key,
+      { "../escape.txt": "x", "index.html": "y" },
+      { expectedPublicationToken: live.body.publicationToken as string },
+    );
+    expect(bad.status).toBe(400);
+    expect(bad.body.code).toBe("ZIP_SLIP_REJECTED");
+    const after = await t.get(a.id, a.key);
+    expect(after.body.publicationToken).toBe(live.body.publicationToken);
+    expect(after.body.currentVersionId).toBe(live.body.versionId);
+  });
+
+  it("Covers AE10. cross-canvas: a foreign key is 403, a foreign token is a plain mismatch, no key is 401", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const b = await t.mkCanvas();
+    const foreignKey = await t.put(
+      b.id,
+      a.key,
+      { "index.html": "x" },
+      { expectedPublicationToken: b.token },
+    );
+    expect(foreignKey.status).toBe(403);
+    const foreignToken = await t.put(
+      a.id,
+      a.key,
+      { "index.html": "x" },
+      { expectedPublicationToken: b.token },
+    );
+    expect(foreignToken.status).toBe(409);
+    expect(foreignToken.body.code).toBe("PUBLICATION_CHANGED");
+    expect((await t.get(b.id, b.key)).body.currentVersion).toBeNull();
+    const noKey = await t.app.request(
+      `/v1/canvases/${a.id}/deploy?releaseId=${encodeURIComponent(R)}`,
+      {
+        method: "PUT",
+        body: zipOf({ "index.html": "x" }),
+      },
+    );
+    expect(noKey.status).toBe(401);
+  });
+
+  it("Covers AE11. callers without the new fields see today's behavior plus additive fields, and every action rotates the token", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const one = await t.put(a.id, a.key, { "index.html": "1" });
+    expect(one.body).toMatchObject({
+      outcome: "published",
+      version: 1,
+      releaseId: null,
+      fileCount: 1,
+    });
+    expect(one.body.publicationToken).toMatch(HEX32);
+    expect(one.body.publicationToken).not.toBe(a.token);
+    const two = await t.put(a.id, a.key, { "index.html": "2" });
+    const rb = await t.json("POST", `/${a.id}/rollback`, a.key, { version: 1 });
+    expect(rb.status).toBe(200);
+    expect(rb.body).toEqual({ url: expect.any(String), version: 1 });
+    const afterRollback = (await t.get(a.id, a.key)).body.publicationToken;
+    expect(afterRollback).not.toBe(two.body.publicationToken);
+    expect(afterRollback).not.toBe(one.body.publicationToken); // never restored
+    const un = await t.json("POST", `/${a.id}/unpublish`, a.key);
+    expect(un.status).toBe(200);
+    expect(un.body).toEqual({
+      url: expect.any(String),
+      publicationState: "draft",
+      currentVersionId: null,
+    });
+    const afterUnpublish = await t.get(a.id, a.key);
+    expect(afterUnpublish.body.publicationToken).not.toBe(afterRollback);
+    expect(afterUnpublish.body.currentVersion).toBeNull();
+    // Covers AE6 tail: an unpublished canvas still has a token and publishes with it.
+    const again = await t.put(
+      a.id,
+      a.key,
+      { "index.html": "3" },
+      {
+        expectedPublicationToken: afterUnpublish.body.publicationToken as string,
+      },
+    );
+    expect(again.status).toBe(200);
+    expect(again.body.outcome).toBe("published");
+  });
+
+  it("Covers AE12. staged: fields captured at begin are enforced at finalize; a fresh token at finalize publishes; a different release is refused", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const t1 = a.token;
+    const files = { "index.html": "mine" };
+    const begun = await t.json("POST", `/${a.id}/uploads`, a.key, {
+      manifest: [{ path: "index.html", hash: t.sha("mine"), size: 4 }],
+      releaseId: R,
+      expectedPublicationToken: t1,
+    });
+    expect(begun.status).toBe(200);
+    expect(begun.body).toEqual({ uploadId: expect.any(String), missingHashes: [t.sha("mine")] });
+    const uploadId = begun.body.uploadId as string;
+    const staged = await t.app.request(
+      `/v1/canvases/${a.id}/uploads/${uploadId}/blobs/${t.sha("mine")}`,
+      {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${a.key}` },
+        body: enc3("mine"),
+      },
+    );
+    expect(staged.status).toBe(204);
+    const editor = await t.put(a.id, a.key, { "index.html": "editor" }); // publication changes
+    const stale = await t.json("POST", `/${a.id}/uploads/${uploadId}/finalize`, a.key);
+    expect(stale.status).toBe(409);
+    expect(stale.body).toMatchObject({
+      code: "PUBLICATION_CHANGED",
+      current: { versionId: editor.body.versionId },
+    });
+    const fresh = await t.json("POST", `/${a.id}/uploads/${uploadId}/finalize`, a.key, {
+      expectedPublicationToken: editor.body.publicationToken,
+    });
+    expect(fresh.status).toBe(200);
+    expect(fresh.body).toMatchObject({ outcome: "published", releaseId: R, version: 2 });
+    expect(await t.deployAudits()).toBe(2);
+    // A second session for a release that is now live: begin answers already_current itself.
+    const again = await t.json("POST", `/${a.id}/uploads`, a.key, {
+      manifest: [{ path: "index.html", hash: t.sha("other"), size: 5 }],
+      releaseId: R,
+    });
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({
+      outcome: "already_current",
+      versionId: fresh.body.versionId,
+    });
+    expect(await t.deployAudits()).toBe(2);
+    // A finalize release that differs from begin's is refused.
+    const b2 = await t.json("POST", `/${a.id}/uploads`, a.key, {
+      manifest: [{ path: "index.html", hash: t.sha("x"), size: 1 }],
+      releaseId: S,
+    });
+    const mismatch = await t.json("POST", `/${a.id}/uploads/${b2.body.uploadId}/finalize`, a.key, {
+      releaseId: R,
+    });
+    expect(mismatch.status).toBe(400);
+    expect(mismatch.body.code).toBe("RELEASE_ID_MISMATCH");
+    const garbage = await t.json(
+      "POST",
+      `/${a.id}/uploads/${b2.body.uploadId}/finalize`,
+      a.key,
+      "{not json",
+    );
+    expect(garbage.status).toBe(400);
+    expect(garbage.body.code).toBe("INVALID_REQUEST");
+    expect(files).toBeDefined();
+  });
+
+  it("an invalid releaseId is 400 INVALID_RELEASE_ID and creates nothing", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const empty = await t.put(a.id, a.key, { "index.html": "x" }, { releaseId: "" });
+    expect(empty.status).toBe(400);
+    expect(empty.body.code).toBe("INVALID_RELEASE_ID");
+    const long = await t.put(a.id, a.key, { "index.html": "x" }, { releaseId: "x".repeat(201) });
+    expect(long.status).toBe(400);
+    expect(await t.versions.listByCanvas(a.id)).toHaveLength(0);
+  });
+
+  it("version listings carry the immutable id and the release identity", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const r = await t.put(a.id, a.key, { "index.html": "x" }, { releaseId: R });
+    await t.put(a.id, a.key, { "index.html": "y" });
+    const list = await t.json("GET", `/${a.id}/versions`, a.key);
+    const versions = list.body.versions as Array<Record<string, unknown>>;
+    expect(versions).toHaveLength(2);
+    expect(versions[1]).toMatchObject({
+      id: r.body.versionId,
+      number: 1,
+      releaseId: R,
+      current: false,
+    });
+    expect(versions[0]).toMatchObject({ number: 2, releaseId: null, current: true });
+  });
+
+  it("an already_current short-circuit consumes a deploy rate-limit token like any attempt (KTD6)", async () => {
+    const t = await setup({ deployPerMin: 2 });
+    const a = await t.mkCanvas();
+    expect((await t.put(a.id, a.key, { "index.html": "x" }, { releaseId: R })).status).toBe(200);
+    const second = await t.put(a.id, a.key, { "index.html": "x" }, { releaseId: R });
+    expect(second.status).toBe(200);
+    expect(second.body.outcome).toBe("already_current");
+    expect((await t.put(a.id, a.key, { "index.html": "x" }, { releaseId: R })).status).toBe(429);
   });
 });
