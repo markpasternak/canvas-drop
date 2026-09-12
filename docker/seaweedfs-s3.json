@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "canvas-drop",
+      "credentials": [{ "accessKey": "canvasdrop", "secretKey": "canvasdrop-demo-only-secret" }],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

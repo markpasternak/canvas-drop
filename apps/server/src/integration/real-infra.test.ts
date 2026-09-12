@@ -179,7 +179,7 @@ describe.skipIf(!PG_URL)("real Postgres — deployment coordination under concur
   });
 });
 
-describe.skipIf(!S3_ENDPOINT)("real S3 (MinIO via S3Driver)", () => {
+describe.skipIf(!S3_ENDPOINT)("real S3 (SeaweedFS via S3Driver)", () => {
   it("round-trips an object against a live S3-compatible endpoint", async () => {
     const bucket = process.env.CANVAS_DROP_TEST_S3_BUCKET ?? "canvas-drop-test";
     const client = new S3Client({
@@ -187,8 +187,9 @@ describe.skipIf(!S3_ENDPOINT)("real S3 (MinIO via S3Driver)", () => {
       region: process.env.CANVAS_DROP_TEST_S3_REGION ?? "us-east-1",
       forcePathStyle: true,
       credentials: {
-        accessKeyId: process.env.CANVAS_DROP_TEST_S3_ACCESS_KEY ?? "minioadmin",
-        secretAccessKey: process.env.CANVAS_DROP_TEST_S3_SECRET_KEY ?? "minioadmin",
+        accessKeyId: process.env.CANVAS_DROP_TEST_S3_ACCESS_KEY ?? "canvasdrop",
+        secretAccessKey:
+          process.env.CANVAS_DROP_TEST_S3_SECRET_KEY ?? "canvasdrop-demo-only-secret",
       },
     });
     const driver = new S3Driver(client, bucket);

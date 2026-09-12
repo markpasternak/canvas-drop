@@ -357,6 +357,13 @@ export function deployEngine(deps: DeployEngineDeps) {
     ): Promise<CommitOutcome> {
       const coordination = normalizeCoordination(commitOptions?.coordination);
       const { releaseId, expectedPublicationToken } = coordination;
+      if (commitOptions?.activateVersion && expectedPublicationToken !== undefined) {
+        // The hook performs its own swap, so the token cannot be compared inside that
+        // statement; refuse loudly rather than silently drop the compare-and-swap promise.
+        throw new Error(
+          "expectedPublicationToken cannot be enforced through a caller-owned activateVersion hook",
+        );
+      }
 
       // 1. Mark ready — the partial unique index is where a same-release race is decided.
       let ready: Version = version;
@@ -366,12 +373,14 @@ export function deployEngine(deps: DeployEngineDeps) {
           break;
         } catch (err) {
           if (releaseId === undefined || !isUniqueViolation(err, RELEASE_READY_UNIQUE)) throw err;
-          const { classification, timedOut } = await awaitHolder(
-            deps,
-            canvas.id,
-            releaseId,
-            deps.waitOptions,
-          );
+          // A ready holder here appeared after our own pre-check found none, so it is a
+          // racing publisher by construction: wait for it regardless of how long its
+          // ingest took (the pending row's `createdAt` predates its storage writes). The
+          // in-flight age gate belongs to the pre-check alone.
+          const { classification, timedOut } = await awaitHolder(deps, canvas.id, releaseId, {
+            ...deps.waitOptions,
+            inFlightWindowMs: Number.POSITIVE_INFINITY,
+          });
           if (classification.kind === "already_current") {
             await this.discardPending(canvas.id, version.id);
             return alreadyCurrentOutcome(classification);

@@ -874,4 +874,43 @@ describe.each(DIALECTS)("deployEngine — deployment coordination [%s]", (dialec
     expect(rows.map((v) => v.id)).toEqual([holderId]); // no pending candidate remains
     expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBeNull();
   });
+
+  it("a same-release rival whose ingest outlived the in-flight window is still waited for at markReady, and its landing is already_current", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    let holderId = "";
+    t = await setup({
+      onFirstPut: async () => {
+        // The rival's pending row is older than the window (slow storage writes) but it
+        // only became ready after our pre-check passed.
+        holderId = (await t.readyVersion(R, 120_000)).id;
+      },
+      waitOptions: {
+        attempts: 5,
+        sleep: async () => {
+          // The rival's swap lands during our wait.
+          await t.canvases.setCurrentVersionIfReady(t.canvas.id, holderId);
+        },
+      },
+    });
+    const r = await deploy(t, { "index.html": "mine" }, { releaseId: R });
+    expect(r.outcome).toBe("already_current");
+    expect(r.versionId).toBe(holderId);
+    expect(await t.readyRows()).toHaveLength(1); // our candidate never became ready
+  });
+
+  it("a caller-owned activation hook combined with an expected token is refused before anything is published", async () => {
+    const t = await setup();
+    const t0 = await t.token();
+    await expect(
+      t.engine.deploy(t.canvas, "api", folder({ "index.html": "x" }), t.ownerId, {
+        activateVersion: async () => {
+          throw new Error("hook must not run");
+        },
+        coordination: { expectedPublicationToken: t0 },
+      }),
+    ).rejects.toThrow(/caller-owned activateVersion hook/);
+    expect(await t.readyRows()).toHaveLength(0);
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBeNull();
+    expect(await t.token()).toBe(t0);
+  });
 });

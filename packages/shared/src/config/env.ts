@@ -205,7 +205,7 @@ const rawSchema = z
     // (apps/dashboard/vite.config.ts); CANVAS_DROP_DASHBOARD_URL is the base the
     // Playwright capture scripts shoot (scripts/screenshots.mjs, scripts/skins-shot.mjs);
     // the CANVAS_DROP_TEST_* family drives the test runner (run isolation, the real
-    // Postgres / MinIO smoke tests, the opt-in capture test). Named here so the docs
+    // Postgres / S3 smoke tests, the opt-in capture test). Named here so the docs
     // integrity test recognises them; add a new one here when you document it.
     CANVAS_DROP_AUTH_MODE: AUTH_MODES.optional().default("dev"),
     CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: csv(),

@@ -108,18 +108,19 @@ services:
       timeout: 5s
       retries: 10
 
-  # Optional S3-compatible storage. Enable with:  docker compose --profile minio up
-  # (and set CANVAS_DROP_STORAGE=s3 + the S3 vars on `app`).
-  minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
-    profiles: [minio]
+  # Optional S3-compatible object storage (SeaweedFS, Apache-2.0). Enable with:
+  #   docker compose --profile s3 up
+  # and set CANVAS_DROP_STORAGE=s3 + the S3 vars on `app` (see the install guide).
+  # One container runs master + volume + filer + the S3 gateway on :8333. The S3
+  # credentials live in docker/seaweedfs-s3.json — DEMO ONLY, change them for real use.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.46
+    profiles: [s3]
     restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+    command: server -s3 -dir=/data -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=1024 -ip.bind=0.0.0.0
     volumes:
-      - minio-data:/data
+      - s3-data:/data
+      - ./docker/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
 
   # Optional maintenance sidecar — runs the scheduled backup + purge jobs INSIDE the
   # stack (no host crontab needed). It shares the app image + data/backups volumes and
@@ -162,4 +163,4 @@ volumes:
   app-data:
   backups:
   pg-data:
-  minio-data:
+  s3-data:

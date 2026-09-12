@@ -17,6 +17,9 @@ regexes = [
   '''demo-only-not-a-real-client-secret''',
   '''CANVAS-DROP-DEMO-ONLY-COOKIE-32B''',
   '''demo-only-session-secret-change-me-0123456789''',
+  # docker/seaweedfs-s3.json — DEMO ONLY S3 credentials for the compose `--profile s3`
+  # store and CI's real-infra tests.
+  '''canvasdrop-demo-only-secret''',
   '''\$2y\$10\$TM1QyKyQuSDLfTgXh5oYwOPtfTnI643BEsm4EfJ0jxdh7YzJy7pmm''',
   # Deployment-coordination publication tokens (deployment-coordination plan): an
   # opaque compare-and-swap precondition, not a credential — knowing one grants

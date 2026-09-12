@@ -290,7 +290,7 @@ Migrations run at boot on the selected database; there is no separate migrate co
 | `CANVAS_DROP_S3_REGION` | (unset) | **Required when `s3`.** |
 | `CANVAS_DROP_S3_ACCESS_KEY` | (unset) | **Required when `s3`.** |
 | `CANVAS_DROP_S3_SECRET_KEY` | (unset) | **Required when `s3`.** |
-| `CANVAS_DROP_S3_FORCE_PATH_STYLE` | `true` | boolean. Keep `true` for path-style stores such as MinIO. |
+| `CANVAS_DROP_S3_FORCE_PATH_STYLE` | `true` | boolean. Keep `true` for path-style stores such as SeaweedFS or MinIO; AWS S3 accepts either. |
 
 ## Screenshots (optional)
 
@@ -472,7 +472,7 @@ are not part of the config schema:
 | `CANVAS_DROP_DASHBOARD_PORT` | the dashboard's Vite dev server | Dev port (default `5173`). |
 | `CANVAS_DROP_DASHBOARD_URL` | `pnpm docs:screenshots`, `pnpm skins:shot` | Dashboard base for Playwright captures (default `http://localhost:5173`). |
 | `CANVAS_DROP_DB` (in tests) | `pnpm test:sqlite`, `pnpm test:pg` | When set, the suite runs only that dialect; unset runs both in-process. |
-| `CANVAS_DROP_TEST_*` | the test runner and CI | Run isolation (`_RUN_ID`, `_MAX_WORKERS`, `_REGISTRY_DIR`), the real Postgres and MinIO smoke tests (`_DATABASE_URL`, `_S3_*`), and the opt-in Chromium capture test (`_SCREENSHOTS=1`). |
+| `CANVAS_DROP_TEST_*` | the test runner and CI | Run isolation (`_RUN_ID`, `_MAX_WORKERS`, `_REGISTRY_DIR`), the real Postgres and S3 (SeaweedFS) smoke tests (`_DATABASE_URL`, `_S3_*`), and the opt-in Chromium capture test (`_SCREENSHOTS=1`). |
 
 > All examples use placeholder values. Never commit real secrets; set them in your deployment
 > environment (systemd, container env, secrets manager).
