@@ -2,6 +2,7 @@ import type { Manifest } from "@canvas-drop/shared/db";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
+import { isUniqueViolation, RELEASE_READY_UNIQUE } from "../unique-violation.js";
 import { canvasesRepository } from "./canvases.js";
 import { usersRepository } from "./users.js";
 import { versionsRepository } from "./versions.js";
@@ -268,3 +269,125 @@ describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
     expect((await repo.findById(readyPending.id))?.status).toBe("ready");
   });
 });
+
+describe.each(DIALECTS)(
+  "versionsRepository release identity (deployment coordination) [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    async function ready(
+      repo: ReturnType<typeof versionsRepository>,
+      canvasId: string,
+      userId: string,
+      number: number,
+      releaseId?: string,
+    ) {
+      const v = await repo.createPending({
+        canvasId,
+        number,
+        createdBy: userId,
+        source: "api",
+        releaseId,
+      });
+      return repo.markReady(v.id, { fileCount: 1, totalBytes: 10, manifest: MANIFEST });
+    }
+
+    it("stores the release identity at createPending; findReadyByRelease returns only the ready holder", async () => {
+      client = await makeTestDb(dialect);
+      const { canvasId, userId } = await seedCanvas(client);
+      const repo = versionsRepository(client);
+      const pending = await repo.createPending({
+        canvasId,
+        number: 1,
+        createdBy: userId,
+        source: "api",
+        releaseId: "gh:acme/roadmap@3f9c2e1:prod",
+      });
+      expect(pending.releaseId).toBe("gh:acme/roadmap@3f9c2e1:prod");
+      // A pending holder is not a holder yet.
+      expect(await repo.findReadyByRelease(canvasId, "gh:acme/roadmap@3f9c2e1:prod")).toBeNull();
+      await repo.markReady(pending.id, { fileCount: 1, totalBytes: 10, manifest: MANIFEST });
+      expect((await repo.findReadyByRelease(canvasId, "gh:acme/roadmap@3f9c2e1:prod"))?.id).toBe(
+        pending.id,
+      );
+      expect(await repo.findReadyByRelease(canvasId, "other")).toBeNull();
+      // No release identity → null column.
+      const bare = await repo.createPending({
+        canvasId,
+        number: 2,
+        createdBy: userId,
+        source: "zip",
+      });
+      expect(bare.releaseId).toBeNull();
+    });
+
+    it("the partial unique index refuses a second READY version carrying the same release on one canvas", async () => {
+      client = await makeTestDb(dialect);
+      const { canvasId, userId } = await seedCanvas(client);
+      const repo = versionsRepository(client);
+      await ready(repo, canvasId, userId, 1, "rel-a");
+      // A second PENDING candidate with the same release may coexist (concurrent deploys).
+      const loser = await repo.createPending({
+        canvasId,
+        number: 2,
+        createdBy: userId,
+        source: "api",
+        releaseId: "rel-a",
+      });
+      let caught: unknown;
+      try {
+        await repo.markReady(loser.id, { fileCount: 1, totalBytes: 10, manifest: MANIFEST });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeDefined();
+      expect(isUniqueViolation(caught, RELEASE_READY_UNIQUE)).toBe(true);
+      // The loser is still pending (never became ready).
+      expect((await repo.findById(loser.id))?.status).toBe("pending");
+    });
+
+    it("the same release may be ready on two canvases, and many null releases coexist", async () => {
+      client = await makeTestDb(dialect);
+      const { canvasId, userId } = await seedCanvas(client);
+      const other = await canvasesRepository(client).create({
+        ownerId: userId,
+        slug: "s2",
+        apiKeyHash: "h2",
+      });
+      const repo = versionsRepository(client);
+      await ready(repo, canvasId, userId, 1, "rel-a");
+      await expect(ready(repo, other.id, userId, 1, "rel-a")).resolves.toBeDefined();
+      await expect(ready(repo, canvasId, userId, 2)).resolves.toBeDefined();
+      await expect(ready(repo, canvasId, userId, 3)).resolves.toBeDefined();
+    });
+
+    it("deleteReadyNonCurrentById refuses the live version and deletes a non-current ready row", async () => {
+      client = await makeTestDb(dialect);
+      const { canvasId, userId } = await seedCanvas(client);
+      const repo = versionsRepository(client);
+      const canvases = canvasesRepository(client);
+      const v1 = await ready(repo, canvasId, userId, 1, "rel-1");
+      const v2 = await ready(repo, canvasId, userId, 2, "rel-2");
+      await canvases.setCurrentVersion(canvasId, v2.id);
+      expect(await repo.deleteReadyNonCurrentById(canvasId, v2.id)).toBeNull();
+      expect(await repo.findById(v2.id)).not.toBeNull();
+      expect((await repo.deleteReadyNonCurrentById(canvasId, v1.id))?.id).toBe(v1.id);
+      expect(await repo.findById(v1.id)).toBeNull();
+      // A pending row is not a ready row.
+      const p = await repo.createPending({ canvasId, number: 3, createdBy: userId, source: "api" });
+      expect(await repo.deleteReadyNonCurrentById(canvasId, p.id)).toBeNull();
+      // A version of another canvas is never touched through this canvas.
+      const other = await canvasesRepository(client).create({
+        ownerId: userId,
+        slug: "s3",
+        apiKeyHash: "h3",
+      });
+      const ov = await ready(repo, other.id, userId, 1);
+      expect(await repo.deleteReadyNonCurrentById(canvasId, ov.id)).toBeNull();
+      expect(await repo.findById(ov.id)).not.toBeNull();
+    });
+  },
+);

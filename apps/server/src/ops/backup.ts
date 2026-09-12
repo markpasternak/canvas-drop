@@ -26,6 +26,7 @@ import { PgTable } from "drizzle-orm/pg-core";
 import { SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { DbClient } from "../db/factory.js";
 import { runMigrations } from "../db/migrate.js";
+import { canvasesRepository } from "../db/repositories/canvases.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 
@@ -339,6 +340,9 @@ export async function restoreBackup(
       await insertAll(db, requireTable(tables, name), await readTableRows(srcDir, name));
     }
   });
+  // Rows restored from a backup taken before the publication token existed carry the
+  // empty default; mint one for each so R6 holds before the instance serves (KTD1).
+  await canvasesRepository(client).mintMissingPublicationTokens();
 
   const totalRows = Object.values(tableRows).reduce((a, b) => a + b, 0);
   log.info({ srcDir, totalRows, blobCount: blobKeys.length, blobBytes }, "restore complete");

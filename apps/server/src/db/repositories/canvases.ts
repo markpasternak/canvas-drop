@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   computeSearchText,
   PolicyConflictError,
@@ -39,6 +40,27 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 import { teamOrgClause } from "./teams.js";
+
+/**
+ * Mint a publication token (deployment-coordination plan, KTD1): 16 random bytes as 32
+ * lowercase hex characters. Opaque by contract — callers compare it, never parse it.
+ */
+export function mintPublicationToken(): string {
+  return randomBytes(16).toString("hex");
+}
+
+/**
+ * The ONLY way a writer in this repository may assign `currentVersionId` (KTD1 / R7):
+ * every live-pointer write spreads this helper so the publication token rotates in the
+ * same UPDATE. A source-scan test (`canvases.test.ts`) fails on any `currentVersionId`
+ * assignment outside a `livePointerSet(...)` call, so a future writer cannot skip the
+ * rotation silently.
+ */
+export function livePointerSet<T extends { currentVersionId?: string | null }>(
+  fields: T,
+): T & { publicationToken: string } {
+  return { ...fields, publicationToken: mintPublicationToken() };
+}
 
 /**
  * The share + gallery columns cleared whenever a canvas leaves the Published
@@ -555,6 +577,44 @@ export function canvasesRepository(client: DbClient) {
   const inTransaction = <T>(fn: (exec: typeof db) => Promise<T>): Promise<T> =>
     client.dialect === "sqlite" ? fn(db) : db.transaction(fn);
 
+  /** KTD3 — see the `activateVersion` method doc on the returned repository object. */
+  async function activateVersion(
+    id: string,
+    versionId: string,
+    opts: { expectedToken?: string },
+  ): Promise<string | null> {
+    const rows = (await db
+      .update(t)
+      .set(
+        livePointerSet({
+          currentVersionId: versionId,
+          revokedAt: null,
+          updatedAt: nextUpdatedAt(),
+        }),
+      )
+      .where(
+        and(
+          eq(t.id, id),
+          isNull(t.purgeStartedAt),
+          opts.expectedToken === undefined ? undefined : eq(t.publicationToken, opts.expectedToken),
+          exists(
+            db
+              .select({ ok: sql`1` })
+              .from(versionsT)
+              .where(
+                and(
+                  eq(versionsT.id, versionId),
+                  eq(versionsT.canvasId, id),
+                  eq(versionsT.status, "ready"),
+                ),
+              ),
+          ),
+        ),
+      )
+      .returning({ publicationToken: t.publicationToken })) as Array<{ publicationToken: string }>;
+    return rows[0]?.publicationToken ?? null;
+  }
+
   /**
    * Recent `view` counts for a set of canvases over `[sinceMs, ∞)`, as a
    * `canvasId → count` map (absent ⇒ 0). One bounded grouped aggregate riding
@@ -783,8 +843,11 @@ export function canvasesRepository(client: DbClient) {
       set.passwordVersion = sql`${t.passwordVersion} + 1`;
     }
     if (options.currentVersionId !== undefined) {
-      set.currentVersionId = options.currentVersionId;
-      set.revokedAt = null;
+      // A live-pointer write: the publication token rotates with it (KTD1).
+      Object.assign(
+        set,
+        livePointerSet({ currentVersionId: options.currentVersionId, revokedAt: null }),
+      );
     }
 
     const touchesSearchBlob =
@@ -867,7 +930,9 @@ export function canvasesRepository(client: DbClient) {
           backendEnabled: input.backendEnabled ?? false,
           apiKeyHash: input.apiKeyHash,
           status: "active",
-          currentVersionId: null,
+          // Never published yet, but the canvas still has a publication token (R6): a
+          // publisher can pass it back as the precondition for the first publication.
+          ...livePointerSet({ currentVersionId: null }),
           createdAt: now,
           updatedAt: now,
         })
@@ -1664,7 +1729,13 @@ export function canvasesRepository(client: DbClient) {
         // Publishing is the inverse of authoring revoke/unpublish. Clear the
         // marker atomically with the live-version pointer so status cannot stay
         // "revoked" after content is published again.
-        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: nextUpdatedAt() })
+        .set(
+          livePointerSet({
+            currentVersionId: versionId,
+            revokedAt: null,
+            updatedAt: nextUpdatedAt(),
+          }),
+        )
         .where(and(eq(t.id, id), isNull(t.purgeStartedAt)))
         .returning({ id: t.id });
       if (rows.length !== 1) throw new Error("Canvas is unavailable for publication");
@@ -1677,31 +1748,43 @@ export function canvasesRepository(client: DbClient) {
      * concurrent prune deleted it), so the rollback caller surfaces a clean error
      * instead of writing a pointer to a missing version. Pairs with
      * `versionsRepository.pruneBeyond`'s live-pointer guard to close the
-     * rollback-vs-prune race without a cross-dialect transaction.
+     * rollback-vs-prune race without a cross-dialect transaction. A thin wrapper over
+     * {@link activateVersion} with no token precondition.
      */
     async setCurrentVersionIfReady(id: string, versionId: string): Promise<boolean> {
+      return (await activateVersion(id, versionId, {})) !== null;
+    },
+
+    /**
+     * Atomic conditional activation (deployment-coordination plan, KTD3 / R8). One UPDATE
+     * moves the live pointer to `versionId`, clears the revoke marker and mints a fresh
+     * publication token, WHERE the canvas is not being purged, the candidate is a READY
+     * version of THIS canvas, and — when `expectedToken` is supplied — the stored token
+     * still equals it. The comparison and the swap are the same statement, so two
+     * concurrent activations can never both pass on the same observed token, on either
+     * dialect and across processes. Returns the new token, or null when no row matched
+     * (stale token, pending or foreign candidate, or purge started); the caller re-reads
+     * the canvas to classify which.
+     */
+    activateVersion,
+
+    /**
+     * Repair rows that still hold the empty publication-token default (R6): a backup taken
+     * before the token existed and restored onto upgraded code, or any writer outside
+     * `create()`. Idempotent — runs after every `runMigrations` and at the end of a
+     * restore. Returns how many rows were minted.
+     */
+    async mintMissingPublicationTokens(): Promise<number> {
+      const fresh =
+        client.dialect === "sqlite"
+          ? sql`lower(hex(randomblob(16)))`
+          : sql`replace(gen_random_uuid()::text, '-', '')`;
       const rows = (await db
         .update(t)
-        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: nextUpdatedAt() })
-        .where(
-          and(
-            eq(t.id, id),
-            exists(
-              db
-                .select({ ok: sql`1` })
-                .from(versionsT)
-                .where(
-                  and(
-                    eq(versionsT.id, versionId),
-                    eq(versionsT.canvasId, id),
-                    eq(versionsT.status, "ready"),
-                  ),
-                ),
-            ),
-          ),
-        )
+        .set({ publicationToken: fresh })
+        .where(eq(t.publicationToken, ""))
         .returning({ id: t.id })) as Array<{ id: string }>;
-      return rows.length > 0;
+      return rows.length;
     },
 
     /**
@@ -1716,7 +1799,13 @@ export function canvasesRepository(client: DbClient) {
     async unpublish(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS, updatedAt: nextUpdatedAt() })
+        .set(
+          livePointerSet({
+            currentVersionId: null,
+            ...CLEARED_PUBLICATION_FIELDS,
+            updatedAt: nextUpdatedAt(),
+          }),
+        )
         .where(and(eq(t.id, id), eq(t.status, "active"), isNotNull(t.currentVersionId)))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -1736,12 +1825,14 @@ export function canvasesRepository(client: DbClient) {
       const now = Date.now();
       const rows = (await db
         .update(t)
-        .set({
-          revokedAt: now,
-          currentVersionId: null,
-          ...CLEARED_PUBLICATION_FIELDS,
-          updatedAt: nextUpdatedAt(now),
-        })
+        .set(
+          livePointerSet({
+            revokedAt: now,
+            currentVersionId: null,
+            ...CLEARED_PUBLICATION_FIELDS,
+            updatedAt: nextUpdatedAt(now),
+          }),
+        )
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning()) as Canvas[];
       return rows[0];
@@ -1813,14 +1904,16 @@ export function canvasesRepository(client: DbClient) {
         );
       await db
         .update(t)
-        .set({
-          purgedAt: now,
-          currentVersionId: null,
-          passwordHash: null,
-          apiKeyHash: `purged:${id}`,
-          ...CLEARED_PUBLICATION_FIELDS,
-          updatedAt: nextUpdatedAt(),
-        })
+        .set(
+          livePointerSet({
+            purgedAt: now,
+            currentVersionId: null,
+            passwordHash: null,
+            apiKeyHash: `purged:${id}`,
+            ...CLEARED_PUBLICATION_FIELDS,
+            updatedAt: nextUpdatedAt(),
+          }),
+        )
         .where(and(eq(t.id, id), eq(t.status, "deleted"), isNotNull(t.purgeStartedAt)));
     },
 
@@ -1833,7 +1926,7 @@ export function canvasesRepository(client: DbClient) {
     async clearCurrentVersion(id: string): Promise<void> {
       await db
         .update(t)
-        .set({ currentVersionId: null, updatedAt: nextUpdatedAt() })
+        .set(livePointerSet({ currentVersionId: null, updatedAt: nextUpdatedAt() }))
         .where(eq(t.id, id));
     },
 

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
 import { canvasesRepository } from "./canvases.js";
-import { uploadSessionsRepository } from "./upload-sessions.js";
+import { CONSUMED_GRACE_MS, uploadSessionsRepository } from "./upload-sessions.js";
 import { usersRepository } from "./users.js";
 import { versionsRepository } from "./versions.js";
 
@@ -109,8 +109,44 @@ describe.each(DIALECTS)("uploadSessionsRepository (%s)", (dialect) => {
     const live = await sessions.listActiveByCanvas(canvasId, Date.now());
     const ids = live.map((s) => s.id);
     expect(ids).toContain(active.id);
-    expect(ids).not.toContain(consumed.id);
+    // A just-consumed session stays in the live set for the grace window (a handle a
+    // publication conflict un-consumes must keep its staged blobs covered, KTD11).
+    expect(ids).toContain(consumed.id);
     expect(ids).not.toContain(expired.id);
+    // Past the grace window a consumed session drops out (expiry kept far away).
+    const longLived = await sessions.create({
+      ...base(),
+      handleHash: "l".repeat(64),
+      expiresAt: Date.now() + 10 * CONSUMED_GRACE_MS,
+    });
+    await sessions.markConsumed(longLived.id);
+    const later = await sessions.listActiveByCanvas(canvasId, Date.now() + CONSUMED_GRACE_MS + 1);
+    expect(later.map((s) => s.id)).not.toContain(longLived.id);
+  });
+
+  it("round-trips the coordination fields captured at begin", async () => {
+    const created = await sessions.create({
+      ...base(),
+      releaseId: "gh:acme/roadmap@3f9c2e1:prod",
+      expectedPublicationToken: "9f2c4e7a1b3d5f60718293a4b5c6d7e8",
+    });
+    expect(created.releaseId).toBe("gh:acme/roadmap@3f9c2e1:prod");
+    expect(created.expectedPublicationToken).toBe("9f2c4e7a1b3d5f60718293a4b5c6d7e8");
+    const bare = await sessions.create({ ...base(), handleHash: "b".repeat(64) });
+    expect(bare.releaseId).toBeNull();
+    expect(bare.expectedPublicationToken).toBeNull();
+  });
+
+  it("unconsume clears both the consumed marker and the finalize lease", async () => {
+    const s = await sessions.create(base());
+    expect(await sessions.claimForFinalize(s.handleHash, 0)).not.toBeNull();
+    await sessions.markConsumed(s.id);
+    await sessions.unconsume(s.id);
+    const again = await sessions.findByHandleHash(s.handleHash);
+    expect(again?.consumedAt).toBeNull();
+    expect(again?.finalizingAt).toBeNull();
+    // and the handle can be claimed again
+    expect(await sessions.claimForFinalize(s.handleHash, 0)).not.toBeNull();
   });
 
   it("deleteExpired removes only rows past the cutoff", async () => {

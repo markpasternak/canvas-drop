@@ -27,6 +27,8 @@ export interface CreatePendingVersionInput {
   number: number;
   createdBy: string;
   source: DeploySource;
+  /** Caller-supplied opaque release identity (deployment-coordination plan, R1); null when none. */
+  releaseId?: string | null;
 }
 
 /**
@@ -61,6 +63,9 @@ export function versionsRepository(client: DbClient) {
               number: sql`${input.number}`,
               createdBy: sql`${input.createdBy}`,
               source: sql`${input.source}`,
+              // The insert-select must list every column in table order (Postgres checks
+              // the shape), so the release identity sits here, right after `source`.
+              releaseId: input.releaseId ? sql`${input.releaseId}` : sql`null`,
               status: sql`'pending'`,
               fileCount: sql`0`,
               totalBytes: sql`0`,
@@ -126,6 +131,20 @@ export function versionsRepository(client: DbClient) {
       return (await db.select().from(t).where(inArray(t.id, ids))) as Version[];
     },
 
+    /**
+     * The READY version carrying a release identity on this canvas — the "holder" the
+     * deployment-coordination classifier reasons about (KTD4). A pending candidate is not
+     * a holder; the partial unique index guarantees at most one ready row matches.
+     */
+    async findReadyByRelease(canvasId: string, releaseId: string): Promise<Version | null> {
+      const rows = await db
+        .select()
+        .from(t)
+        .where(and(eq(t.canvasId, canvasId), eq(t.releaseId, releaseId), eq(t.status, "ready")))
+        .limit(1);
+      return (rows[0] as Version | undefined) ?? null;
+    },
+
     /** A specific ready version by number (rollback target lookup). */
     async findReadyByNumber(canvasId: string, number: number): Promise<Version | null> {
       const rows = await db
@@ -180,6 +199,32 @@ export function versionsRepository(client: DbClient) {
             eq(t.canvasId, canvasId),
             eq(t.number, number),
             expectedId ? eq(t.id, expectedId) : undefined,
+            eq(t.status, "ready"),
+            notInArray(t.id, liveCurrent),
+          ),
+        )
+        .returning()) as Version[];
+      return deleted[0] ?? null;
+    },
+
+    /**
+     * Delete one ready version BY ID without ever removing the version the canvas
+     * currently serves — the deploy engine's cleanup for a candidate whose conditional
+     * activation lost (deployment-coordination plan, KTD3). Same in-DELETE live-pointer
+     * exclusion as {@link deleteReadyNonCurrent}; returns the deleted row or null when the
+     * id is missing, pending, on another canvas, or current.
+     */
+    async deleteReadyNonCurrentById(canvasId: string, id: string): Promise<Version | null> {
+      const liveCurrent = db
+        .select({ id: canvasesT.currentVersionId })
+        .from(canvasesT)
+        .where(and(eq(canvasesT.id, canvasId), isNotNull(canvasesT.currentVersionId)));
+      const deleted = (await db
+        .delete(t)
+        .where(
+          and(
+            eq(t.canvasId, canvasId),
+            eq(t.id, id),
             eq(t.status, "ready"),
             notInArray(t.id, liveCurrent),
           ),
