@@ -121,6 +121,9 @@ async function connect(
     drafts: draftsRepo,
     storage,
     log: silent,
+    // Wired like production: the blob GC must see staged upload sessions.
+    uploadSessions: uploadSessionsRepository(client),
+    waitOptions: { intervalMs: 5 },
   });
   const server = buildMcpServer(
     {
@@ -3501,3 +3504,320 @@ describe.each(DIALECTS)(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Deployment coordination parity (plan 2026-09-12, U5 / AE13).
+// ---------------------------------------------------------------------------
+describe.each(DIALECTS)("MCP deployment coordination parity [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const R = "gh:acme/roadmap@3f9c2e1:prod";
+  const HEX32 = /^[0-9a-f]{32}$/;
+  const manifestOf = (files: Record<string, string>) =>
+    Object.entries(files).map(([path, content]) => ({
+      path,
+      hash: sha(content),
+      size: new TextEncoder().encode(content).byteLength,
+    }));
+  async function deployAudits(): Promise<number> {
+    // Audit writes are fire-and-forget; give the in-flight append a tick to land.
+    await new Promise((r) => setTimeout(r, 25));
+    return (await auditRepository(client).recent(500)).filter((r) => r.action === "deploy").length;
+  }
+
+  it("Covers AE13. deploy_canvas with a releaseId twice is already_current; get_canvas and list_versions expose the release and the token", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    expect(made.publicationToken).toBeUndefined(); // the create view is unchanged
+    const first = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, files: [{ path: "index.html", content: "one" }], releaseId: R },
+      }),
+    );
+    expect(first).toMatchObject({ outcome: "published", version: 1, releaseId: R });
+    expect(first.publicationToken).toMatch(HEX32);
+    const second = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, files: [{ path: "index.html", content: "two" }], releaseId: R },
+      }),
+    );
+    expect(second).toMatchObject({
+      outcome: "already_current",
+      version: 1,
+      versionId: first.versionId,
+      publicationToken: first.publicationToken,
+    });
+    expect(await deployAudits()).toBe(1);
+
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: made.id } }));
+    expect(got.publicationToken).toBe(first.publicationToken);
+    expect(got.currentVersion).toEqual({
+      id: first.versionId,
+      number: 1,
+      releaseId: R,
+      createdAt: expect.any(Number),
+    });
+    expect(got.deploy.status).toContain(`GET `);
+    const listed = payload(
+      await mcp.callTool({ name: "list_versions", arguments: { id: made.id } }),
+    );
+    expect(listed.versions).toHaveLength(1);
+    expect(listed.versions[0]).toMatchObject({
+      id: first.versionId,
+      number: 1,
+      releaseId: R,
+      current: true,
+    });
+  });
+
+  it("deploy_canvas with a stale expectedPublicationToken fails PUBLICATION_CHANGED with the current publication as JSON", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const stale = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: made.id } }))
+      .publicationToken as string;
+    expect(stale).toMatch(HEX32);
+    const editor = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, files: [{ path: "index.html", content: "editor" }] },
+      }),
+    );
+    const res = await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: {
+        id: made.id,
+        files: [{ path: "index.html", content: "mine" }],
+        releaseId: R,
+        expectedPublicationToken: stale,
+      },
+    });
+    expect(isError(res)).toBe(true);
+    const msg = text(res);
+    expect(msg.startsWith("PUBLICATION_CHANGED: ")).toBe(true);
+    const detail = JSON.parse(msg.slice(msg.indexOf("{"))) as { current: Record<string, unknown> };
+    expect(detail.current).toEqual({
+      publicationToken: editor.publicationToken,
+      versionId: editor.versionId,
+      version: 1,
+      releaseId: null,
+    });
+    // Nothing of ours landed; the audit trail has the one editor deploy.
+    expect(await deployAudits()).toBe(1);
+  });
+
+  it("begin_deploy answers a live release with already_current and no uploadId; finalize_deploy enforces the captured token and accepts a fresh one", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const t1 = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: made.id } }))
+      .publicationToken as string;
+    const files = { "index.html": "<h1>mine</h1>" };
+    const begun = payload(
+      await mcp.callTool({
+        name: "begin_deploy",
+        arguments: {
+          id: made.id,
+          manifest: manifestOf(files),
+          releaseId: R,
+          expectedPublicationToken: t1,
+        },
+      }),
+    );
+    expect(begun.uploadId).toBeTruthy();
+    await mcp.callTool({
+      name: "add_files",
+      arguments: {
+        id: made.id,
+        uploadId: begun.uploadId,
+        files: [{ path: "index.html", content: files["index.html"] }],
+      },
+    });
+    // An intervening publish (from another publisher) rotates the token.
+    const editor = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, files: [{ path: "index.html", content: "editor" }] },
+      }),
+    );
+    const stale = await mcp.callTool({
+      name: "finalize_deploy",
+      arguments: { id: made.id, uploadId: begun.uploadId },
+    });
+    expect(isError(stale)).toBe(true);
+    expect(text(stale).startsWith("PUBLICATION_CHANGED: ")).toBe(true);
+    const fresh = payload(
+      await mcp.callTool({
+        name: "finalize_deploy",
+        arguments: {
+          id: made.id,
+          uploadId: begun.uploadId,
+          expectedPublicationToken: editor.publicationToken,
+        },
+      }),
+    );
+    expect(fresh).toMatchObject({ outcome: "published", releaseId: R, version: 2 });
+    expect(await deployAudits()).toBe(2);
+    // The release is live now: a new begin_deploy for it opens nothing.
+    const again = payload(
+      await mcp.callTool({
+        name: "begin_deploy",
+        arguments: { id: made.id, manifest: manifestOf({ "index.html": "other" }), releaseId: R },
+      }),
+    );
+    expect(again).toMatchObject({ outcome: "already_current", versionId: fresh.versionId });
+    expect(again.uploadId).toBeUndefined();
+    expect(await deployAudits()).toBe(2);
+    // A mismatched release at finalize is refused.
+    const b2 = payload(
+      await mcp.callTool({
+        name: "begin_deploy",
+        arguments: {
+          id: made.id,
+          manifest: manifestOf({ "index.html": "x" }),
+          releaseId: "other-release",
+        },
+      }),
+    );
+    const mismatch = await mcp.callTool({
+      name: "finalize_deploy",
+      arguments: { id: made.id, uploadId: b2.uploadId, releaseId: R },
+    });
+    expect(isError(mismatch)).toBe(true);
+    expect(text(mismatch).startsWith("RELEASE_ID_MISMATCH: ")).toBe(true);
+  });
+
+  it("an editor may use the coordination fields; a no-role member still reads the bare not-found", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const nobody = await seedUser(client, "nobody@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "coord", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const asEditor = await connect(client, { userId: editor });
+    const t0 = payload(await asEditor.callTool({ name: "get_canvas", arguments: { id: cv.id } }))
+      .publicationToken as string;
+    expect(t0).toBe(cv.publicationToken);
+    const r = payload(
+      await asEditor.callTool({
+        name: "deploy_canvas",
+        arguments: {
+          id: cv.id,
+          files: [{ path: "index.html", content: "e" }],
+          releaseId: R,
+          expectedPublicationToken: t0,
+        },
+      }),
+    );
+    expect(r).toMatchObject({ outcome: "published", releaseId: R });
+    const asNobody = await connect(client, { userId: nobody });
+    const denied = await asNobody.callTool({
+      name: "deploy_canvas",
+      arguments: { id: cv.id, files: [{ path: "index.html", content: "n" }], releaseId: R },
+    });
+    expect(isError(denied)).toBe(true);
+    expect(text(denied)).toBe("canvas not found");
+  });
+
+  it("finalize_deploy that itself resolves to already_current writes no deploy audit row (two sessions, one release)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const open = async (content: string) => {
+      const begun = payload(
+        await mcp.callTool({
+          name: "begin_deploy",
+          arguments: { id: made.id, manifest: manifestOf({ "index.html": content }), releaseId: R },
+        }),
+      );
+      expect(begun.uploadId).toBeTruthy();
+      await mcp.callTool({
+        name: "add_files",
+        arguments: {
+          id: made.id,
+          uploadId: begun.uploadId,
+          files: [{ path: "index.html", content }],
+        },
+      });
+      return begun.uploadId as string;
+    };
+    const first = await open("one");
+    const second = await open("two");
+    const f1 = payload(
+      await mcp.callTool({ name: "finalize_deploy", arguments: { id: made.id, uploadId: first } }),
+    );
+    expect(f1).toMatchObject({ outcome: "published", releaseId: R, version: 1 });
+    expect(await deployAudits()).toBe(1);
+    const f2 = payload(
+      await mcp.callTool({ name: "finalize_deploy", arguments: { id: made.id, uploadId: second } }),
+    );
+    expect(f2).toMatchObject({ outcome: "already_current", versionId: f1.versionId });
+    expect(await deployAudits()).toBe(1);
+  });
+
+  it("deploy_canvas for a release that exists only in history fails RELEASE_NOT_CURRENT naming it, with the live publication", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const v1 = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, files: [{ path: "index.html", content: "one" }], releaseId: R },
+      }),
+    );
+    const v2 = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: {
+          id: made.id,
+          files: [{ path: "index.html", content: "two" }],
+          releaseId: "gh:acme/roadmap@77aa01b:prod",
+        },
+      }),
+    );
+    const rolled = payload(
+      await mcp.callTool({ name: "rollback_canvas", arguments: { id: made.id, version: 1 } }),
+    );
+    expect(rolled.version).toBe(1);
+    const res = await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: {
+        id: made.id,
+        files: [{ path: "index.html", content: "again" }],
+        releaseId: "gh:acme/roadmap@77aa01b:prod",
+      },
+    });
+    expect(isError(res)).toBe(true);
+    const msg = text(res);
+    expect(msg.startsWith("RELEASE_NOT_CURRENT: ")).toBe(true);
+    const detail = JSON.parse(msg.slice(msg.indexOf("{"))) as {
+      current: Record<string, unknown>;
+      release: Record<string, unknown>;
+    };
+    expect(detail.release).toEqual({ versionId: v2.versionId, version: 2 });
+    expect(detail.current).toMatchObject({ versionId: v1.versionId, version: 1, releaseId: R });
+    // Nothing was reactivated: the rollback target is still live and no version was added.
+    const listed = payload(
+      await mcp.callTool({ name: "list_versions", arguments: { id: made.id } }),
+    );
+    expect(listed.versions).toHaveLength(2);
+    expect(await deployAudits()).toBe(2);
+  });
+});

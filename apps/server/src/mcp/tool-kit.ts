@@ -2,7 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import { accessModeOf, parseRuntimePolicy } from "@canvas-drop/shared";
 import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
 import { canvasUrl } from "../canvas/url.js";
-import { DeployError } from "../deploy/errors.js";
+import { conflictDetail, DeployError, PublicationConflictError } from "../deploy/errors.js";
 import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
 
 /** The MCP tool return envelope. `isError` marks a tool-level failure. */
@@ -22,8 +22,14 @@ export function fail(message: string): ToolResult {
 }
 
 /** Surface an upload/deploy `DeployError` as a stable `CODE: message` fail; rethrow
- *  anything else (a real bug, not a client error). Shared by every deploy/draft tool. */
+ *  anything else (a real bug, not a client error). Shared by every deploy/draft tool.
+ *  A deployment-coordination conflict (KTD9) appends the current publication — and, for
+ *  `RELEASE_NOT_CURRENT`, the version holding the release — as JSON after the message so
+ *  an agent can reassess from the same text the HTTP 409 body carries. */
 export function failDeploy(e: unknown): ToolResult {
+  if (e instanceof PublicationConflictError) {
+    return fail(`${e.code}: ${e.message} ${JSON.stringify(conflictDetail(e))}`);
+  }
   if (e instanceof DeployError) return fail(`${e.code}: ${e.message}`);
   throw e;
 }

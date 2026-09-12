@@ -30,6 +30,16 @@ export const SLUG_UNIQUE: UniqueTarget = {
   sqliteColumn: "canvases.slug",
 };
 
+/**
+ * The partial unique index that keeps a release identity on at most one READY version
+ * per canvas (deployment-coordination plan, KTD2). The loser of a same-release race hits
+ * it at `markReady`; better-sqlite3 names both columns of the composite index.
+ */
+export const RELEASE_READY_UNIQUE: UniqueTarget = {
+  pgConstraint: "versions_canvas_release_ready_uq",
+  sqliteColumn: "versions.canvas_id, versions.release_id",
+};
+
 interface DriverError {
   code?: unknown;
   message?: unknown;

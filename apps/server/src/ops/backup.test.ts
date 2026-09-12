@@ -369,3 +369,45 @@ describe.each(DIALECTS)("restore failure recovery + force [%s]", (dialect) => {
     await source.close();
   });
 });
+
+describe.each(DIALECTS)("restore repairs empty publication tokens [%s]", (dialect) => {
+  it("a backup whose canvases carry the pre-0043 empty token restores with fresh, distinct tokens (R6)", async () => {
+    const source = await makeTestDb(dialect);
+    const srcStore = memStorage();
+    const { user, canvas } = await seed(source, srcStore);
+    const second = await canvasesRepository(source).create({
+      ownerId: user.id,
+      slug: "second-yak",
+      apiKeyHash: "hash-def",
+    });
+    const dir = await freshDir();
+    await createBackup({ client: source, storage: srcStore, log }, dir);
+
+    // Simulate a backup taken before the token existed: blank every canvas token.
+    const path = join(dir, "db", "canvases.ndjson");
+    const blanked = (await readFile(path, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const row = JSON.parse(line) as Record<string, unknown>;
+        if ("publicationToken" in row) row.publicationToken = "";
+        if ("publication_token" in row) row.publication_token = "";
+        return JSON.stringify(row);
+      })
+      .join("\n");
+    await writeFile(path, `${blanked}\n`);
+
+    const target = await emptyTarget(dialect);
+    await restoreBackup({ client: target, storage: memStorage(), log }, dir);
+    const restoredRepo = canvasesRepository(target);
+    const tokens = [
+      (await restoredRepo.findById(canvas.id))?.publicationToken ?? "",
+      (await restoredRepo.findById(second.id))?.publicationToken ?? "",
+    ];
+    expect(tokens).toHaveLength(2);
+    for (const t of tokens) expect(t).toMatch(/^[0-9a-f]{32}$/);
+    expect(new Set(tokens).size).toBe(2);
+    await target.close();
+    await source.close();
+  });
+});

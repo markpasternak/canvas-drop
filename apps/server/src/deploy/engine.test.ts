@@ -1,21 +1,26 @@
 import { Buffer } from "node:buffer";
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import type { Manifest } from "@canvas-drop/shared/db";
+import { sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { pino } from "pino";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { blobKey, canvasBlobPrefix } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
+import { isUniqueViolation, RELEASE_READY_UNIQUE } from "../db/unique-violation.js";
+import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
 import { deployEngine } from "./engine.js";
+import { PublicationConflictError } from "./errors.js";
 import type { DeployEntry } from "./ingest.js";
 import { fromZip } from "./ingest.js";
+import type { WaitOptions } from "./publication.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 const silent = pino({ level: "silent" });
@@ -377,5 +382,496 @@ describe("deployEngine", () => {
     await engine.deploy(cv, "api", folder({ "index.html": "v1" }), owner.id);
     const live = await canvases.findById(cv.id);
     expect(calls).toEqual([[cv.id, live?.currentVersionId]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deployment coordination (plan 2026-09-12): release identity + publication token.
+// ---------------------------------------------------------------------------
+describe.each(DIALECTS)("deployEngine — deployment coordination [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const R = "gh:acme/roadmap@3f9c2e1:prod";
+  const S = "gh:acme/roadmap@77aa01b:prod";
+  const HEX32 = /^[0-9a-f]{32}$/;
+
+  interface Hooks {
+    /** Called on the first storage put of a deploy — a window between pre-check and markReady. */
+    onFirstPut?: () => Promise<void>;
+    waitOptions?: WaitOptions;
+    /** Replaces the silent logger (to assert on error-level cleanup reports). */
+    log?: Logger;
+  }
+
+  async function setup(hooks: Hooks = {}) {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
+    const base = memStorage();
+    let firstPut = true;
+    const storage: StorageDriver = {
+      ...base,
+      async put(key, bytes) {
+        if (firstPut && hooks.onFirstPut) {
+          firstPut = false;
+          await hooks.onFirstPut();
+        }
+        return base.put(key, bytes);
+      },
+    };
+    const enqueue = vi.fn(async () => {});
+    const markStale = vi.spyOn(drafts, "markStale");
+    const resetToBase = vi.spyOn(drafts, "resetToBase");
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      log: hooks.log ?? silent,
+      screenshots: { enqueue } as never,
+      waitOptions: hooks.waitOptions ?? { intervalMs: 5 },
+    });
+    /** A ready version with an optional release, made outside the engine (an editor publish / another publisher). */
+    const readyVersion = async (releaseId?: string, ageMs = 0) => {
+      const v = await versions.createPending({
+        canvasId: cv.id,
+        number: await versions.nextNumber(cv.id),
+        createdBy: owner.id,
+        source: "editor",
+        releaseId,
+      });
+      await versions.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: {} });
+      if (ageMs > 0) {
+        const q = sql`update versions set created_at = ${Date.now() - ageMs} where id = ${v.id}`;
+        if (client.dialect === "sqlite") client.db.run(q);
+        else await client.db.execute(q);
+      }
+      return v;
+    };
+    const token = async () => (await canvases.findById(cv.id))?.publicationToken ?? "";
+    const readyRows = async () =>
+      (await versions.listByCanvas(cv.id)).filter((v) => v.status === "ready");
+    return {
+      engine,
+      canvases,
+      versions,
+      drafts,
+      canvas: cv,
+      ownerId: owner.id,
+      readyVersion,
+      token,
+      readyRows,
+      spies: { enqueue, markStale, resetToBase },
+    };
+  }
+
+  const deploy = (
+    t: Awaited<ReturnType<typeof setup>>,
+    files: Record<string, string>,
+    coordination?: { releaseId?: string; expectedPublicationToken?: string },
+  ) => t.engine.deploy(t.canvas, "api", folder(files), t.ownerId, { coordination });
+
+  async function conflictOf(p: Promise<unknown>): Promise<PublicationConflictError> {
+    try {
+      await p;
+    } catch (err) {
+      expect(err).toBeInstanceOf(PublicationConflictError);
+      return err as PublicationConflictError;
+    }
+    throw new Error("expected a PublicationConflictError");
+  }
+
+  it("Covers AE1. the same release deployed twice: the second is already_current, one version exists, no second candidate", async () => {
+    const t = await setup();
+    const first = await deploy(t, { "index.html": "a" }, { releaseId: R });
+    expect(first.outcome).toBe("published");
+    expect(first.releaseId).toBe(R);
+    expect(first.publicationToken).toMatch(HEX32);
+    const createPending = vi.spyOn(t.versions, "createPending");
+    const second = await deploy(t, { "index.html": "b" }, { releaseId: R });
+    expect(second.outcome).toBe("already_current");
+    expect(second.versionId).toBe(first.versionId);
+    expect(second.version).toBe(first.version);
+    expect(second.fileCount).toBe(1);
+    expect(second.publicationToken).toBe(first.publicationToken);
+    expect(second.warnings).toEqual([]);
+    expect(createPending).not.toHaveBeenCalled();
+    expect(await t.readyRows()).toHaveLength(1);
+    // The live site still serves the FIRST deploy's bytes.
+    expect((await t.versions.findById(first.versionId))?.manifest).toEqual(
+      expect.objectContaining({ "index.html": expect.objectContaining({ size: 1 }) }),
+    );
+  });
+
+  it("Covers AE2 / F2. two concurrent deploys of one release: exactly one ready version carries it, one result is already_current", async () => {
+    const t = await setup();
+    const [a, b] = await Promise.all([
+      deploy(t, { "index.html": "a" }, { releaseId: R }),
+      deploy(t, { "index.html": "b" }, { releaseId: R }),
+    ]);
+    expect([a.outcome, b.outcome].sort()).toEqual(["already_current", "published"]);
+    expect(a.versionId).toBe(b.versionId);
+    const ready = await t.readyRows();
+    expect(ready).toHaveLength(1);
+    expect(ready[0]?.releaseId).toBe(R);
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(ready[0]?.id);
+    // No pending leftovers from the loser.
+    expect(await t.versions.listByCanvas(t.canvas.id)).toHaveLength(1);
+  });
+
+  it("Covers AE4 / F3. a token read before an editor publish is refused with PUBLICATION_CHANGED; the editor's version stays live", async () => {
+    const t = await setup();
+    const t1 = await t.token();
+    const editors = await t.readyVersion(); // an editor publish lands in between
+    await t.canvases.setCurrentVersion(t.canvas.id, editors.id);
+    const t2 = await t.token();
+    const err = await conflictOf(
+      deploy(t, { "index.html": "x" }, { releaseId: R, expectedPublicationToken: t1 }),
+    );
+    expect(err.code).toBe("PUBLICATION_CHANGED");
+    expect(err.current).toEqual({
+      publicationToken: t2,
+      versionId: editors.id,
+      version: editors.number,
+      releaseId: null,
+    });
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(editors.id);
+    expect(await t.token()).toBe(t2);
+    // The pre-check refused it before any candidate row existed.
+    expect(await t.versions.listByCanvas(t.canvas.id)).toHaveLength(1);
+  });
+
+  it("the atomic activation refuses a token that changes between the pre-check and the swap; the candidate is removed", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    t = await setup({
+      onFirstPut: async () => {
+        const v = await t.readyVersion(); // someone publishes mid-ingest
+        await t.canvases.setCurrentVersion(t.canvas.id, v.id);
+      },
+    });
+    const t0 = await t.token();
+    const err = await conflictOf(
+      deploy(t, { "index.html": "x" }, { expectedPublicationToken: t0 }),
+    );
+    expect(err.code).toBe("PUBLICATION_CHANGED");
+    expect(err.current.publicationToken).not.toBe(t0);
+    const rows = await t.versions.listByCanvas(t.canvas.id);
+    expect(rows).toHaveLength(1); // only the mid-ingest publish; our candidate is gone
+    expect(rows[0]?.id).toBe(err.current.versionId);
+    expect(t.spies.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("Covers AE5 / F4. a release that exists only in history is RELEASE_NOT_CURRENT, naming that version; nothing is reactivated", async () => {
+    const t = await setup();
+    const first = await deploy(t, { "index.html": "r" }, { releaseId: R });
+    const second = await deploy(t, { "index.html": "s" }, { releaseId: S });
+    expect(await t.canvases.setCurrentVersionIfReady(t.canvas.id, first.versionId)).toBe(true); // rollback
+    // Age the S holder out of the in-flight window: a rollback is history, not a race.
+    const q = sql`update versions set created_at = ${Date.now() - 120_000} where id = ${second.versionId}`;
+    if (client.dialect === "sqlite") client.db.run(q);
+    else await client.db.execute(q);
+    const err = await conflictOf(deploy(t, { "index.html": "s2" }, { releaseId: S }));
+    expect(err.code).toBe("RELEASE_NOT_CURRENT");
+    expect(err.release).toEqual({ versionId: second.versionId, version: second.version });
+    expect(err.current.versionId).toBe(first.versionId);
+    expect(err.current.releaseId).toBe(R);
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(first.versionId);
+    expect(await t.readyRows()).toHaveLength(2);
+  });
+
+  it("Covers AE7 / F5. first publication with the initial token succeeds and rotates it", async () => {
+    const t = await setup();
+    const t0 = t.canvas.publicationToken;
+    expect(t0).toMatch(HEX32);
+    const r = await deploy(
+      t,
+      { "index.html": "x" },
+      { releaseId: R, expectedPublicationToken: t0 },
+    );
+    expect(r.outcome).toBe("published");
+    expect(r.publicationToken).toMatch(HEX32);
+    expect(r.publicationToken).not.toBe(t0);
+    expect(await t.token()).toBe(r.publicationToken);
+  });
+
+  it("Covers AE8. a failed deploy with an expected token leaves the pointer and the token unchanged", async () => {
+    const t = await setup();
+    const live = await deploy(t, { "index.html": "ok" });
+    await expect(
+      deploy(
+        t,
+        { "../escape.txt": "x", "index.html": "y" },
+        { expectedPublicationToken: live.publicationToken },
+      ),
+    ).rejects.toMatchObject({ code: "ZIP_SLIP_REJECTED" });
+    expect(await t.token()).toBe(live.publicationToken);
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(live.versionId);
+    expect(await t.readyRows()).toHaveLength(1);
+  });
+
+  it("Covers AE9 / F7. a lost response: repeating the identical call (same release, same token) is already_current", async () => {
+    const t = await setup();
+    const t0 = await t.token();
+    const first = await deploy(
+      t,
+      { "index.html": "x" },
+      { releaseId: R, expectedPublicationToken: t0 },
+    );
+    expect(first.outcome).toBe("published");
+    // The retry carries the OLD token, but the release check comes first (R9).
+    const retry = await deploy(
+      t,
+      { "index.html": "x" },
+      { releaseId: R, expectedPublicationToken: t0 },
+    );
+    expect(retry.outcome).toBe("already_current");
+    expect(retry.versionId).toBe(first.versionId);
+    expect(retry.publicationToken).toBe(first.publicationToken);
+    expect(await t.readyRows()).toHaveLength(1);
+  });
+
+  it("Covers AE11. a deploy with no coordination fields publishes as today, with the additive fields present", async () => {
+    const t = await setup();
+    const r = await t.engine.deploy(t.canvas, "api", folder({ "index.html": "x" }), t.ownerId);
+    expect(r.outcome).toBe("published");
+    expect(r.releaseId).toBeNull();
+    expect(r.publicationToken).toMatch(HEX32);
+    expect(r.versionId).toBe((await t.canvases.findById(t.canvas.id))?.currentVersionId);
+    expect(r.publicationToken).not.toBe(t.canvas.publicationToken);
+  });
+
+  it("an invalid releaseId is refused before any version row exists", async () => {
+    const t = await setup();
+    for (const bad of ["", "x".repeat(201), "a\nb"]) {
+      await expect(deploy(t, { "index.html": "x" }, { releaseId: bad })).rejects.toMatchObject({
+        code: "INVALID_RELEASE_ID",
+      });
+    }
+    expect(await t.versions.listByCanvas(t.canvas.id)).toHaveLength(0);
+    expect(await deploy(t, { "index.html": "x" }, { releaseId: "x".repeat(200) })).toMatchObject({
+      outcome: "published",
+    });
+  });
+
+  it("Covers R3 / R9 (KTD7). already_current and both conflicts trigger no screenshot and no draft write", async () => {
+    const t = await setup();
+    const live = await deploy(t, { "index.html": "x" }, { releaseId: R });
+    expect(t.spies.enqueue).toHaveBeenCalledTimes(1);
+    t.spies.enqueue.mockClear();
+    t.spies.markStale.mockClear();
+    t.spies.resetToBase.mockClear();
+
+    await deploy(t, { "index.html": "y" }, { releaseId: R }); // already_current
+    await conflictOf(
+      deploy(t, { "index.html": "y" }, { expectedPublicationToken: "0".repeat(32) }),
+    );
+    await t.readyVersion(S, 120_000); // a historical holder for S
+    await conflictOf(deploy(t, { "index.html": "y" }, { releaseId: S })); // RELEASE_NOT_CURRENT
+    expect(t.spies.enqueue).not.toHaveBeenCalled();
+    expect(t.spies.markStale).not.toHaveBeenCalled();
+    expect(t.spies.resetToBase).not.toHaveBeenCalled();
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(live.versionId);
+  });
+
+  it("KTD4 wait: a fresh holder that becomes current during the pre-check wait yields already_current", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    let sleeps = 0;
+    t = await setup({
+      waitOptions: {
+        attempts: 5,
+        sleep: async () => {
+          sleeps++;
+          if (sleeps === 2) {
+            const holder = await t.versions.findReadyByRelease(t.canvas.id, R);
+            if (holder) await t.canvases.setCurrentVersionIfReady(t.canvas.id, holder.id);
+          }
+        },
+      },
+    });
+    const v1 = await t.readyVersion();
+    await t.canvases.setCurrentVersion(t.canvas.id, v1.id);
+    const holder = await t.readyVersion(R); // ready, fresh, not current: a winner mid-swap
+    const r = await deploy(t, { "index.html": "x" }, { releaseId: R });
+    expect(r.outcome).toBe("already_current");
+    expect(r.versionId).toBe(holder.id);
+    expect(sleeps).toBe(2);
+    expect(await t.versions.listByCanvas(t.canvas.id)).toHaveLength(2); // no candidate was created
+  });
+
+  it("KTD4 wait: when the winner withdraws mid-wait, the loser retries markReady and publishes its own candidate", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    let holderId: string | undefined;
+    t = await setup({
+      // The rival becomes ready AFTER our pre-check passed (so our markReady collides).
+      onFirstPut: async () => {
+        holderId = (await t.readyVersion(R)).id;
+      },
+      waitOptions: {
+        attempts: 5,
+        sleep: async () => {
+          // The rival's own activation failed (stale token) and it deleted its candidate.
+          if (holderId) await t.versions.deleteReadyNonCurrentById(t.canvas.id, holderId);
+        },
+      },
+    });
+    const r = await deploy(t, { "index.html": "mine" }, { releaseId: R });
+    expect(r.outcome).toBe("published");
+    expect(r.releaseId).toBe(R);
+    const ready = await t.readyRows();
+    expect(ready).toHaveLength(1);
+    expect(ready[0]?.id).toBe(r.versionId);
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(r.versionId);
+  });
+
+  it("KTD4 wait: a holder outside the in-flight window is RELEASE_NOT_CURRENT at once, without sleeping", async () => {
+    let slept = false;
+    const t = await setup({
+      waitOptions: {
+        attempts: 5,
+        sleep: async () => {
+          slept = true;
+        },
+      },
+    });
+    const v1 = await t.readyVersion();
+    await t.canvases.setCurrentVersion(t.canvas.id, v1.id);
+    const old = await t.readyVersion(R, 120_000);
+    const err = await conflictOf(deploy(t, { "index.html": "x" }, { releaseId: R }));
+    expect(err.code).toBe("RELEASE_NOT_CURRENT");
+    expect(err.release?.versionId).toBe(old.id);
+    expect(slept).toBe(false);
+  });
+
+  it("KTD4 wait: a fresh holder that never lands times out as RELEASE_NOT_CURRENT naming it, and the loser's candidate is gone", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    let sleeps = 0;
+    let holderId = "";
+    t = await setup({
+      onFirstPut: async () => {
+        holderId = (await t.readyVersion(R)).id; // a rival that crashed between markReady and swap
+      },
+      waitOptions: {
+        attempts: 3,
+        sleep: async () => {
+          sleeps++;
+        },
+      },
+    });
+    const err = await conflictOf(deploy(t, { "index.html": "x" }, { releaseId: R }));
+    expect(err.code).toBe("RELEASE_NOT_CURRENT");
+    expect(err.release?.versionId).toBe(holderId);
+    expect(err.message).toContain("never activated");
+    expect(sleeps).toBe(3);
+    const rows = await t.versions.listByCanvas(t.canvas.id);
+    expect(rows.map((v) => v.id)).toEqual([holderId]); // no pending candidate remains
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBeNull();
+  });
+
+  it("a caller-owned activation hook still runs and the result carries the token it minted", async () => {
+    const t = await setup();
+    let hooked: string | undefined;
+    const r = await t.engine.deploy(t.canvas, "api", folder({ "index.html": "x" }), t.ownerId, {
+      activateVersion: async (versionId) => {
+        hooked = versionId;
+        await t.canvases.setCurrentVersion(t.canvas.id, versionId);
+      },
+    });
+    expect(hooked).toBe(r.versionId);
+    expect(r.publicationToken).toBe(await t.token());
+    expect(r.publicationToken).not.toBe(t.canvas.publicationToken);
+  });
+
+  it("a transient failure removing the lost candidate is retried; the conflict still surfaces and no orphan remains", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    t = await setup({
+      onFirstPut: async () => {
+        const v = await t.readyVersion(); // someone publishes mid-ingest
+        await t.canvases.setCurrentVersion(t.canvas.id, v.id);
+      },
+      waitOptions: { intervalMs: 5, sleep: async () => {} },
+    });
+    const original = t.versions.deleteReadyNonCurrentById.bind(t.versions);
+    const cleanup = vi
+      .spyOn(t.versions, "deleteReadyNonCurrentById")
+      .mockRejectedValueOnce(new Error("db blip"))
+      .mockRejectedValueOnce(new Error("db blip"))
+      .mockImplementation(original);
+    const t0 = await t.token();
+    const err = await conflictOf(
+      deploy(t, { "index.html": "x" }, { expectedPublicationToken: t0 }),
+    );
+    expect(err.code).toBe("PUBLICATION_CHANGED");
+    expect(cleanup).toHaveBeenCalledTimes(3);
+    expect(await t.readyRows()).toHaveLength(1); // only the mid-ingest publish; our candidate is gone
+  });
+
+  it("when removing the lost candidate keeps failing, the conflict is still raised and the orphan is reported at error level", async () => {
+    const log = silent.child({});
+    const errorLog = vi.spyOn(log, "error");
+    let t: Awaited<ReturnType<typeof setup>>;
+    t = await setup({
+      onFirstPut: async () => {
+        const v = await t.readyVersion();
+        await t.canvases.setCurrentVersion(t.canvas.id, v.id);
+      },
+      waitOptions: { intervalMs: 5, sleep: async () => {} },
+      log,
+    });
+    const cleanup = vi
+      .spyOn(t.versions, "deleteReadyNonCurrentById")
+      .mockRejectedValue(new Error("db down"));
+    const t0 = await t.token();
+    const err = await conflictOf(
+      deploy(t, { "index.html": "x" }, { expectedPublicationToken: t0 }),
+    );
+    expect(err.code).toBe("PUBLICATION_CHANGED");
+    expect(cleanup).toHaveBeenCalledTimes(3);
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    const orphan = (await t.readyRows()).find((v) => v.id !== err.current.versionId);
+    expect(orphan).toBeDefined(); // the ready orphan remains, named in the log for manual removal
+    const logged = errorLog.mock.calls[0]?.[0] as { versionId?: string; attempts?: number };
+    expect(logged.versionId).toBe(orphan?.id);
+    expect(logged.attempts).toBe(3);
+  });
+
+  it("a unique violation that persists while the holder reads absent surfaces the raw error after the retry cap; the candidate is discarded", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    let holderId = "";
+    t = await setup({
+      onFirstPut: async () => {
+        holderId = (await t.readyVersion(R)).id; // a rival lands after our pre-check
+      },
+      waitOptions: { attempts: 1, sleep: async () => {} },
+    });
+    // The classifier never sees the holder (as if it had withdrawn), so every retry collides again.
+    vi.spyOn(t.versions, "findReadyByRelease").mockResolvedValue(null);
+    const markReady = vi.spyOn(t.versions, "markReady");
+    let caught: unknown;
+    try {
+      await deploy(t, { "index.html": "x" }, { releaseId: R });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(caught).not.toBeInstanceOf(PublicationConflictError);
+    expect(isUniqueViolation(caught, RELEASE_READY_UNIQUE)).toBe(true);
+    // The rival's own markReady (from readyVersion) aside: our first attempt plus three retries.
+    expect(markReady.mock.calls.filter(([id]) => id !== holderId)).toHaveLength(4);
+    const rows = await t.versions.listByCanvas(t.canvas.id);
+    expect(rows.map((v) => v.id)).toEqual([holderId]); // no pending candidate remains
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBeNull();
   });
 });

@@ -126,8 +126,8 @@ Minimum role: editor. These keep working on a disabled canvas.
 
 | Tool | Input | Result |
 |---|---|---|
-| `get_canvas` | `id` | View + `owner`, `role`, `publicLinkEnabled`, `teamIds` (the team grants on the people-and-teams list, at any `access` value; `[]` when none), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, and `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued). |
-| `list_versions` | `id` | `{versions: [{number, source, status, createdBy, createdByName, createdByEmail, createdAt, fileCount, totalBytes, current, downloadUrl}]}`. `downloadUrl` is `{base}/mcp/canvases/{id}/versions/{n}/download`, a ZIP of that version. |
+| `get_canvas` | `id` | View + `owner`, `role`, `publicLinkEnabled`, `teamIds` (the team grants on the people-and-teams list, at any `access` value; `[]` when none), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued), plus the deployment-coordination readback: `publicationToken` (always present) and `currentVersion: {id, number, releaseId, createdAt} \| null`. |
+| `list_versions` | `id` | `{versions: [{id, number, source, status, createdBy, createdByName, createdByEmail, createdAt, fileCount, totalBytes, releaseId, current, downloadUrl}]}`. `id` is the immutable version id, `releaseId` the release identity it was deployed under (or `null`); `downloadUrl` is `{base}/mcp/canvases/{id}/versions/{n}/download`, a ZIP of that version. |
 | `get_canvas_file` | `id`, `path?` | Without `path`: `{version, fileCount, files: [{path, size, mime, hash}]}` for the live version. With `path`: `{version, path, size, mime, hash, encoding: "utf8" \| "base64", content}`. A file over 256 KiB returns `truncated: true` and a `note` instead of `content`; compare the `hash`. Fails with `this canvas has no live version yet` or `no file at "…"`. |
 | `get_canvas_usage` | `id` | `{totalViews, uniqueViewers, lastViewedAt, viewsByDay, kvOps, fileOps, fileCount, fileBytes, aiCalls, aiTokens, aiCostUsd, realtimeConnects}`. |
 | `list_canvas_connections` | `id` | `{connections: [{key, label, origin, allowedMethods, protectedHeaderNames, enabled, available, unavailableReason}]}`. This is sanitized authority metadata only: protected header values are never returned. A Connection works only while its live admin grant and profile remain enabled and the canvas backend is on. |
@@ -143,10 +143,10 @@ path; for a draft, use the editor tools below.
 
 | Tool | Input | Result |
 |---|---|---|
-| `deploy_canvas` | `id`, and exactly one of `zipBase64` or `files: [{path, content, encoding?: "utf8" \| "base64"}]` | `{url, version, fileCount, totalBytes, warnings: []}`. `INVALID_REQUEST` for both or neither; `empty deploy` for a zero-byte ZIP. Ingest failures use the Deploy API codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`, `INVALID_ZIP`, `INVALID_PATH`, `INVALID_ENCODING`, `ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`. |
-| `begin_deploy` | `id`, `manifest: [{path, hash, size}]` (`hash` is the sha256 hex of the bytes) | `{uploadId, missingHashes}`: the blobs the server does not already hold. The handle lives 15 minutes. `INVALID_MANIFEST`. |
+| `deploy_canvas` | `id`, exactly one of `zipBase64` or `files: [{path, content, encoding?: "utf8" \| "base64"}]`, and optionally `releaseId`, `expectedPublicationToken` | `{outcome: "published" \| "already_current", url, version, versionId, releaseId, publicationToken, fileCount, totalBytes, warnings: []}`. `INVALID_REQUEST` for both or neither payload; `empty deploy` for a zero-byte ZIP. Ingest failures use the Deploy API codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`, `INVALID_ZIP`, `INVALID_PATH`, `INVALID_ENCODING`, `ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`. Coordination: `INVALID_RELEASE_ID`, and the conflicts `PUBLICATION_CHANGED` / `RELEASE_NOT_CURRENT`, whose text ends with the current publication as JSON. |
+| `begin_deploy` | `id`, `manifest: [{path, hash, size}]` (`hash` is the sha256 hex of the bytes), optionally `releaseId`, `expectedPublicationToken` | `{uploadId, missingHashes}`: the blobs the server does not already hold. The handle lives 15 minutes. A release that is live already answers the `already_current` result instead (no `uploadId`); a stale token fails `PUBLICATION_CHANGED` before anything is staged. `INVALID_MANIFEST`, `INVALID_RELEASE_ID`. |
 | `add_files` | `id`, `uploadId`, `files: [{path, content, encoding?}]` | `{staged: <count>}`. Call repeatedly to chunk. `UPLOAD_HANDLE_INVALID`, `UPLOAD_EXPIRED`, `UPLOAD_ALREADY_FINALIZED`, `UPLOAD_UNEXPECTED_BLOB`, `BLOB_HASH_MISMATCH`, `INVALID_ENCODING`. |
-| `finalize_deploy` | `id`, `uploadId` | Same result as `deploy_canvas`. Single-use. `UPLOAD_MISSING_BLOB` (stage it and retry), `UPLOAD_IN_PROGRESS` (a 60 s lease), `UPLOAD_ALREADY_FINALIZED`. |
+| `finalize_deploy` | `id`, `uploadId`, optionally `expectedPublicationToken` (replaces the one captured at begin), `releaseId` (must equal begin's) | Same result as `deploy_canvas`. Single-use, except that a repeated finalize of a live release answers `already_current`. `UPLOAD_MISSING_BLOB` (stage it and retry), `UPLOAD_IN_PROGRESS` (a 60 s lease), `UPLOAD_ALREADY_FINALIZED`, `RELEASE_ID_MISMATCH`; a `PUBLICATION_CHANGED` conflict leaves the handle usable for a finalize with the fresh token. |
 
 Limits: 100 MiB per canvas, 25 MiB per file, 2000 files. Read "Which deploy tool to
 use" below before sending bytes through a tool call.
@@ -296,9 +296,13 @@ for this canvas, so there is nothing to probe.
     "finalize": "POST https://canvases.example.com/v1/canvases/{id}/uploads/{uploadId}/finalize"
   },
   "readback": "GET https://canvases.example.com/v1/canvases/{id}/files",
+  "status": "GET https://canvases.example.com/v1/canvases/{id}",
   "curl": "curl -X PUT \"https://canvases.example.com/v1/canvases/{id}/deploy\" -H \"Authorization: Bearer $CANVAS_KEY\" --data-binary @site.zip"
 }
 ```
+
+`status` is the canvas readback: publication state, the current `releaseId`, and the
+`publicationToken` a coordinated deploy passes back.
 
 `create_canvas` and `regenerate_deploy_key` embed the real key in `curl` (returned
 once); `get_canvas` and `set_canvas_slug` show the `$CANVAS_KEY` placeholder, so set it
@@ -325,6 +329,15 @@ The staged flow:
 
 Over MCP, `add_files` content still travels in the tool call. The saving comes from not
 resending unchanged files and from chunking.
+
+**When several publishers may ship the same build** (a local tool plus a CI fallback),
+pass an opaque `releaseId` and the `publicationToken` from `get_canvas` as
+`expectedPublicationToken` on `deploy_canvas` or `begin_deploy`. A release that is live
+already answers `outcome: "already_current"` and creates nothing; a token that went
+stale fails `PUBLICATION_CHANGED` with the current publication; a release that exists
+only in history fails `RELEASE_NOT_CURRENT`. Treat each as a reassess signal: read
+back and decide, never refresh the token and retry blindly. The full contract and a
+recipe live under [Coordinate two publishers](/docs/api/deploy-api#coordinate-two-publishers).
 
 **Prefer `curl` and the keyed Deploy API for the file transfer whenever you can run
 shell commands.** Every MCP deploy tool inlines file contents into the tool call, so they

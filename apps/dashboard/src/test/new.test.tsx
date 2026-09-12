@@ -160,7 +160,17 @@ describe("Create canvas — audience shortcut", () => {
   });
 });
 
-const DEPLOYED = { url: "http://x/c/new", version: 1, fileCount: 2, totalBytes: 50, warnings: [] };
+const DEPLOYED = {
+  outcome: "published" as const,
+  url: "http://x/c/new",
+  version: 1,
+  versionId: "v1",
+  releaseId: null,
+  publicationToken: "0123456789abcdef0123456789abcdef",
+  fileCount: 2,
+  totalBytes: 50,
+  warnings: [],
+};
 function chooseFiles(files: File[]) {
   const input = document.querySelector<HTMLInputElement>(
     'input[type="file"]:not([webkitdirectory])',

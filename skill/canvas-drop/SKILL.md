@@ -105,8 +105,8 @@ slug. Calls share one bucket of 120 per minute per user
 |---|---|---|
 | Identity and lists | `whoami`, `list_canvases`, `list_shared_canvases` | `list_canvases` takes `role` (`owned` / `edited`), `query` (case-, accent-, and whitespace-insensitive search over title, description, tags, and slug; multi-word AND), `tags` (any-match), `sort` (`updated` / `created` / `title` / `popular`), `limit` (default 50, max 100). Each row carries `owner` and `role`. |
 | Create | `create_canvas`, `clone_canvas` | `create_canvas(title?, description?, backendEnabled?, slug?, orgId?)` returns the canvas, its `apiKey` (shown once), and a `deploy` block with the exact endpoints (`apiBase`, `zipUpload`, `staged.begin` / `stageBlob` / `finalize`, `readback`, and a copy-paste `curl`). Use them verbatim; do not probe for the API host. `get_canvas` returns the same block with a `$CANVAS_KEY` placeholder. `clone_canvas(id)` copies the published files into a new private, unpublished canvas; its key is not returned (use `regenerate_deploy_key`). |
-| Read | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_canvas_connections`, `list_access`, `search_people` | `get_canvas_file(id)` lists the live files; `get_canvas_file(id, path)` returns one file's content (`utf8` or `base64`; over 256 KiB comes back `truncated: true` without content). This is how you verify a deploy. `list_versions` rows carry a `downloadUrl` (ZIP export, same bearer token). `list_canvas_connections(id)` returns sanitized admin-granted profile metadata, never protected header values. `list_access` returns the people list with each entry's `id` (used by `revoke_access` / `set_access_role`) and, for the owner, `transferCandidates`. |
-| Deploy | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` | `deploy_canvas(id, zipBase64)` or `deploy_canvas(id, files: [{path, content, encoding?}])` publishes in one call. Staged: `begin_deploy(id, manifest: [{path, hash, size}])` returns `{uploadId, missingHashes}`; `add_files` stages only those; `finalize_deploy` publishes. Session TTL 15 minutes. The canvas must be active (`NOT_ACTIVE` otherwise). |
+| Read | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_canvas_connections`, `list_access`, `search_people` | `get_canvas` also returns `publicationToken` and `currentVersion: {id, number, releaseId, createdAt} \| null` (the deployment-coordination readback); `list_versions` rows carry `id` and `releaseId`. `get_canvas_file(id)` lists the live files; `get_canvas_file(id, path)` returns one file's content (`utf8` or `base64`; over 256 KiB comes back `truncated: true` without content). This is how you verify a deploy. `list_versions` rows carry a `downloadUrl` (ZIP export, same bearer token). `list_canvas_connections(id)` returns sanitized admin-granted profile metadata, never protected header values. `list_access` returns the people list with each entry's `id` (used by `revoke_access` / `set_access_role`) and, for the owner, `transferCandidates`. |
+| Deploy | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` | `deploy_canvas(id, zipBase64)` or `deploy_canvas(id, files: [{path, content, encoding?}])` publishes in one call and returns `{outcome, url, version, versionId, releaseId, publicationToken, fileCount, totalBytes, warnings}`. Staged: `begin_deploy(id, manifest: [{path, hash, size}])` returns `{uploadId, missingHashes}`; `add_files` stages only those; `finalize_deploy` publishes. Session TTL 15 minutes. The canvas must be active (`NOT_ACTIVE` otherwise). Optional on `deploy_canvas`, `begin_deploy`, `finalize_deploy`: `releaseId` (opaque build identity) and `expectedPublicationToken` (from `get_canvas`) — a live release answers `outcome: "already_current"`, a stale token fails `PUBLICATION_CHANGED`, a release found only in history fails `RELEASE_NOT_CURRENT`; all three mean read back and reassess, never retry blindly. |
 | Versions and lifecycle | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `preview_version_prune`, `prune_versions`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) | `rollback_canvas(id, version)` takes the `number` from `list_versions`. `delete_canvas` is a soft delete; only an admin can restore. `transfer_canvas(id, toUserId)` takes a user id from `list_access`'s `transferCandidates`, never an email; the recipient must already be an editor and an org member (`NOT_ELIGIBLE` otherwise). The result reports `previousOwnerEditor` (whether you were kept on as an editor) and `publicLinkReverted`. |
 | Settings | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key` | `update_canvas` covers `title`, `description` (max 2000 chars), `tags` (max 20, 50 chars each; one tag set drives list filters and the gallery), `access` rung, `discoverability`, `teamIds`, `password` (`null` clears), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto` / `off`), `galleryListed`, `galleryTemplatable`, and the owner-only `guestAiEnabled` / `guestAiCap`. `set_canvas_preview(id, image)` uploads a custom cover (`previewMode: "custom"`); without `image` it reverts to `auto`. `set_capabilities(id, backendEnabled?, kv?, files?, ai?, realtime?, authoring?, aiAudience?, connectionsAudience?)` clears a `CAPABILITY_DISABLED` error. `set_canvas_slug` changes the URL at once (omit `slug` for a fresh random one). `regenerate_deploy_key` returns the new key once with a refreshed `deploy` block; the old key stops working, and the owner is emailed when an editor rotates it. |
 | People and sharing | `grant_access`, `invite_to_canvas`, `revoke_access`, `set_access_role` | The people list holds people and teams, each `viewer` or `editor`. `grant_access(id, email or teamId, role?)`: an existing user is granted at once; an admissible new email becomes a pending grant that materializes on first verified sign-in. Only org members can be editors; guests are always viewers (`GUEST_VIEWER_ONLY`). |
@@ -143,7 +143,7 @@ Publish a ZIP (with `index.html` at its root), then read back what shipped:
 curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
   -H "Authorization: Bearer $CANVAS_KEY" \
   --data-binary @site.zip
-# → { "url", "version", "fileCount", "totalBytes", "warnings": [] }
+# → { "outcome": "published", "url", "version", "versionId", "releaseId", "publicationToken", "fileCount", "totalBytes", "warnings": [] }
 
 curl -fsS "{base}/v1/canvases/{id}/files" \
   -H "Authorization: Bearer $CANVAS_KEY"
@@ -154,6 +154,28 @@ Limits: 100 MB per canvas, 25 MB per file, 2 000 files. Dotfiles are stripped;
 zip-slip and zip-bomb archives are rejected. Deploy, staged begin/finalize, and
 rollback share a throttle of 10 per minute per canvas (`429 {"error":"rate_limited"}`
 with `Retry-After`).
+
+### Coordinate two publishers
+
+When a local tool and a CI job can both ship the same build, read back first, then
+deploy with the two optional fields:
+
+```bash
+curl -fsS "{base}/v1/canvases/{id}" -H "Authorization: Bearer $CANVAS_KEY"
+# → { …, "publicationToken": "9f2c…", "currentVersion": { "id", "number", "releaseId", "createdAt" } | null }
+curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy?releaseId=<opaque build identity>&expectedPublicationToken=9f2c…" \
+  -H "Authorization: Bearer $CANVAS_KEY" --data-binary @site.zip
+```
+
+`200 outcome:"already_current"` means your release is live already (nothing created;
+also the answer to a retry after a lost response). `409 PUBLICATION_CHANGED` means the
+publication changed since you read the token (a deploy, editor publish, rollback or
+unpublish); `409 RELEASE_NOT_CURRENT` means your release exists only in history — roll
+back to it or ship a new release. Each is a reassess signal: read back and decide;
+Canvas Drop does not know which commit is newest. The staged flow takes the same two
+fields in the begin body and an optional finalize body (a `409` at finalize leaves the
+handle usable for a finalize with the fresh token). Full recipe:
+`{base}/docs/api/deploy-api#coordinate-two-publishers`.
 
 ### Staged upload for large or repeat deploys
 

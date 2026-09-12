@@ -26,6 +26,9 @@ export interface DeployEndpoints {
   staged: { begin: string; stageBlob: string; finalize: string };
   /** Read back the live version (verify a deploy without fetching the gated URL). */
   readback: string;
+  /** Canvas status + publication readback: the current release identity and the publication
+   *  token a coordinated deploy passes back as its precondition. */
+  status: string;
   /** Copy-paste one-shot deploy command. Uses the real key when known, else `$CANVAS_KEY`. */
   curl: string;
 }
@@ -52,6 +55,7 @@ export function deployEndpoints(
       finalize: `POST ${apiBase}/uploads/{uploadId}/finalize`,
     },
     readback: `GET ${apiBase}/files`,
+    status: `GET ${apiBase}`,
     curl: `curl -X PUT "${apiBase}/deploy" -H "Authorization: Bearer ${bearer}" --data-binary @site.zip`,
   };
 }

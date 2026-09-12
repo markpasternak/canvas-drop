@@ -2,10 +2,13 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "@canvas-drop/shared";
+import { PGlite } from "@electric-sql/pglite";
 import Database from "better-sqlite3";
 import { sql } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
+import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
+import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeDb } from "./factory.js";
 import { runMigrations } from "./migrate.js";
@@ -26,8 +29,8 @@ interface JournalEntry {
 }
 
 /** Build a temp migrations folder containing only the migrations BEFORE `cutoffTag`. */
-function subsetMigrationsBefore(cutoffPrefix: string): string {
-  const src = resolveMigrationsDir("sqlite");
+function subsetMigrationsBefore(cutoffPrefix: string, dialect: "sqlite" | "pg" = "sqlite"): string {
+  const src = resolveMigrationsDir(dialect);
   const journal = JSON.parse(readFileSync(join(src, "meta", "_journal.json"), "utf8")) as {
     version: string;
     dialect: string;
@@ -77,7 +80,7 @@ describe("migrating a populated database (FK-on table-recreation regression)", (
     const config = loadConfig({ CANVAS_DROP_DB: "sqlite", CANVAS_DROP_SQLITE_PATH: dbFile });
     const client = makeDb(config);
     if (client.dialect !== "sqlite") throw new Error("expected a sqlite client");
-    await expect(runMigrations(client)).resolves.toBeUndefined();
+    await expect(runMigrations(client)).resolves.toEqual({ repairedPublicationTokens: 0 });
 
     // Data preserved + shared→access mapped; new table present; integrity intact.
     const access = client.db.all<{ access: string }>(
@@ -161,7 +164,7 @@ describe("0036 canvas_access_roles on a populated database", () => {
     const config = loadConfig({ CANVAS_DROP_DB: "sqlite", CANVAS_DROP_SQLITE_PATH: dbFile });
     const client = makeDb(config);
     if (client.dialect !== "sqlite") throw new Error("expected a sqlite client");
-    await expect(runMigrations(client)).resolves.toBeUndefined();
+    await expect(runMigrations(client)).resolves.toEqual({ repairedPublicationTokens: 0 });
 
     const allowlist = client.db.all<{ id: string; role: string }>(
       sql`SELECT id, role FROM canvas_allowlist ORDER BY id`,
@@ -181,5 +184,84 @@ describe("0036 canvas_access_roles on a populated database", () => {
     const violations = client.db.all(sql`PRAGMA foreign_key_check`);
     expect(violations).toHaveLength(0);
     await client.close();
+  });
+});
+
+describe("0043 deployment coordination on a populated database (AE14)", () => {
+  const HEX32 = /^[0-9a-f]{32}$/;
+
+  it("sqlite: existing canvases get distinct publication tokens, versions read back with a null release id, and the boot repair is idempotent", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "cd-mig-0043-"));
+    const dbFile = join(workdir, "canvasdrop.db");
+    const pre = subsetMigrationsBefore("0043");
+    const seed = new Database(dbFile);
+    migrateSqlite(drizzleSqlite(seed), { migrationsFolder: pre });
+    seed.exec(`
+      INSERT INTO users (id, provider_sub, email, name, created_at)
+        VALUES ('u1','sub-1','u@example.com','U',0);
+      INSERT INTO canvases (id, slug, owner_id, api_key_hash, created_at, updated_at)
+        VALUES ('c1','slug-1','u1','h1',0,0), ('c2','slug-2','u1','h2',0,0);
+      INSERT INTO versions (id, canvas_id, number, created_by, source, status, created_at)
+        VALUES ('v1','c1',1,'u1','api','ready',0);
+      UPDATE canvases SET current_version_id = 'v1' WHERE id = 'c1';
+    `);
+    seed.close();
+
+    const config = loadConfig({ CANVAS_DROP_DB: "sqlite", CANVAS_DROP_SQLITE_PATH: dbFile });
+    const client = makeDb(config);
+    if (client.dialect !== "sqlite") throw new Error("expected a sqlite client");
+    await expect(runMigrations(client)).resolves.toEqual({ repairedPublicationTokens: 0 });
+
+    const tokens = client.db.all<{ id: string; publication_token: string }>(
+      sql`SELECT id, publication_token FROM canvases ORDER BY id`,
+    );
+    expect(tokens).toHaveLength(2);
+    for (const row of tokens) expect(row.publication_token).toMatch(HEX32);
+    expect(new Set(tokens.map((r) => r.publication_token)).size).toBe(2);
+    const rel = client.db.all<{ release_id: string | null }>(
+      sql`SELECT release_id FROM versions WHERE id = 'v1'`,
+    );
+    expect(rel[0]?.release_id).toBeNull();
+
+    // Rows written by any other path (a restored older backup) hold the empty default
+    // until the next boot; runMigrations repairs them and is a no-op otherwise.
+    client.db.run(sql`UPDATE canvases SET publication_token = '' WHERE id = 'c2'`);
+    await runMigrations(client);
+    const repaired = client.db.all<{ publication_token: string }>(
+      sql`SELECT publication_token FROM canvases WHERE id = 'c2'`,
+    );
+    expect(repaired[0]?.publication_token).toMatch(HEX32);
+    expect(repaired[0]?.publication_token).not.toBe(tokens[1]?.publication_token);
+    expect(client.db.all(sql`PRAGMA foreign_key_check`)).toHaveLength(0);
+    await client.close();
+  });
+
+  it("postgres (pglite): the same backfill on a database first migrated to 0042", async () => {
+    const pre = subsetMigrationsBefore("0043", "pg");
+    const pglite = new PGlite();
+    const db = drizzlePglite(pglite);
+    await migratePglite(db, { migrationsFolder: pre });
+    await db.execute(
+      sql`INSERT INTO users (id, provider_sub, email, name, created_at) VALUES ('u1','sub-1','u@example.com','U',0)`,
+    );
+    await db.execute(
+      sql`INSERT INTO canvases (id, slug, owner_id, api_key_hash, created_at, updated_at)
+          VALUES ('c1','slug-1','u1','h1',0,0), ('c2','slug-2','u1','h2',0,0)`,
+    );
+    await db.execute(
+      sql`INSERT INTO versions (id, canvas_id, number, created_by, source, status, created_at)
+          VALUES ('v1','c1',1,'u1','api','ready',0)`,
+    );
+    await migratePglite(db, { migrationsFolder: resolveMigrationsDir("pg") });
+
+    const tokens = (await db.execute(sql`SELECT id, publication_token FROM canvases ORDER BY id`))
+      .rows as Array<{ id: string; publication_token: string }>;
+    expect(tokens).toHaveLength(2);
+    for (const row of tokens) expect(row.publication_token).toMatch(HEX32);
+    expect(new Set(tokens.map((r) => r.publication_token)).size).toBe(2);
+    const rel = (await db.execute(sql`SELECT release_id FROM versions WHERE id = 'v1'`))
+      .rows as Array<{ release_id: string | null }>;
+    expect(rel[0]?.release_id).toBeNull();
+    await pglite.close();
   });
 });

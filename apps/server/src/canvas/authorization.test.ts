@@ -55,6 +55,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     status: "active",
     disabledReason: null,
     currentVersionId: "v1",
+    publicationToken: "0123456789abcdef0123456789abcdef",
     clonedFromCanvasId: null,
     viewCount: 0,
     lastViewedAt: null,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isUniqueViolation, SLUG_UNIQUE } from "./unique-violation.js";
+import { isUniqueViolation, RELEASE_READY_UNIQUE, SLUG_UNIQUE } from "./unique-violation.js";
 
 describe("isUniqueViolation", () => {
   it("matches a better-sqlite3 slug unique violation (column in message)", () => {
@@ -49,5 +49,42 @@ describe("isUniqueViolation", () => {
     expect(isUniqueViolation(new Error("boom"), SLUG_UNIQUE)).toBe(false);
     expect(isUniqueViolation(null, SLUG_UNIQUE)).toBe(false);
     expect(isUniqueViolation({ code: "23502" }, SLUG_UNIQUE)).toBe(false);
+  });
+});
+
+describe("isUniqueViolation — versions release partial unique index (deployment coordination)", () => {
+  it("matches the better-sqlite3 composite-index message", () => {
+    const err = Object.assign(
+      new Error("UNIQUE constraint failed: versions.canvas_id, versions.release_id"),
+      { code: "SQLITE_CONSTRAINT_UNIQUE" },
+    );
+    expect(isUniqueViolation(err, RELEASE_READY_UNIQUE)).toBe(true);
+  });
+
+  it("matches the postgres constraint name, also when nested under .cause", () => {
+    const direct = Object.assign(
+      new Error(
+        'duplicate key value violates unique constraint "versions_canvas_release_ready_uq"',
+      ),
+      { code: "23505", constraint: "versions_canvas_release_ready_uq" },
+    );
+    expect(isUniqueViolation(direct, RELEASE_READY_UNIQUE)).toBe(true);
+    const wrapped = Object.assign(new Error("Failed query: update versions …"), {
+      cause: { code: "23505", constraint: "versions_canvas_release_ready_uq", message: "dup" },
+    });
+    expect(isUniqueViolation(wrapped, RELEASE_READY_UNIQUE)).toBe(true);
+  });
+
+  it("does NOT mistake the (canvas_id, number) index for the release index", () => {
+    const sqliteErr = Object.assign(
+      new Error("UNIQUE constraint failed: versions.canvas_id, versions.number"),
+      { code: "SQLITE_CONSTRAINT_UNIQUE" },
+    );
+    const pgErr = Object.assign(new Error("dup"), {
+      code: "23505",
+      constraint: "versions_canvas_number_uq",
+    });
+    expect(isUniqueViolation(sqliteErr, RELEASE_READY_UNIQUE)).toBe(false);
+    expect(isUniqueViolation(pgErr, RELEASE_READY_UNIQUE)).toBe(false);
   });
 });

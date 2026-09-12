@@ -8,13 +8,18 @@ import { soleHtmlEntry } from "../canvas/manifest.js";
 import { decodeText, isTextContentType, mimeFor } from "../canvas/mime.js";
 import { resolveManagementGrant } from "../canvas/role.js";
 import { blobKey, canvasBlobPrefix, hashFromBlobKey } from "../canvas/storage-keys.js";
-import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { DeployEngine, DeployResult } from "../deploy/engine.js";
-import { DeployError, LIMITS } from "../deploy/errors.js";
+import { DeployError, LIMITS, PublicationConflictError } from "../deploy/errors.js";
 import { type FileInput, fromFilesArray } from "../deploy/ingest.js";
+import {
+  alreadyCurrentOutcome,
+  type Coordination,
+  type CoordinationInput,
+  normalizeCoordination,
+} from "../deploy/publication.js";
 import { normalizeEntryPath } from "../deploy/validate.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -35,6 +40,12 @@ export interface ManifestInput {
 export interface BeginResult {
   uploadId: string;
   missingHashes: string[];
+  /**
+   * Deployment coordination (KTD11 / R12): when the requested release is live already, no
+   * session is opened — this carries the `already_current` result instead and `uploadId`
+   * is the empty string. Callers check this field first.
+   */
+  alreadyCurrent?: DeployResult;
 }
 
 export interface UploadServiceDeps {
@@ -81,12 +92,26 @@ export function uploadService(deps: UploadServiceDeps) {
     callerId: string,
     canvasId: string,
   ): Promise<UploadSession> {
+    const s = await requireBound(handleHash, callerId, canvasId);
+    if (s.consumedAt) throw new DeployError("UPLOAD_ALREADY_FINALIZED", "already finalized");
+    return requireUnexpired(s);
+  }
+
+  /** The session bound to this actor and canvas, whatever its lifecycle state. */
+  async function requireBound(
+    handleHash: string,
+    callerId: string,
+    canvasId: string,
+  ): Promise<UploadSession> {
     const s = await deps.uploadSessions.findByHandleHash(handleHash);
     // One opaque code for unknown / wrong-actor / wrong-canvas — no existence leak.
     if (!s || s.actorId !== callerId || s.canvasId !== canvasId) {
       throw new DeployError("UPLOAD_HANDLE_INVALID", "no such upload session");
     }
-    if (s.consumedAt) throw new DeployError("UPLOAD_ALREADY_FINALIZED", "already finalized");
+    return s;
+  }
+
+  function requireUnexpired(s: UploadSession): UploadSession {
     if (s.expiresAt <= now()) throw new DeployError("UPLOAD_EXPIRED", "upload session expired");
     return s;
   }
@@ -154,7 +179,12 @@ export function uploadService(deps: UploadServiceDeps) {
      * covers a staged blob's hash. Returns the missing hashes the caller must
      * upload (content-addressed skip-unchanged).
      */
-    async begin(canvas: Canvas, actorId: string, input: ManifestInput[]): Promise<BeginResult> {
+    async begin(
+      canvas: Canvas,
+      actorId: string,
+      input: ManifestInput[],
+      coordination?: CoordinationInput,
+    ): Promise<BeginResult> {
       if (!Array.isArray(input) || input.length === 0) {
         throw new DeployError("INVALID_MANIFEST", "manifest is empty");
       }
@@ -218,6 +248,20 @@ export function uploadService(deps: UploadServiceDeps) {
       const wanted = new Set(Object.values(manifest).map((m) => m.hash));
       const missingHashes = [...wanted].filter((h) => !present.has(h));
 
+      // Deployment coordination (KTD11 / R12): validate the fields and answer the cheap
+      // cases before a session exists — a live release needs no upload at all, and a
+      // token that is already stale needs no staging. Captured values ride on the session
+      // so finalize enforces them at activation (R11).
+      const coord = normalizeCoordination(coordination);
+      const early = await deps.engine.precheck(canvas, coord);
+      if (early) {
+        return {
+          uploadId: "",
+          missingHashes: [],
+          alreadyCurrent: deps.engine.toResult(canvas, early),
+        };
+      }
+
       const uploadId = generateUploadId();
       await deps.uploadSessions.create({
         canvasId: canvas.id,
@@ -226,6 +270,8 @@ export function uploadService(deps: UploadServiceDeps) {
         manifest,
         stagedHashes: [],
         expiresAt: now() + UPLOAD_TTL_MS,
+        releaseId: coord.releaseId ?? null,
+        expectedPublicationToken: coord.expectedPublicationToken ?? null,
       });
       return { uploadId, missingHashes };
     },
@@ -262,11 +308,61 @@ export function uploadService(deps: UploadServiceDeps) {
      * asserts every manifest hash is present and the aggregate caps hold; commits a
      * ready version through the engine's shared tail; only then marks the handle
      * consumed. A transient failure releases the lease so a legitimate retry resumes.
+     *
+     * Deployment coordination (KTD11): the fields captured at begin merge with any
+     * supplied here (a finalize token replaces the captured one; a finalize release must
+     * match), the KTD4 pre-check runs BEFORE the claim so the common stale-token case
+     * costs no version number, lease or consume, a conflict raised by the atomic
+     * activation un-consumes the handle so the caller can finalize again after
+     * reassessing, and a repeated finalize of a consumed session whose release is live
+     * answers `already_current` (R17 on the staged path).
      */
-    async finalize(uploadId: string, callerId: string, canvasId: string): Promise<DeployResult> {
+    async finalize(
+      uploadId: string,
+      callerId: string,
+      canvasId: string,
+      coordination?: CoordinationInput,
+    ): Promise<DeployResult> {
       const handleHash = hashUploadId(uploadId);
-      // Liveness/owner pre-check before claiming (clear errors for the common cases).
-      await requireStageable(handleHash, callerId, canvasId);
+      const supplied = normalizeCoordination(coordination);
+
+      // Binding + liveness pre-check before claiming (clear errors for the common cases).
+      const existing = await requireBound(handleHash, callerId, canvasId);
+      if (existing.consumedAt) {
+        if (existing.releaseId) {
+          const c = await deps.engine.classifyRelease(canvasId, existing.releaseId);
+          if (c.kind === "already_current") {
+            return deps.engine.toResult(c.canvas, alreadyCurrentOutcome(c));
+          }
+        }
+        throw new DeployError("UPLOAD_ALREADY_FINALIZED", "already finalized");
+      }
+      requireUnexpired(existing);
+
+      // Merge the coordination fields: begin's values are the floor, finalize may
+      // refresh the token after reassessing; the release identity is fixed at begin.
+      if (
+        supplied.releaseId !== undefined &&
+        existing.releaseId &&
+        supplied.releaseId !== existing.releaseId
+      ) {
+        throw new DeployError(
+          "RELEASE_ID_MISMATCH",
+          `finalize releaseId ${supplied.releaseId} differs from the releaseId captured at begin`,
+        );
+      }
+      const coord: Coordination = {};
+      const releaseId = supplied.releaseId ?? existing.releaseId ?? undefined;
+      if (releaseId !== undefined) coord.releaseId = releaseId;
+      const expectedToken =
+        supplied.expectedPublicationToken ?? existing.expectedPublicationToken ?? undefined;
+      if (expectedToken !== undefined) coord.expectedPublicationToken = expectedToken;
+
+      // The cheap pre-check, before any claim or consume (KTD11).
+      const canvasRow = await deps.canvases.findById(canvasId);
+      if (!canvasRow) throw new DeployError("UPLOAD_HANDLE_INVALID", "no such upload session");
+      const early = await deps.engine.precheck(canvasRow, coord);
+      if (early) return deps.engine.toResult(canvasRow, early);
 
       const claimed = await deps.uploadSessions.claimForFinalize(
         handleHash,
@@ -338,6 +434,7 @@ export function uploadService(deps: UploadServiceDeps) {
           canvasId,
           claimed.actorId,
           "upload",
+          coord.releaseId,
         );
         // Mark the handle terminal BEFORE the commit so a transient failure in
         // commitReadyVersion (or markConsumed itself succeeding then the commit
@@ -346,16 +443,36 @@ export function uploadService(deps: UploadServiceDeps) {
         // already staged, so a failed commit after this point requires a fresh
         // begin()/stage/finalize cycle — acceptable, and never duplicates a version.
         await deps.uploadSessions.markConsumed(claimed.id);
-        await deps.engine.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
-
-        return {
-          url: canvasUrl(deps.config, canvas.slug),
-          version: version.number,
+        const committed = await deps.engine.commitReadyVersion(
+          canvas,
+          version,
+          manifest,
           fileCount,
           totalBytes,
-          warnings,
-        };
+          { coordination: coord },
+        );
+        return deps.engine.toResult(canvas, committed, warnings);
       } catch (err) {
+        if (err instanceof PublicationConflictError) {
+          // The pointer never moved and the candidate is gone (KTD3): reopen the handle
+          // so the caller can reassess and finalize again without re-staging (R16).
+          // Fenced on the lease this attempt claimed: a finalize that outlived
+          // FINALIZE_LEASE_MS must never reopen a handle a newer attempt consumed.
+          await deps.uploadSessions
+            .unconsume(claimed.id, claimed.finalizingAt)
+            .then((reopened) => {
+              if (!reopened) {
+                deps.log?.warn(
+                  { sessionId: claimed.id },
+                  "unconsume skipped: the finalize lease was re-claimed by a newer attempt",
+                );
+              }
+            })
+            .catch((e) =>
+              deps.log?.warn({ err: e, sessionId: claimed.id }, "unconsume after conflict failed"),
+            );
+          throw err;
+        }
         // Release the lease so a legitimate retry (a client that still needs to
         // upload a missing blob, or a pre-markConsumed failure) can re-claim. Once
         // the handle is marked consumed (just before commitReadyVersion), a retry

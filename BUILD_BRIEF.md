@@ -694,7 +694,7 @@ Errors: typed `CanvasdropError { code, status, message }` base, with `Permission
 Canvas CRUD, settings (incl. access rung, discoverability, team grants, **share revoke**, **share expiry**, password, SPA fallback, gallery opt-in), versions, rollback, slug regen, key regen, paste-HTML create, usage/stats queries. Admin routes (`/api/admin/...`) require `is_admin`.
 
 ### 11.4 Programmatic API (Bearer secret key)
-`PUT /v1/canvases/:id/deploy` · `GET /v1/canvases/:id` · `GET /v1/canvases/:id/versions` · `POST /v1/canvases/:id/rollback`. A key operates only on its own canvas. Future CLI and agent skills are thin clients of exactly this.
+`PUT /v1/canvases/:id/deploy` · `GET /v1/canvases/:id` · `GET /v1/canvases/:id/versions` · `POST /v1/canvases/:id/rollback`. A key operates only on its own canvas. Future CLI and agent skills are thin clients of exactly this. **Optional deployment coordination** (plan 2026-09-12): a caller-supplied opaque `releaseId` persisted on the version, and a per-canvas `publicationToken` rotated by every live-pointer write, exposed by readback and accepted as `expectedPublicationToken` on the deploy paths (ZIP, staged, MCP) — a live release answers `already_current`, a stale token `PUBLICATION_CHANGED`, a release found only in history `RELEASE_NOT_CURRENT`; the comparison and the pointer swap are one atomic statement on both dialects.
 
 ### 11.5 Agent enablement (v1, cheap and high-leverage)
 - `{base}/docs/*` — multi-page human docs (server-rendered, with an API reference and search); `{base}/llms.txt` — same content agent-optimized. Both public (before the auth gateway). *(Built multi-page rather than single-page — owner decision 2026-06-14; see docs/plans/2026-06-14-002-…-documentation-system-plan.md.)*

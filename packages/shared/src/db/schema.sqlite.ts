@@ -285,6 +285,12 @@ export const canvases = sqliteTable(
     // Pointer (not an FK) to the current ready version — avoids a circular FK with
     // versions.canvas_id; nullable until the first deploy lands.
     currentVersionId: c.text("current_version_id"),
+    // Opaque publication token (deployment-coordination plan, KTD1). Rotated inside EVERY
+    // write of `current_version_id` (deploy, publish, rollback, unpublish, revoke, purge) so a
+    // publisher can pass it back as a compare-and-swap precondition. 32 lowercase hex chars,
+    // minted app-side; the migration backfills existing rows and the boot/restore repair
+    // replaces the empty default on rows written by any other path.
+    publicationToken: c.text("publication_token").notNull().default(""),
     // Lineage: the canvas this one was cloned from (plan 002). Pointer, not an FK —
     // the source may be archived/purged independently; null for non-clones.
     clonedFromCanvasId: c.text("cloned_from_canvas_id"),
@@ -496,6 +502,10 @@ export const versions = sqliteTable(
       .notNull()
       .references(() => users.id),
     source: c.text("source").$type<VersionSource>().notNull(), // folder | zip | paste | api | editor | upload
+    // Caller-supplied opaque release identity (deployment-coordination plan, KTD2). Stored
+    // verbatim, never parsed; at most one READY version per canvas may carry a given value
+    // (partial unique index below). Null for versions published without one.
+    releaseId: c.text("release_id"),
     status: c.text("status").$type<VersionStatus>().notNull().default("pending"), // pending | ready
     fileCount: c.int("file_count").notNull().default(0),
     totalBytes: c.int("total_bytes").notNull().default(0),
@@ -506,6 +516,14 @@ export const versions = sqliteTable(
     // (canvas_id, number) covers every versions query — filter by canvas + sort by
     // number (history, prune, nextNumber's max). No separate created_at index needed.
     uniqueIndex("versions_canvas_number_uq").on(t.canvasId, t.number),
+    // A release identity lives on at most one kept READY version per canvas (KTD2 / R5):
+    // the loser of a same-release race fails at markReady with a unique violation. Pending
+    // rows and null release ids are excluded, so concurrent candidates can coexist until one
+    // is committed. Inline literals only — an interpolated JS value would become a bind
+    // placeholder inside CREATE INDEX.
+    uniqueIndex("versions_canvas_release_ready_uq")
+      .on(t.canvasId, t.releaseId)
+      .where(sql`${t.status} = 'ready' and ${t.releaseId} is not null`),
     check("versions_status_chk", sql`${t.status} in ('pending', 'ready')`),
     check(
       "versions_source_chk",
@@ -545,6 +563,11 @@ export const uploadSessions = sqliteTable(
     expiresAt: c.epochMs("expires_at").notNull(),
     finalizingAt: c.epochMs("finalizing_at"),
     consumedAt: c.epochMs("consumed_at"),
+    // Coordination fields captured at begin (deployment-coordination plan, KTD5/KTD11):
+    // the release identity the finalize will publish under, and the publication token the
+    // caller observed. Finalize may replace the token; a finalize release must match.
+    releaseId: c.text("release_id"),
+    expectedPublicationToken: c.text("expected_publication_token"),
     createdAt: c.epochMs("created_at").notNull(),
   },
   (t) => [

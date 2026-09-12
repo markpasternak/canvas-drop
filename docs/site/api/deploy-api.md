@@ -5,14 +5,17 @@ session. You authenticate with the canvas's **secret key** as a Bearer token. A 
 operates only on its own canvas, and every response has a stable, machine-readable
 shape so a client can repair and retry without a human. This page covers the whole
 keyed loop: publish (one ZIP or a staged set of files), verify what shipped through
-the server, roll back, and unpublish.
+the server, roll back, and unpublish. When more than one publisher can ship the same
+build, the optional release identity and publication token in
+[Coordinate two publishers](#coordinate-two-publishers) keep them from duplicating a
+version or overwriting each other.
 
 ```bash
 # Publish a ZIP.
 curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
   -H "Authorization: Bearer $CANVAS_KEY" \
   --data-binary @site.zip
-# 200 {"url":"<canvas URL>","version":7,"fileCount":12,"totalBytes":348201,"warnings":[]}
+# 200 {"outcome":"published","url":"<canvas URL>","version":7,"versionId":"01J9Z…","releaseId":null,"publicationToken":"9f2c…","fileCount":12,"totalBytes":348201,"warnings":[]}
 
 # Read back the live manifest to confirm what is being served.
 curl -fsS "{base}/v1/canvases/{id}/files" \
@@ -42,7 +45,7 @@ Base path: `{base}/v1/canvases/{id}`. `{id}` is the canvas id, not the slug.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `PUT` | `/v1/canvases/{id}/deploy` | Publish a live version from a ZIP body |
+| `PUT` | `/v1/canvases/{id}/deploy` | Publish a live version from a ZIP body (optional `?releaseId=&expectedPublicationToken=`) |
 | `POST` | `/v1/canvases/{id}/uploads` | Open a staged upload from a manifest |
 | `PUT` | `/v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}` | Stage one file's bytes |
 | `POST` | `/v1/canvases/{id}/uploads/{uploadId}/finalize` | Publish from the staged upload |
@@ -74,6 +77,12 @@ Content-Type: application/zip
 <ZIP bytes>
 ```
 
+Two optional query parameters coordinate concurrent publishers: `releaseId` (an
+opaque identity for this build) and `expectedPublicationToken` (the `publicationToken`
+you last read back). Both are explained under
+[Coordinate two publishers](#coordinate-two-publishers); a call that omits them
+behaves exactly as described here.
+
 The body is read as a **ZIP** regardless of `Content-Type` (a tar archive fails with
 `INVALID_ZIP`). Put `index.html` at the archive root. Dotfiles and dot-directories
 (`.git/`, `.env`) and directory entries are dropped. The ZIP reader rejects an entry
@@ -85,17 +94,29 @@ declares, or inflates to, more than 25 MB is rejected before it can exhaust memo
 
 ```json
 {
+  "outcome": "published",
   "url": "<canvas URL>",
   "version": 7,
+  "versionId": "01J9Z…",
+  "releaseId": null,
+  "publicationToken": "9f2c4e7a1b3d5f60718293a4b5c6d7e8",
   "fileCount": 12,
   "totalBytes": 348201,
   "warnings": ["legacy.php will be served as text/plain"]
 }
 ```
 
+- `outcome`: `published` when this call created and activated a version;
+  `already_current` when the `releaseId` you sent was live already and nothing was
+  created (see [Coordinate two publishers](#coordinate-two-publishers)).
 - `url`: the canvas URL (`{scheme}//{slug}.{host}/` in `subdomain` mode,
   `{base}/c/{slug}/` in `path` mode).
-- `version`: the new version number; use the immutable version ID to identify a historical snapshot: a number can be reused after its row is deleted.
+- `version`: the version number this result describes; `versionId` is its immutable id.
+  Use the id to identify a historical snapshot: a number can be reused after its row is
+  deleted.
+- `releaseId`: the release identity stored on that version, or `null`.
+- `publicationToken`: the canvas's publication token after this call; pass it back as
+  `expectedPublicationToken` on a later deploy that must not overwrite anything newer.
 - `fileCount` / `totalBytes`: files and bytes in the version, after stripping.
 - `warnings[]`: non-fatal notices. Three exist: `<path> will be served as text/plain`
   (the extension is unknown, or is a server-side script type such as `.php`, so the
@@ -133,7 +154,9 @@ again.
 
 **1. Begin.** Send the full manifest: each file's canvas-relative `path`, the `hash`
 (lowercase sha256 hex of its bytes, 64 characters), and its `size` in bytes (`0` is
-allowed).
+allowed). The body may also carry the optional `releaseId` and
+`expectedPublicationToken` (see [Coordinate two publishers](#coordinate-two-publishers));
+they are captured on the session and enforced when finalize activates the version.
 
 ```
 POST {base}/v1/canvases/{id}/uploads
@@ -148,6 +171,11 @@ Returns the handle and the subset of hashes the canvas does not already store:
 ```json
 { "uploadId": "up_...", "missingHashes": ["<sha256>", "..."] }
 ```
+
+When the `releaseId` you sent is live already, begin opens no session and answers
+with the `already_current` `DeployResult` instead (no `uploadId`); when the
+`expectedPublicationToken` is already stale it answers `409 PUBLICATION_CHANGED`
+before any byte is staged.
 
 Dotfile and directory entries are skipped; a leading `./` or `/` on a path is
 stripped. A body that is not JSON, a `manifest` that is not an array, an empty
@@ -183,14 +211,23 @@ POST {base}/v1/canvases/{id}/uploads/{uploadId}/finalize
 Authorization: Bearer cd_...
 ```
 
-Returns the same `DeployResult` as `PUT .../deploy`; the version's `source` is
-`"upload"`. Finalize re-checks that the actor who began the upload is still active
+An optional JSON body `{ "expectedPublicationToken": "…", "releaseId": "…" }` refreshes
+the token captured at begin (after you reassessed a conflict) or repeats the release;
+a `releaseId` that differs from begin's is `400 RELEASE_ID_MISMATCH`, a body that
+is not a JSON object is `400 INVALID_REQUEST`, and a body over 16 KB is
+`413 INVALID_REQUEST`. Returns the same `DeployResult` as
+`PUT .../deploy`; the version's `source` is `"upload"`. Finalize re-checks that the actor who began the upload is still active
 and still an owner or editor of the canvas (else `404 UPLOAD_HANDLE_INVALID`). The
 handle is **single-use** and lives 15 minutes from begin (then `400 UPLOAD_EXPIRED`
 on stage or finalize). A finalize before every blob is staged returns
 `400 UPLOAD_MISSING_BLOB`; stage the rest and call finalize again. The handle is
 consumed when finalize commits a version, after which any further stage or finalize
-returns `409 UPLOAD_ALREADY_FINALIZED` and a fresh begin is required. Two concurrent
+returns `409 UPLOAD_ALREADY_FINALIZED` and a fresh begin is required — with one
+exception: a repeated finalize of a consumed session whose `releaseId` is the live
+release answers `200` with `outcome: "already_current"`, so a lost response is safe to
+retry. A `409 PUBLICATION_CHANGED` at finalize does **not** consume the handle: the
+staged blobs stay, and you may finalize again with a fresh `expectedPublicationToken`
+once you have reassessed. Two concurrent
 finalizes of one handle: the second gets `409 UPLOAD_IN_PROGRESS` while the first
 holds a 60-second lease. The `warnings` on this path cover the `text/plain`
 downgrade and the missing `index.html`.
@@ -202,14 +239,34 @@ GET {base}/v1/canvases/{id}
 Authorization: Bearer cd_...
 ```
 
-Returns `{ id, slug, url, title, status, publicationState, accessMode, currentVersionId }`.
+Returns
+`{ id, slug, url, title, status, publicationState, accessMode, currentVersionId, publicationToken, currentVersion }`:
+
+```json
+{
+  "id": "01J8…",
+  "slug": "roadmap",
+  "url": "https://roadmap.canvases.example.com/",
+  "title": "Roadmap",
+  "status": "active",
+  "publicationState": "published",
+  "accessMode": "whole_org",
+  "currentVersionId": "01J9Z…",
+  "publicationToken": "9f2c4e7a1b3d5f60718293a4b5c6d7e8",
+  "currentVersion": { "id": "01J9Z…", "number": 7, "releaseId": "gh:acme/roadmap@3f9c2e1:prod", "createdAt": 1789200000000 }
+}
+```
+
 A key resolves only an active canvas (an archived, disabled, or deleted canvas's key fails
 auth with `401`), so `status` is always `"active"` here and `publicationState` is
 `"published"` when a live version exists, otherwise `"draft"`. To confirm a canvas is
 live, check `publicationState === "published"`; you do not need to interpret
 `currentVersionId` yourself. `accessMode` is the audience — `restricted` (only the
 people-and-teams list), `whole_org`, or `public_link` — the same derived value the
-management API and MCP return.
+management API and MCP return. `publicationToken` is always present, also on a canvas
+that was never published or was unpublished; `currentVersion` is `null` then, and
+otherwise names the live version, its immutable id and the `releaseId` it was
+deployed under (`null` when none was supplied).
 
 ## List versions
 
@@ -219,8 +276,9 @@ Authorization: Bearer cd_...
 ```
 
 Returns `{ versions: [...] }`, newest first. Each entry is
-`{ number, source, status, createdBy, createdAt, fileCount, totalBytes, current }`.
-`current` marks the live version. `source` records how the version was made:
+`{ id, number, source, status, createdBy, createdAt, fileCount, totalBytes, releaseId, current }`.
+`current` marks the live version, `id` is the immutable version id, and `releaseId` is
+the release identity the version was deployed under (`null` when none). `source` records how the version was made:
 `"api"` for `PUT .../deploy`, `"upload"` for the staged flow, `"editor"` for a publish
 from the browser editor, and `"zip"`, `"folder"`, or `"paste"` for dashboard deploys.
 `status` is `"pending"` while a version is being written and `"ready"` once
@@ -300,6 +358,156 @@ Restricted, so re-share it from the dashboard or with the `update_canvas` MCP to
 Unpublishing a canvas that is not currently published returns
 `409 { "code": "CANNOT_UNPUBLISH" }`.
 
+## Coordinate two publishers
+
+Two publishers can build the same release: a local tool that deploys right after it
+pushes a commit, and a CI job that builds every commit as the fallback. Two optional
+fields let them share one canvas safely. Both are accepted on `PUT .../deploy` (query
+string), on staged begin (JSON body) and on staged finalize (optional JSON body), and
+on the MCP tools `deploy_canvas`, `begin_deploy` and `finalize_deploy`. A caller that
+omits them sees exactly the behavior documented above.
+
+**Release identity (`releaseId`).** An opaque string of 1 to 200 characters (no control
+characters) that you derive from what you are shipping — for example the repository,
+the commit and the effective build configuration. Canvas Drop stores it verbatim on
+the version, never parses it and infers no ordering from it. At most one kept ready
+version per canvas carries a given identity. Readback shows the live one as
+`currentVersion.releaseId`, and every version listing carries each version's `releaseId`.
+
+**Publication token (`publicationToken` / `expectedPublicationToken`).** Every canvas
+has an opaque token, from creation onwards. It changes on every publication change —
+any deploy from any path, an editor publish, a rollback, an unpublish — and a value is
+never reused, so returning to an earlier version yields a token that version never had.
+Read it back, then pass it as `expectedPublicationToken`: the new version is activated
+only if the token still matches, and the comparison and the live-version switch are one
+atomic database operation, safe across concurrent requests and processes on both
+database backends.
+
+The outcomes, in the order they are decided:
+
+1. **Your release is live already.** `200` with `outcome: "already_current"`, describing
+   the version that is live (its `version`, `versionId`, `releaseId`, `fileCount`,
+   `totalBytes`) and the current `publicationToken`. Nothing was created or activated;
+   no deploy side effect (audit event, preview capture, draft reconciliation) ran. This
+   is also what a retry gets after a lost response. It is checked before the token, so a
+   retry that carries an older token still succeeds.
+2. **Your release exists only in history.** `409 RELEASE_NOT_CURRENT`. Someone moved
+   the canvas off that release (a rollback, a newer deploy, an unpublish) and the
+   platform will not silently reactivate it. The body names the version that holds the
+   release and the current publication; roll back to it with `POST .../rollback` if that
+   is intended, or ship a new release.
+3. **The token is stale.** `409 PUBLICATION_CHANGED`. A deploy, publish, rollback or
+   unpublish landed between your readback and this call. The live site is unchanged,
+   nothing of yours was kept in history, and the body carries the current publication.
+4. **Otherwise** the version is published and the response is the normal `published`
+   result with the new `publicationToken`.
+
+Every conflict, and `already_current`, is a **reassess** signal. Do not refresh the
+token and retry blindly: read back, re-check your source of truth (Canvas Drop does not
+know which commit is newest), and decide.
+
+Read back first:
+
+```bash
+curl -fsS "{base}/v1/canvases/{id}" -H "Authorization: Bearer $CANVAS_KEY"
+# 200 {"…","publicationToken":"9f2c4e7a1b3d5f60718293a4b5c6d7e8","currentVersion":{"id":"01J9Z…","number":7,"releaseId":"gh:acme/roadmap@3f9c2e1:prod","createdAt":1789200000000}}
+```
+
+Deploy a ZIP with both fields:
+
+```bash
+curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy?releaseId=gh%3Aacme%2Froadmap%4077aa01b%3Aprod&expectedPublicationToken=9f2c4e7a1b3d5f60718293a4b5c6d7e8" \
+  -H "Authorization: Bearer $CANVAS_KEY" \
+  --data-binary @site.zip
+```
+
+Published, `200`:
+
+```json
+{ "outcome": "published", "url": "<canvas URL>", "version": 8, "versionId": "01JA0…", "releaseId": "gh:acme/roadmap@77aa01b:prod", "publicationToken": "c0ffee1234567890abcdef1234567890", "fileCount": 12, "totalBytes": 348201, "warnings": [] }
+```
+
+Already current (the same call repeated, or the other publisher's copy), `200`:
+
+```json
+{ "outcome": "already_current", "url": "<canvas URL>", "version": 8, "versionId": "01JA0…", "releaseId": "gh:acme/roadmap@77aa01b:prod", "publicationToken": "c0ffee1234567890abcdef1234567890", "fileCount": 12, "totalBytes": 348201, "warnings": [] }
+```
+
+Publication changed, `409`:
+
+```json
+{ "code": "PUBLICATION_CHANGED", "message": "Publication changed since token 9f2c4e7a… was read; reassess before retrying.", "current": { "publicationToken": "c0ffee1234567890abcdef1234567890", "versionId": "01JA0…", "version": 8, "releaseId": "gh:acme/roadmap@77aa01b:prod" } }
+```
+
+Release in history, `409`:
+
+```json
+{ "code": "RELEASE_NOT_CURRENT", "message": "Release gh:acme/roadmap@3f9c2e1:prod exists as version 7 but is not live (version 8 is live); roll back to it or publish a new release.", "release": { "versionId": "01J9Z…", "version": 7 }, "current": { "publicationToken": "c0ffee1234567890abcdef1234567890", "versionId": "01JA0…", "version": 8, "releaseId": "gh:acme/roadmap@77aa01b:prod" } }
+```
+
+Staged flow: send the fields at begin, refresh the token at finalize.
+
+```
+POST {base}/v1/canvases/{id}/uploads
+{ "manifest": [ … ], "releaseId": "gh:acme/roadmap@77aa01b:prod", "expectedPublicationToken": "9f2c4e7a1b3d5f60718293a4b5c6d7e8" }
+
+POST {base}/v1/canvases/{id}/uploads/{uploadId}/finalize
+{ "expectedPublicationToken": "c0ffee1234567890abcdef1234567890" }
+```
+
+Both return the bodies shown above. The staged path has three extra rules: begin
+answers `already_current` itself (no session, no `uploadId`) when the release is live,
+and `409 PUBLICATION_CHANGED` when the token is already stale; a `409` at finalize leaves
+the handle usable, so after reassessing you finalize again with the fresh token without
+re-staging; and a `releaseId` at finalize must equal the one given at begin
+(`400 RELEASE_ID_MISMATCH`).
+
+**Recipe: a local publisher and a CI fallback.** Both publishers run the same steps.
+
+1. Derive `releaseId` from the repository, the commit SHA and the effective build
+   configuration, so identical inputs produce the identical string.
+2. Read back `GET /v1/canvases/{id}`. If `currentVersion.releaseId` equals yours, stop:
+   that release is live. Otherwise keep `publicationToken`.
+3. Confirm the commit you hold is the one you mean to ship (is it still the newest on
+   the branch? did validation pass?). Canvas Drop cannot do this for you.
+4. Build, then deploy with `releaseId` and `expectedPublicationToken`.
+5. `published`: done. `already_current`: the other publisher won; done.
+   `PUBLICATION_CHANGED`: something newer landed; return to step 2.
+   `RELEASE_NOT_CURRENT`: someone moved off this release deliberately; do not
+   redeploy it — roll back only if that is the intent.
+
+A GitHub Actions job following the recipe, with the local tool deploying through the
+same API right after its push:
+
+```yaml
+- name: Skip if the local publisher already shipped this commit
+  id: readback
+  run: |
+    release="gh:${GITHUB_REPOSITORY}@${GITHUB_SHA}:prod"
+    live=$(curl -fsS "$CANVAS_API/v1/canvases/$CANVAS_ID" -H "Authorization: Bearer $CANVAS_KEY")
+    echo "token=$(jq -r .publicationToken <<<"$live")" >> "$GITHUB_OUTPUT"
+    echo "release=$release" >> "$GITHUB_OUTPUT"
+    [ "$(jq -r '.currentVersion.releaseId // ""' <<<"$live")" = "$release" ] && echo "skip=true" >> "$GITHUB_OUTPUT"
+- name: Build and deploy
+  if: steps.readback.outputs.skip != 'true'
+  run: |
+    npm run build && (cd dist && zip -qr ../site.zip .)
+    code=$(curl -sS -o result.json -w '%{http_code}' -X PUT \
+      "$CANVAS_API/v1/canvases/$CANVAS_ID/deploy?releaseId=$(jq -rn --arg r "${{ steps.readback.outputs.release }}" '$r|@uri')&expectedPublicationToken=${{ steps.readback.outputs.token }}" \
+      -H "Authorization: Bearer $CANVAS_KEY" --data-binary @site.zip)
+    case "$code" in
+      200) echo "outcome: $(jq -r .outcome result.json)";;
+      409) echo "::warning::$(jq -r .code result.json) — reassess"; jq . result.json;;
+      *)   jq . result.json; exit 1;;
+    esac
+```
+
+Notes for both publishers: a release that was unpublished or rolled away from stays in
+history, so redeploying the same identity answers `RELEASE_NOT_CURRENT` until it is
+rolled back to or pruned out of the kept versions; ship under a new identity if you
+want a fresh build anyway. Every path that changes the live version rotates the token,
+including the dashboard and the editor, so a human's publish is protected the same way.
+
 ## Errors
 
 Branch on `code` (or `error`), never on message text. Two body shapes appear on these
@@ -322,7 +530,8 @@ the offending file when there is one:
 ```
 
 On `PUT .../deploy` every validation code is a `400`, except `CANVAS_TOO_LARGE`, which
-is a `413` when the body is rejected before buffering:
+is a `413` when the body is rejected before buffering, and the coordination outcomes
+below, which are `409`:
 
 | Code | Cause |
 |---|---|
@@ -332,6 +541,17 @@ is a `413` when the body is rejected before buffering:
 | `ZIP_BOMB_REJECTED` | An entry declares, or inflates to, more than 25 MB (the per-file cap; inside a ZIP it never surfaces as `FILE_TOO_LARGE`) |
 | `TOO_MANY_FILES` | More than 2000 files |
 | `CANVAS_TOO_LARGE` | More than 100 MB in total (`413` when caught at the body cap) |
+
+The coordination fields ([Coordinate two publishers](#coordinate-two-publishers)) add
+these on every deploy path, including the MCP deploy tools:
+
+| Code | Status | Cause |
+|---|---|---|
+| `PUBLICATION_CHANGED` | `409` | `expectedPublicationToken` no longer matches; the body's `current` names the live publication. Reassess |
+| `RELEASE_NOT_CURRENT` | `409` | `releaseId` is on a kept version that is not live; the body's `release` names it and `current` the live publication |
+| `INVALID_RELEASE_ID` | `400` | `releaseId` is empty, longer than 200 characters, or contains control characters |
+| `RELEASE_ID_MISMATCH` | `400` | The `releaseId` given at finalize differs from the one captured at begin |
+| `INVALID_REQUEST` | `400` | A coordination field is not a string, or the optional finalize body is not a JSON object (`413` when that body exceeds 16 KB) |
 
 The staged-upload routes map the same shape to richer statuses:
 
@@ -361,7 +581,8 @@ The remaining routes use the same shape:
 
 The MCP deploy tools (`deploy_canvas`, `begin_deploy`, `add_files`,
 `finalize_deploy`, `rollback_canvas`, `unpublish_canvas`) wrap the same service layer
-and surface the same codes; `INVALID_ENCODING` belongs to that channel only (a
+and surface the same codes (a coordination conflict's text is `CODE: message` followed
+by the same `current` / `release` JSON); `INVALID_ENCODING` belongs to that channel only (a
 `files[]` entry with an encoding other than `utf8` or `base64`) and never occurs on
 these HTTP routes. Codes returned to canvases at runtime are a separate set; see
 [Error codes](/docs/api/errors).

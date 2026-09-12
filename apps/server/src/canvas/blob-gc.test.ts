@@ -1,9 +1,10 @@
 import type { Manifest } from "@canvas-drop/shared/db";
+import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
-import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
+import { CONSUMED_GRACE_MS, uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
@@ -143,6 +144,32 @@ describe.each(DIALECTS)("collectGarbage (blob mark-sweep) [%s]", (dialect) => {
 
     // Expire + prune the session: the blob is now an orphan and is reclaimed.
     await uploadSessions.deleteExpired(Date.now() + 120_000);
+    await collectGarbage({ versions, drafts, storage, log, uploadSessions }, canvasId);
+    expect(await storage.list(canvasBlobPrefix(canvasId))).toHaveLength(0);
+  });
+
+  it("keeps the blobs of a recently consumed upload session (a conflict may un-consume it), sweeps them once the grace window passes (KTD11)", async () => {
+    const { versions, drafts, canvasId, owner } = await setup();
+    const uploadSessions = uploadSessionsRepository(client);
+    const storage = memStorage();
+    await storage.put(blobKey(canvasId, "staged"), enc("staged"));
+    const s = await uploadSessions.create({
+      canvasId,
+      actorId: owner.id,
+      handleHash: "h".repeat(64),
+      manifest: m(["staged"]),
+      stagedHashes: ["staged"],
+      expiresAt: Date.now() + 600_000,
+    });
+    await uploadSessions.markConsumed(s.id);
+    await collectGarbage({ versions, drafts, storage, log, uploadSessions }, canvasId);
+    expect(await storage.list(canvasBlobPrefix(canvasId))).toHaveLength(1); // retained — within grace
+
+    // Age the consumption past the grace window: the blob is an orphan and is reclaimed.
+    const old = Date.now() - CONSUMED_GRACE_MS - 1;
+    const age = sql`update upload_sessions set consumed_at = ${old} where id = ${s.id}`;
+    if (client.dialect === "sqlite") client.db.run(age);
+    else await client.db.execute(age);
     await collectGarbage({ versions, drafts, storage, log, uploadSessions }, canvasId);
     expect(await storage.list(canvasBlobPrefix(canvasId))).toHaveLength(0);
   });

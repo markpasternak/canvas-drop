@@ -43,7 +43,29 @@ export type DeployErrorCode =
   // A `files[]` entry declared an encoding other than utf8/base64.
   | "INVALID_ENCODING"
   // The begin manifest was empty or malformed.
-  | "INVALID_MANIFEST";
+  | "INVALID_MANIFEST"
+  // --- Deployment coordination (release identity + publication token) ---
+  // The publication changed since the caller read its `expectedPublicationToken`
+  // (a deploy, publish, rollback or unpublish landed in between); the live version is
+  // unchanged and the body names the current publication. Reassess — do not blindly retry.
+  | "PUBLICATION_CHANGED"
+  // The requested `releaseId` exists on a kept ready version that is NOT current. Nothing
+  // is reactivated; rollback is the way to make it live again.
+  | "RELEASE_NOT_CURRENT"
+  // `releaseId` is not 1–200 characters of text without control characters.
+  | "INVALID_RELEASE_ID"
+  // A staged finalize supplied a `releaseId` different from the one captured at begin.
+  | "RELEASE_ID_MISMATCH"
+  // A coordination field or optional JSON body was malformed (not JSON, wrong type).
+  | "INVALID_REQUEST";
+
+/** What is live right now — attached to every coordination conflict (R9 / KTD5). */
+export interface CurrentPublication {
+  publicationToken: string;
+  versionId: string | null;
+  version: number | null;
+  releaseId: string | null;
+}
 
 export class DeployError extends Error {
   constructor(
@@ -92,3 +114,29 @@ export const LIMITS = {
   maxFileBytes: 25 * 1024 * 1024, // 25 MB / file
   maxFiles: 2000,
 } as const;
+
+/**
+ * A deployment-coordination conflict (R4 / R9): the live site is unchanged and the caller
+ * must reassess. `PUBLICATION_CHANGED` carries the current publication; `RELEASE_NOT_CURRENT`
+ * additionally names the kept version that holds the requested release. HTTP maps both to
+ * 409 `{ code, message, current, release? }`; MCP to the `CODE:` prefix plus the same JSON.
+ */
+export class PublicationConflictError extends DeployError {
+  constructor(
+    code: "PUBLICATION_CHANGED" | "RELEASE_NOT_CURRENT",
+    message: string,
+    public readonly current: CurrentPublication,
+    public readonly release?: { versionId: string; version: number },
+  ) {
+    super(code, message);
+    this.name = "PublicationConflictError";
+  }
+}
+
+/** The `{ current, release? }` body every transport attaches to a coordination conflict. */
+export function conflictDetail(e: PublicationConflictError): {
+  current: CurrentPublication;
+  release?: { versionId: string; version: number };
+} {
+  return { current: e.current, ...(e.release ? { release: e.release } : {}) };
+}

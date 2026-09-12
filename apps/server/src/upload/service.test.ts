@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { type Config, loadConfig } from "@canvas-drop/shared";
+import { sql } from "drizzle-orm";
 import { pino } from "pino";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
@@ -14,8 +15,10 @@ import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
+import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
-import { type ManifestInput, uploadService } from "./service.js";
+import { hashUploadId } from "./handle.js";
+import { FINALIZE_LEASE_MS, type ManifestInput, uploadService } from "./service.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 const silent = pino({ level: "silent" });
@@ -441,5 +444,291 @@ describe.each(DIALECTS)("uploadService — editor actor [%s]", (dialect) => {
     const { uploadId } = await svc.begin(canvas, editor.id, manifestFor(files));
     await stage(uploadId, editor.id);
     expect((await svc.finalize(uploadId, editor.id, canvas.id)).version).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deployment coordination on the staged path (plan 2026-09-12, KTD11 / U3).
+// ---------------------------------------------------------------------------
+describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const R = "gh:acme/roadmap@3f9c2e1:prod";
+  const S = "gh:acme/roadmap@77aa01b:prod";
+
+  async function setup() {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const uploadSessions = uploadSessionsRepository(client);
+    const base = memStorage();
+    /** A one-shot hook fired on the next storage existence check (finalize's slow phase). */
+    const hooks: { onExists?: () => Promise<void> } = {};
+    const storage: StorageDriver = {
+      ...base,
+      async exists(key) {
+        const fire = hooks.onExists;
+        if (fire) {
+          hooks.onExists = undefined;
+          await fire();
+        }
+        return base.exists(key);
+      },
+    };
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      log: silent,
+      waitOptions: { intervalMs: 5 },
+    });
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const canvas = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
+    const svc = uploadService({
+      config,
+      canvases,
+      users,
+      uploadSessions,
+      storage,
+      engine,
+      log: silent,
+    });
+    /** An unrelated publication landing in between (an editor publish). */
+    const publishElsewhere = async () => {
+      const v = await versions.createPending({
+        canvasId: canvas.id,
+        number: await versions.nextNumber(canvas.id),
+        createdBy: owner.id,
+        source: "editor",
+      });
+      await versions.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: {} });
+      await canvases.setCurrentVersion(canvas.id, v.id);
+      return v;
+    };
+    const token = async () => (await canvases.findById(canvas.id))?.publicationToken ?? "";
+    const session = async (
+      files: Record<string, string>,
+      coordination?: { releaseId?: string; expectedPublicationToken?: string },
+    ) => {
+      const begun = await svc.begin(canvas, owner.id, manifestFor(files), coordination);
+      expect(begun.alreadyCurrent).toBeUndefined();
+      for (const [, content] of Object.entries(files)) {
+        await svc.stageBlob(begun.uploadId, owner.id, canvas.id, sha(content), enc(content));
+      }
+      return begun.uploadId;
+    };
+    const readyRows = async () =>
+      (await versions.listByCanvas(canvas.id)).filter((v) => v.status === "ready");
+    return {
+      svc,
+      canvases,
+      versions,
+      uploadSessions,
+      canvas,
+      ownerId: owner.id,
+      publishElsewhere,
+      token,
+      session,
+      readyRows,
+      hooks,
+    };
+  }
+
+  it("begin with a release that is already live returns already_current and opens no session", async () => {
+    const t = await setup();
+    const id = await t.session({ "index.html": "a" }, { releaseId: R });
+    const live = await t.svc.finalize(id, t.ownerId, t.canvas.id);
+    expect(live.outcome).toBe("published");
+    const begun = await t.svc.begin(t.canvas, t.ownerId, manifestFor({ "index.html": "b" }), {
+      releaseId: R,
+    });
+    expect(begun.alreadyCurrent?.outcome).toBe("already_current");
+    expect(begun.alreadyCurrent?.versionId).toBe(live.versionId);
+    expect(begun.uploadId).toBe("");
+    expect(
+      await t.uploadSessions.listActiveByCanvas(t.canvas.id, Date.now() + 120_000),
+    ).toHaveLength(0);
+  });
+
+  it("begin with a stale token is PUBLICATION_CHANGED and opens no session", async () => {
+    const t = await setup();
+    const stale = await t.token();
+    await t.publishElsewhere();
+    await expect(
+      t.svc.begin(t.canvas, t.ownerId, manifestFor({ "index.html": "a" }), {
+        expectedPublicationToken: stale,
+      }),
+    ).rejects.toMatchObject({ code: "PUBLICATION_CHANGED" });
+    expect(await t.uploadSessions.listActiveByCanvas(t.canvas.id, Date.now())).toHaveLength(0);
+  });
+
+  it("Covers AE12 / F6. a stale token at finalize conflicts BEFORE any claim; the handle stays usable and finalizes with the fresh token", async () => {
+    const t = await setup();
+    const t1 = await t.token();
+    const id = await t.session(
+      { "index.html": "mine" },
+      { releaseId: R, expectedPublicationToken: t1 },
+    );
+    const editors = await t.publishElsewhere(); // T2 now
+    const before = (await t.versions.listByCanvas(t.canvas.id)).length;
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "PUBLICATION_CHANGED",
+      current: expect.objectContaining({ versionId: editors.id }),
+    });
+    // Pre-check path: no version number allocated, session neither claimed nor consumed.
+    expect(await t.versions.listByCanvas(t.canvas.id)).toHaveLength(before);
+    const s = await t.uploadSessions.findByHandleHash(hashUploadId(id));
+    expect(s?.consumedAt).toBeNull();
+    expect(s?.finalizingAt).toBeNull();
+    // Reassessed: finalize again with the token read back now, without re-staging.
+    const t2 = await t.token();
+    const r = await t.svc.finalize(id, t.ownerId, t.canvas.id, { expectedPublicationToken: t2 });
+    expect(r.outcome).toBe("published");
+    expect(r.releaseId).toBe(R);
+    expect(r.publicationToken).not.toBe(t2);
+    expect((await t.versions.findById(r.versionId))?.source).toBe("upload");
+    expect((await t.uploadSessions.findByHandleHash(hashUploadId(id)))?.consumedAt).not.toBeNull();
+  });
+
+  it("a conflict raised by the atomic activation un-consumes the session so it can finalize again", async () => {
+    const t = await setup();
+    const t1 = await t.token();
+    const id = await t.session({ "index.html": "mine" }, { expectedPublicationToken: t1 });
+    // The publication changes between finalize's pre-check and its swap.
+    const original = t.canvases.activateVersion.bind(t.canvases);
+    const spy = vi
+      .spyOn(t.canvases, "activateVersion")
+      .mockImplementationOnce(async (cid, vid, opts) => {
+        await t.publishElsewhere();
+        return original(cid, vid, opts);
+      });
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "PUBLICATION_CHANGED",
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const s = await t.uploadSessions.findByHandleHash(hashUploadId(id));
+    expect(s?.consumedAt).toBeNull();
+    expect(s?.finalizingAt).toBeNull();
+    // Our candidate is gone; only the intervening publish is ready.
+    expect(await t.readyRows()).toHaveLength(1);
+    const t2 = await t.token();
+    const r = await t.svc.finalize(id, t.ownerId, t.canvas.id, { expectedPublicationToken: t2 });
+    expect(r.outcome).toBe("published");
+    expect(await t.readyRows()).toHaveLength(2);
+  });
+
+  it("a finalize that outlives its lease cannot reopen a handle a newer attempt already published (fenced unconsume)", async () => {
+    const t = await setup();
+    const t1 = await t.token();
+    const id = await t.session({ "index.html": "mine" }, { expectedPublicationToken: t1 });
+    const handle = hashUploadId(id);
+    let newer: Awaited<ReturnType<typeof t.svc.finalize>> | undefined;
+    // Attempt A claims, then stalls on its storage checks past FINALIZE_LEASE_MS; the
+    // client's retry (B) re-claims the stale lease, publishes with the captured token and
+    // rotates it. A then loses its own activation and must NOT reopen B's consumed handle.
+    t.hooks.onExists = async () => {
+      const q = sql`update upload_sessions set finalizing_at = finalizing_at - ${FINALIZE_LEASE_MS + 1000} where handle_hash = ${handle}`;
+      if (client.dialect === "sqlite") client.db.run(q);
+      else await client.db.execute(q);
+      newer = await t.svc.finalize(id, t.ownerId, t.canvas.id);
+    };
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "PUBLICATION_CHANGED",
+    });
+    expect(newer?.outcome).toBe("published");
+    const s = await t.uploadSessions.findByHandleHash(handle);
+    expect(s?.consumedAt).not.toBeNull(); // B's consume stands; A's stale unconsume matched nothing
+    expect(await t.readyRows()).toHaveLength(1);
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(newer?.versionId);
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_ALREADY_FINALIZED",
+    });
+  });
+
+  it("a finalize releaseId that differs from begin's is RELEASE_ID_MISMATCH and touches nothing", async () => {
+    const t = await setup();
+    const id = await t.session({ "index.html": "a" }, { releaseId: R });
+    await expect(
+      t.svc.finalize(id, t.ownerId, t.canvas.id, { releaseId: S }),
+    ).rejects.toMatchObject({
+      code: "RELEASE_ID_MISMATCH",
+    });
+    expect(await t.readyRows()).toHaveLength(0);
+    const s = await t.uploadSessions.findByHandleHash(hashUploadId(id));
+    expect(s?.consumedAt).toBeNull();
+    // The same release repeated at finalize is fine; a finalize without one inherits it.
+    const r = await t.svc.finalize(id, t.ownerId, t.canvas.id, { releaseId: R });
+    expect(r.releaseId).toBe(R);
+  });
+
+  it("finalize without coordination inherits begin's values (a stale begin token still conflicts)", async () => {
+    const t = await setup();
+    const t1 = await t.token();
+    const id = await t.session({ "index.html": "a" }, { expectedPublicationToken: t1 });
+    await t.publishElsewhere();
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "PUBLICATION_CHANGED",
+    });
+  });
+
+  it("two sessions for one release finalized in sequence: the second is already_current, one ready version", async () => {
+    const t = await setup();
+    const a = await t.session({ "index.html": "a" }, { releaseId: R });
+    const b = await t.session({ "index.html": "b" }, { releaseId: R });
+    const first = await t.svc.finalize(a, t.ownerId, t.canvas.id);
+    const second = await t.svc.finalize(b, t.ownerId, t.canvas.id);
+    expect(first.outcome).toBe("published");
+    expect(second.outcome).toBe("already_current");
+    expect(second.versionId).toBe(first.versionId);
+    expect(await t.readyRows()).toHaveLength(1);
+    // The second handle was never consumed: the pre-check answered it.
+    expect((await t.uploadSessions.findByHandleHash(hashUploadId(b)))?.consumedAt).toBeNull();
+  });
+
+  it("Covers R17. a repeated finalize of a consumed session whose release is live is already_current; not live is UPLOAD_ALREADY_FINALIZED", async () => {
+    const t = await setup();
+    const id = await t.session({ "index.html": "a" }, { releaseId: R });
+    const live = await t.svc.finalize(id, t.ownerId, t.canvas.id);
+    const retry = await t.svc.finalize(id, t.ownerId, t.canvas.id); // the lost-response retry
+    expect(retry.outcome).toBe("already_current");
+    expect(retry.versionId).toBe(live.versionId);
+    expect(await t.readyRows()).toHaveLength(1);
+    // Someone moved off this release: the handle is spent, as today.
+    await t.publishElsewhere();
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_ALREADY_FINALIZED",
+    });
+    // A session begun without a release keeps today's terminal behavior.
+    const bare = await t.session({ "index.html": "bare" });
+    await t.svc.finalize(bare, t.ownerId, t.canvas.id);
+    await expect(t.svc.finalize(bare, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_ALREADY_FINALIZED",
+    });
+  });
+
+  it("a successful finalize carries the additive result fields", async () => {
+    const t = await setup();
+    const t0 = await t.token();
+    const id = await t.session(
+      { "index.html": "a" },
+      { releaseId: R, expectedPublicationToken: t0 },
+    );
+    const r = await t.svc.finalize(id, t.ownerId, t.canvas.id);
+    expect(r).toMatchObject({ outcome: "published", releaseId: R, version: 1, fileCount: 1 });
+    expect(r.publicationToken).toMatch(/^[0-9a-f]{32}$/);
+    expect(r.publicationToken).not.toBe(t0);
+    expect(r.versionId).toBe((await t.canvases.findById(t.canvas.id))?.currentVersionId);
   });
 });

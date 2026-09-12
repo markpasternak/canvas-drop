@@ -17,7 +17,19 @@ export interface CreateUploadSessionInput {
   manifest: Manifest;
   stagedHashes: string[];
   expiresAt: number;
+  /** Release identity captured at begin (deployment-coordination plan, KTD5); null when none. */
+  releaseId?: string | null;
+  /** Publication token the caller observed, captured at begin; finalize may replace it. */
+  expectedPublicationToken?: string | null;
 }
+
+/**
+ * How long a CONSUMED session stays in the blob-GC live set (deployment-coordination
+ * plan, KTD11). A publication conflict un-consumes the handle so the caller can finalize
+ * again without re-staging; the staged blobs must stay covered across that window. Sized
+ * to the finalize lease.
+ */
+export const CONSUMED_GRACE_MS = 60 * 1000;
 
 /**
  * Upload-sessions repository (plan 003). The staging side of the two-channel
@@ -49,6 +61,8 @@ export function uploadSessionsRepository(client: DbClient) {
           expiresAt: input.expiresAt,
           finalizingAt: null,
           consumedAt: null,
+          releaseId: input.releaseId ?? null,
+          expectedPublicationToken: input.expectedPublicationToken ?? null,
           createdAt: Date.now(),
         })
         .returning();
@@ -103,16 +117,50 @@ export function uploadSessionsRepository(client: DbClient) {
     },
 
     /**
-     * Active (not consumed, not expired) sessions for a canvas — the blob-GC live
-     * set unions these sessions' recorded manifests so a pending finalize's blobs
-     * are never swept (U7).
+     * Reopen a consumed session after a publication conflict (deployment-coordination
+     * plan, KTD11): the pointer never moved, so the handle may finalize again once the
+     * caller has reassessed. Clears the consumed marker AND the finalize lease.
+     *
+     * Fenced on `leaseStamp`, the `finalizingAt` this attempt received from
+     * `claimForFinalize`: a finalize that outlived `FINALIZE_LEASE_MS` and lost its lease
+     * to a retry must not reopen a handle that retry already consumed and published (the
+     * newer claim carries a newer stamp, so the stale attempt matches nothing). Returns
+     * whether the handle was reopened.
      */
-    async listActiveByCanvas(canvasId: string, now: number): Promise<UploadSession[]> {
+    async unconsume(id: string, leaseStamp: number | null): Promise<boolean> {
+      const rows = await db
+        .update(t)
+        .set({ consumedAt: null, finalizingAt: null })
+        .where(
+          and(
+            eq(t.id, id),
+            leaseStamp === null ? isNull(t.finalizingAt) : eq(t.finalizingAt, leaseStamp),
+          ),
+        )
+        .returning({ id: t.id });
+      return rows.length === 1;
+    },
+
+    /**
+     * Sessions whose staged blobs must stay live for a canvas — the blob-GC live set
+     * unions these sessions' recorded manifests so a pending finalize's blobs are never
+     * swept (U7). Unexpired and either unconsumed, or consumed within the last
+     * `consumedGraceMs` (a handle a conflict may still un-consume, KTD11).
+     */
+    async listActiveByCanvas(
+      canvasId: string,
+      now: number,
+      consumedGraceMs: number = CONSUMED_GRACE_MS,
+    ): Promise<UploadSession[]> {
       return (await db
         .select()
         .from(t)
         .where(
-          and(eq(t.canvasId, canvasId), isNull(t.consumedAt), gt(t.expiresAt, now)),
+          and(
+            eq(t.canvasId, canvasId),
+            gt(t.expiresAt, now),
+            or(isNull(t.consumedAt), gt(t.consumedAt, now - consumedGraceMs)),
+          ),
         )) as UploadSession[];
     },
 

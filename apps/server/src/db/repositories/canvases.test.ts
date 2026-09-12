@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { type SQL, sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
@@ -1165,5 +1168,190 @@ describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) 
     expect(await ownerSearchIds(repo, ownerB, "zzsecret")).toEqual([]);
     // Sanity: owner A searching the same token DOES find their own canvas.
     expect(await ownerSearchIds(repo, ownerA, "zzsecret")).toEqual([aCanvas.id]);
+  });
+});
+
+const HEX32 = /^[0-9a-f]{32}$/;
+
+describe.each(DIALECTS)(
+  "canvasesRepository publication token (deployment coordination) [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    async function exec(query: SQL): Promise<void> {
+      if (client.dialect === "sqlite") client.db.run(query);
+      else await client.db.execute(query);
+    }
+
+    async function readyVersion(canvasId: string, ownerId: string, number: number) {
+      const versions = versionsRepository(client);
+      const v = await versions.createPending({
+        canvasId,
+        number,
+        createdBy: ownerId,
+        source: "api",
+      });
+      await versions.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: {} });
+      return v;
+    }
+
+    it("create mints a 32-hex publication token and two canvases never share one", async () => {
+      client = await makeTestDb(dialect);
+      const ownerId = await seedOwner(client);
+      const canvases = canvasesRepository(client);
+      const a = await canvases.create({ ownerId, slug: "tok-a", apiKeyHash: "k-a" });
+      const b = await canvases.create({ ownerId, slug: "tok-b", apiKeyHash: "k-b" });
+      expect(a.publicationToken).toMatch(HEX32);
+      expect(b.publicationToken).toMatch(HEX32);
+      expect(a.publicationToken).not.toBe(b.publicationToken);
+    });
+
+    it("every live-pointer writer rotates the token and never restores an earlier one (R7 / AE6)", async () => {
+      client = await makeTestDb(dialect);
+      const ownerId = await seedOwner(client);
+      const canvases = canvasesRepository(client);
+      const cv = await canvases.create({ ownerId, slug: "rot", apiKeyHash: "k" });
+      const v1 = await readyVersion(cv.id, ownerId, 1);
+      const v2 = await readyVersion(cv.id, ownerId, 2);
+      const seen: string[] = [cv.publicationToken];
+      const token = async () => (await canvases.findById(cv.id))?.publicationToken ?? "";
+      const step = async (label: string, act: () => Promise<unknown>) => {
+        await act();
+        const tkn = await token();
+        expect(tkn, label).toMatch(HEX32);
+        expect(seen, label).not.toContain(tkn);
+        seen.push(tkn);
+      };
+      await step("setCurrentVersion", () => canvases.setCurrentVersion(cv.id, v1.id));
+      await step("setCurrentVersionIfReady", async () =>
+        expect(await canvases.setCurrentVersionIfReady(cv.id, v2.id)).toBe(true),
+      );
+      // Returning to an earlier version yields a token that version never had (AE6).
+      await step("rollback to v1", async () =>
+        expect(await canvases.setCurrentVersionIfReady(cv.id, v1.id)).toBe(true),
+      );
+      await step("unpublish", async () => expect(await canvases.unpublish(cv.id)).toBe(true));
+      await step("republish", () => canvases.setCurrentVersion(cv.id, v1.id));
+      await step("revoke", async () => expect(await canvases.revoke(cv.id)).toBeDefined());
+      await step("updateSettingsAtomic with currentVersionId", async () =>
+        expect(
+          await canvases.updateSettingsAtomic(cv.id, {}, { currentVersionId: v2.id }),
+        ).toBeDefined(),
+      );
+      await step("clearCurrentVersion", () => canvases.clearCurrentVersion(cv.id));
+      // Settings writes that do not touch the pointer leave the token alone.
+      const before = await token();
+      await canvases.updateSettingsAtomic(cv.id, { title: "renamed" }, {});
+      expect(await token()).toBe(before);
+      await canvases.updateSettings(cv.id, { title: "again" });
+      expect(await token()).toBe(before);
+    });
+
+    it("activateVersion is one compare-and-swap: a stale token changes nothing; a matching or absent token swaps and mints (R8)", async () => {
+      client = await makeTestDb(dialect);
+      const ownerId = await seedOwner(client);
+      const canvases = canvasesRepository(client);
+      const versions = versionsRepository(client);
+      const cv = await canvases.create({ ownerId, slug: "cas", apiKeyHash: "k" });
+      const v1 = await readyVersion(cv.id, ownerId, 1);
+      const v2 = await readyVersion(cv.id, ownerId, 2);
+      const pending = await versions.createPending({
+        canvasId: cv.id,
+        number: 3,
+        createdBy: ownerId,
+        source: "api",
+      });
+      const other = await canvases.create({ ownerId, slug: "cas-other", apiKeyHash: "k2" });
+      const ov = await readyVersion(other.id, ownerId, 1);
+
+      const t0 = cv.publicationToken;
+      expect(
+        await canvases.activateVersion(cv.id, v1.id, { expectedToken: "0".repeat(32) }),
+      ).toBeNull();
+      let row = await canvases.findById(cv.id);
+      expect(row?.currentVersionId).toBeNull();
+      expect(row?.publicationToken).toBe(t0);
+
+      const t1 = await canvases.activateVersion(cv.id, v1.id, { expectedToken: t0 });
+      expect(t1).toMatch(HEX32);
+      expect(t1).not.toBe(t0);
+      row = await canvases.findById(cv.id);
+      expect(row?.currentVersionId).toBe(v1.id);
+      expect(row?.publicationToken).toBe(t1);
+      // The token the caller observed before is now stale.
+      expect(await canvases.activateVersion(cv.id, v2.id, { expectedToken: t0 })).toBeNull();
+      expect((await canvases.findById(cv.id))?.currentVersionId).toBe(v1.id);
+      // A pending candidate and another canvas's version never activate.
+      expect(await canvases.activateVersion(cv.id, pending.id, {})).toBeNull();
+      expect(await canvases.activateVersion(cv.id, ov.id, {})).toBeNull();
+      // No expected token: unconditional, still mints.
+      const t2 = await canvases.activateVersion(cv.id, v2.id, {});
+      expect(t2).toMatch(HEX32);
+      expect(t2).not.toBe(t1);
+      // Activation clears a revoke marker, like the existing swap does.
+      await canvases.revoke(cv.id);
+      expect(await canvases.activateVersion(cv.id, v1.id, {})).toMatch(HEX32);
+      row = await canvases.findById(cv.id);
+      expect(row?.revokedAt).toBeNull();
+      expect(row?.currentVersionId).toBe(v1.id);
+      // A canvas whose permanent cleanup has started is never re-pointed.
+      await exec(sql`update canvases set purge_started_at = 1 where id = ${cv.id}`);
+      expect(await canvases.activateVersion(cv.id, v2.id, {})).toBeNull();
+    });
+
+    it("mintMissingPublicationTokens repairs rows holding the empty default and is idempotent (R6 after restore)", async () => {
+      client = await makeTestDb(dialect);
+      const ownerId = await seedOwner(client);
+      const canvases = canvasesRepository(client);
+      const a = await canvases.create({ ownerId, slug: "m-a", apiKeyHash: "k-a" });
+      const b = await canvases.create({ ownerId, slug: "m-b", apiKeyHash: "k-b" });
+      const c = await canvases.create({ ownerId, slug: "m-c", apiKeyHash: "k-c" });
+      await exec(sql`update canvases set publication_token = '' where id in (${a.id}, ${b.id})`);
+      expect(await canvases.mintMissingPublicationTokens()).toBe(2);
+      const ta = (await canvases.findById(a.id))?.publicationToken ?? "";
+      const tb = (await canvases.findById(b.id))?.publicationToken ?? "";
+      expect(ta).toMatch(HEX32);
+      expect(tb).toMatch(HEX32);
+      expect(ta).not.toBe(tb);
+      expect((await canvases.findById(c.id))?.publicationToken).toBe(c.publicationToken);
+      expect(await canvases.mintMissingPublicationTokens()).toBe(0);
+    });
+  },
+);
+
+describe("canvases repository source scan (deployment coordination, KTD1)", () => {
+  it("every currentVersionId assignment goes through livePointerSet, so no writer can skip the token rotation", () => {
+    const src = readFileSync(fileURLToPath(new URL("./canvases.ts", import.meta.url)), "utf8");
+    // Object-key assignments (`currentVersionId: …`) and property writes
+    // (`.currentVersionId = …`); reads (`t.currentVersionId`) and the optional type
+    // field (`currentVersionId?: string`) do not match.
+    const assignment = /(?<![\w.?])currentVersionId\s*:(?!:)|\.currentVersionId\s*=(?!=)/g;
+    const violations: string[] = [];
+    for (const m of src.matchAll(assignment)) {
+      const idx = m.index ?? 0;
+      const open = src.lastIndexOf("livePointerSet(", idx);
+      let covered = false;
+      if (open !== -1) {
+        let depth = 0;
+        let i = open + "livePointerSet".length;
+        for (; i < src.length; i++) {
+          const ch = src[i];
+          if (ch === "(") depth++;
+          else if (ch === ")") {
+            depth--;
+            if (depth === 0) break;
+          }
+        }
+        covered = idx > open && idx < i;
+      }
+      if (!covered) {
+        const line = src.slice(0, idx).split("\n").length;
+        violations.push(`line ${line}: ${src.slice(idx, idx + 48).split("\n")[0]}`);
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });

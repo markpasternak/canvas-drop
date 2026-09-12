@@ -15,6 +15,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { fromZip } from "../deploy/ingest.js";
+import { currentVersionView } from "../deploy/publication.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
@@ -23,6 +24,8 @@ import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 import {
   blobBodyLimit,
+  coordinationBodyLimit,
+  coordinationFrom,
   deployBodyLimit,
   deployErrorResponse,
   deployResponse,
@@ -93,8 +96,19 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     if (limited) return limited;
     const body = Buffer.from(await c.req.arrayBuffer());
     if (body.byteLength === 0) return c.json({ code: "EMPTY_DEPLOY", message: "empty body" }, 400);
+    // Deployment coordination (KTD5): the body is the raw ZIP, so the optional
+    // `releaseId` / `expectedPublicationToken` ride on the query string.
+    let coordination: ReturnType<typeof coordinationFrom>;
+    try {
+      coordination = coordinationFrom(c.req.query());
+    } catch (err) {
+      if (err instanceof DeployError) return deployErrorResponse(c, err);
+      throw err;
+    }
     // Key-authenticated deploy: attribute to the canvas owner (no user session).
-    return deployResponse(c, deps.engine, deps.audit, auth, "api", fromZip(body), auth.ownerId);
+    return deployResponse(c, deps.engine, deps.audit, auth, "api", fromZip(body), auth.ownerId, {
+      coordination,
+    });
   });
 
   // --- Two-channel staging upload (plan 003) -----------------------------------
@@ -121,8 +135,12 @@ export function deployApiRoutes(deps: DeployApiDeps) {
         return c.json({ code: "INVALID_MANIFEST", message: "manifest must be an array" }, 400);
       }
       try {
-        const result = await upload.begin(auth, auth.ownerId, manifest);
-        return c.json(result);
+        // Optional coordination fields are captured on the session and enforced at
+        // finalize (R11); a release that is live already needs no session at all (R12).
+        const coordination = coordinationFrom(body as Record<string, unknown>);
+        const result = await upload.begin(auth, auth.ownerId, manifest, coordination);
+        if (result.alreadyCurrent) return c.json(result.alreadyCurrent);
+        return c.json({ uploadId: result.uploadId, missingHashes: result.missingHashes });
       } catch (err) {
         if (err instanceof DeployError) return deployErrorResponse(c, err);
         throw err;
@@ -151,19 +169,42 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     });
 
     // Finalize: publish a new version from the staged manifest.
-    app.post("/:id/uploads/:uploadId/finalize", async (c) => {
+    app.post("/:id/uploads/:uploadId/finalize", coordinationBodyLimit, async (c) => {
       const auth = await authCanvas(c);
       if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
       const limited = deployThrottle(c, auth.id);
       if (limited) return limited;
       try {
-        const result = await upload.finalize(c.req.param("uploadId"), auth.ownerId, auth.id);
-        deps.audit.recordAudit({
-          action: "deploy",
-          actorId: auth.ownerId,
-          targetId: auth.id,
-          meta: { source: "upload", version: result.version, fileCount: result.fileCount },
-        });
+        // An optional JSON body may refresh the expected token after a reassess (KTD11)
+        // or repeat the release identity; an absent body keeps the values begin captured.
+        const raw = await c.req.text();
+        let parsed: unknown = {};
+        if (raw.trim().length > 0) {
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            throw new DeployError("INVALID_REQUEST", "finalize body must be JSON when present");
+          }
+        }
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new DeployError("INVALID_REQUEST", "finalize body must be a JSON object");
+        }
+        const coordination = coordinationFrom(parsed as Record<string, unknown>);
+        const result = await upload.finalize(
+          c.req.param("uploadId"),
+          auth.ownerId,
+          auth.id,
+          coordination,
+        );
+        // An `already_current` result created and activated nothing (R3 / KTD7): no audit event.
+        if (result.outcome === "published") {
+          deps.audit.recordAudit({
+            action: "deploy",
+            actorId: auth.ownerId,
+            targetId: auth.id,
+            meta: { source: "upload", version: result.version, fileCount: result.fileCount },
+          });
+        }
         return c.json(result);
       } catch (err) {
         if (err instanceof DeployError) return deployErrorResponse(c, err);
@@ -175,6 +216,8 @@ export function deployApiRoutes(deps: DeployApiDeps) {
   app.get("/:id", async (c) => {
     const auth = await authCanvas(c);
     if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+    // Deployment coordination readback (R2 / R6): the current release identity and the
+    // publication token a publisher passes back as its precondition.
     return c.json({
       id: auth.id,
       slug: auth.slug,
@@ -189,6 +232,8 @@ export function deployApiRoutes(deps: DeployApiDeps) {
       // the same derived audience the management and MCP views carry.
       accessMode: accessModeOf(auth.access),
       currentVersionId: auth.currentVersionId,
+      publicationToken: auth.publicationToken,
+      currentVersion: await currentVersionView(deps.versions, auth),
     });
   });
 
@@ -220,6 +265,8 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     const versions = await deps.versions.listByCanvas(auth.id);
     return c.json({
       versions: versions.map((v) => ({
+        // The immutable id identifies a snapshot even after its number is reused (R2).
+        id: v.id,
         number: v.number,
         source: v.source,
         status: v.status,
@@ -227,6 +274,7 @@ export function deployApiRoutes(deps: DeployApiDeps) {
         createdAt: v.createdAt,
         fileCount: v.fileCount,
         totalBytes: v.totalBytes,
+        releaseId: v.releaseId ?? null,
         current: v.id === auth.currentVersionId,
       })),
     });

@@ -63,7 +63,13 @@ async function main() {
 
   // 2. Drivers (DB, storage, auth) — all behind config-selected factories.
   const db = makeDb(config);
-  await runMigrations(db); // dev convenience; ops run migrations explicitly in prod
+  const migrated = await runMigrations(db); // dev convenience; ops run migrations explicitly in prod
+  if (migrated.repairedPublicationTokens > 0) {
+    rootLogger.info(
+      { repaired: migrated.repairedPublicationTokens },
+      "publication tokens minted for canvases that had none (deployment coordination repair)",
+    );
+  }
   const storage = makeStorage(config);
   const users = usersRepository(db);
   const allowedEmails = allowedEmailsRepository(db);
