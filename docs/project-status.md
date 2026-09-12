@@ -26,6 +26,16 @@ The [resource-model documentation follow-up](plans/2026-09-08-004-docs-resource-
 introduces the feature/resource/policy distinction, storage choices and per-resource
 settings across the docs, agent skill, examples and Backend help text.
 
+The [deployment coordination round](plans/2026-09-12-1811-feat-deployment-coordination-plan.md)
+(12 September 2026) lets two publishers ship the same release to one canvas without a
+duplicate version or a stale overwrite: an optional opaque `releaseId` on the deploy
+paths and MCP deploy tools, a per-canvas `publicationToken` rotated by every
+live-pointer write and passed back as `expectedPublicationToken`, one atomic
+conditional activation on both dialects, `already_current` success and the
+`PUBLICATION_CHANGED` / `RELEASE_NOT_CURRENT` conflicts, plus the two-publisher recipe
+in the [Deploy API](site/api/deploy-api.md#coordinate-two-publishers) page. Learnings in
+[`docs/solutions/2026-09-12-publication-token-and-release-identity.md`](solutions/2026-09-12-publication-token-and-release-identity.md).
+
 **M10 ops/packaging is the one open milestone.**
 
 The [admin operations round](plans/2026-09-06-001-feat-admin-operations-plan.md), tracked

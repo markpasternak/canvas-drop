@@ -222,6 +222,14 @@ git pull
 docker compose up -d --build
 ```
 
+Builds from September 2026 onwards add deployment coordination (migration 0043,
+additive on both dialects): every canvas gains a publication token, versions and
+upload sessions gain a release identity, and the migration backfills tokens for
+existing rows. The same repair runs after every boot and after a restore, so a backup
+taken before that migration restores cleanly. On Postgres the backfill uses
+`gen_random_uuid()`, which needs PostgreSQL 13 or newer. Deploy API and MCP callers
+that send none of the new fields behave exactly as before; responses only gain fields.
+
 `restore <backup-dir>` is the inverse; it refuses a non-empty database without
 `--force`. A backup is a cleartext export that includes credential hashes, so keep
 it off the data volume and encrypt it before it leaves the host. For scheduled

@@ -32,7 +32,7 @@ directly with no draft step. Both create a new version at the same URL; the last
 curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
   -H "Authorization: Bearer $CANVAS_KEY" \
   --data-binary @site.zip
-# 200 {"url":"...","version":7,"fileCount":12,"totalBytes":348201,"warnings":[]}
+# 200 {"outcome":"published","url":"...","version":7,"versionId":"01J…","releaseId":null,"publicationToken":"9f2c…","fileCount":12,"totalBytes":348201,"warnings":[]}
 ```
 
 3. Verify through the server, not the URL:
@@ -64,8 +64,8 @@ Companion routes, same Bearer key:
 
 | Route | Purpose |
 |---|---|
-| `GET /v1/canvases/{id}` | `{id, slug, url, title, status, publicationState, accessMode, currentVersionId}` (`accessMode`: `restricted` \| `whole_org` \| `public_link` — who else can open it beyond the people-and-teams list) |
-| `GET /v1/canvases/{id}/versions` | `{versions: [{number, source, status, createdBy, createdAt, fileCount, totalBytes, current}]}` |
+| `GET /v1/canvases/{id}` | `{id, slug, url, title, status, publicationState, accessMode, currentVersionId, publicationToken, currentVersion: {id, number, releaseId, createdAt} \| null}` (`accessMode`: `restricted` \| `whole_org` \| `public_link` — who else can open it beyond the people-and-teams list) |
+| `GET /v1/canvases/{id}/versions` | `{versions: [{id, number, source, status, createdBy, createdAt, fileCount, totalBytes, releaseId, current}]}` |
 | `GET /v1/canvases/{id}/files` | the live manifest as JSON; `?path=` returns that file's raw bytes; `404 NOT_PUBLISHED` before the first deploy |
 | `POST /v1/canvases/{id}/rollback` | body `{"version": 6}`; makes that ready version current and returns `{url, version}`; `404` when no ready version has that number |
 | `POST /v1/canvases/{id}/unpublish` | back to Draft: `{url, publicationState: "draft", currentVersionId: null}`; `409 CANNOT_UNPUBLISH` when not published |
@@ -84,6 +84,19 @@ Staged errors use the same `{code, message}` shape at a mapped status: size caps
 Limits: 100 MB per canvas, 25 MB per file, 2 000 files. Full contract:
 [Deploy API](/docs/api/deploy-api).
 
+**Two publishers, one canvas.** When a local tool and a CI job can both ship the same
+build, add `?releaseId=<opaque build identity>&expectedPublicationToken=<the
+publicationToken you read back>` to `PUT .../deploy` (or the same two fields in the
+staged begin/finalize bodies). Outcomes: `200 outcome:"already_current"` (your release
+is live already; nothing created), `409 PUBLICATION_CHANGED` (the publication changed
+since you read the token; body carries `current`), `409 RELEASE_NOT_CURRENT` (your
+release exists only in history; roll back to it or ship a new release), else a normal
+`published` result with the new token. Every publication change — any deploy, an editor
+publish, a rollback, an unpublish — rotates the token and never reuses a value. Read
+back before deploying and treat each conflict as a reassess signal, not a retry; Canvas
+Drop does not know which commit is newest. Recipe and examples:
+[Coordinate two publishers](/docs/api/deploy-api#coordinate-two-publishers).
+
 ## Connect over MCP
 
 Add `{base}/mcp` to an MCP-capable host. First use runs OAuth 2.1 against
@@ -100,7 +113,7 @@ A first session, as tool calls:
 whoami           {}                             -> { id, email, name, orgs, teams, isGuest }
 create_canvas    { "title": "Retro board" }     -> { id, slug, url, apiKey, deploy, ... }   apiKey is returned once
 deploy_canvas    { "id": "<id>", "files": [{ "path": "index.html", "content": "<h1>Hi</h1>" }] }
-                                                -> { url, version: 1, fileCount: 1, totalBytes, warnings: [] }
+                                                -> { outcome: "published", url, version: 1, versionId, releaseId: null, publicationToken, fileCount: 1, totalBytes, warnings: [] }
 get_canvas_file  { "id": "<id>", "path": "index.html" }
                                                 -> { version, path, size, mime, hash, encoding: "utf8", content }
 ```
@@ -121,7 +134,7 @@ deploy and publish with `NOT_ACTIVE`.
 |---|---|
 | Identity, lists, create (`any`) | `whoami`, `list_canvases`, `list_shared_canvases`, `create_canvas`, `clone_canvas` |
 | Read (`editor`) | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_access`, `search_people` |
-| Deploy (`editor`; publishes live immediately) | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` |
+| Deploy (`editor`; publishes live immediately) | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` — optional `releaseId` / `expectedPublicationToken` on `deploy_canvas`, `begin_deploy`, `finalize_deploy` coordinate two publishers (see Deploy with a key) |
 | Lifecycle (`editor` unless marked) | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `preview_version_prune`, `prune_versions`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) |
 | Settings (`editor`) | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key`; `list_canvas_connections` reads the admin-granted profiles |
 | Sharing (`editor`) | `grant_access`, `invite_to_canvas`, `revoke_access`, `set_access_role` |
