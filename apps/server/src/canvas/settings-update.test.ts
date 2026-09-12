@@ -410,14 +410,14 @@ describe("resolveSettingsUpdate — CDN downgrade warning", () => {
     if (r.ok) expect(r.warning).toMatch(/CDN/);
   });
 
-  it("does NOT warn when edge caching is off (TTL 0)", () => {
+  it("warns about immutable assets when HTML edge caching is off (TTL 0)", () => {
     const r = resolveSettingsUpdate(
       publicCanvas(),
       { access: "private" },
       { ...cdnOpts, publicEdgeCacheTtlSec: 0 },
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.warning).toBeUndefined();
+    if (r.ok) expect(r.warning).toContain("up to a year");
   });
 
   it("does NOT warn on an upgrade TO public (was never edge-cacheable)", () => {

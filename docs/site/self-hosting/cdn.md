@@ -20,13 +20,37 @@ to reason about it per canvas — just honor the origin headers:
 |----------|-----------------|-------------------|
 | HTML of a **public** canvas (`public_link`, no password) | `public, max-age=0, s-maxage=<TTL>` | cache at the edge for the TTL; the browser still revalidates |
 | HTML of any **auth-gated** canvas (Restricted / Whole org / password) | `private, no-cache` | **never** store it |
-| Content-hashed asset (`app.a1b2c3d4.js`) of a **public** canvas | `public, max-age=1y, immutable` | cache forever |
+| Content-hashed asset (`app.a1b2c3d4.js`) of a **public** canvas | `public, max-age=1y, immutable` | cache for up to a year |
 | Content-hashed asset of an **auth-gated** canvas | `private, max-age=1y, immutable` | **never** store it (the browser still caches) |
 
 Only the **`public_link`, no-password** rung is reachable by an anonymous request, so
 it's the only rung marked `public`. Everything else is `private` so a shared cache can't
 serve one viewer's bytes to another. See [Sharing & access](../authoring/sharing) for
 the rungs and the [Security model](security-model) for the isolation guarantee.
+
+### Generated asset filenames
+
+Hexadecimal hash suffixes such as `app.a1b2c3d4.js` are recognized throughout a canvas.
+Astro's `_astro/` directory also supports eight-character URL-safe base64 suffixes
+containing an uppercase letter, such as `_astro/sections.B3rvd3pb.js`. This convention
+covers generated JavaScript, CSS, fonts and images. Ambiguous lowercase non-hex
+suffixes and ordinary stable filenames continue to revalidate.
+
+Treat these names as immutable: never publish different bytes at the same recognized
+URL, including manually named files inside `_astro/`. The server recognizes a naming
+convention; it cannot prove that an arbitrary filename contains a content hash.
+HTML entry points such as `index.html` continue to revalidate, so they can point to
+new generated URLs after a publish.
+
+Restricted assets use the browser's **private** cache. Every network request still
+passes current access checks, but bytes already downloaded or cached on a device
+remain available after logout or access removal. Reverting cache headers cannot purge
+an existing fresh browser response; publish a new URL when correcting cached content.
+
+Previously public hashed assets can also remain in **shared** caches for up to a
+year after access is restricted, even if the HTML edge TTL is zero. Purge the
+canvas's CDN cache to remove those shared copies. This cannot erase files already
+downloaded to a viewer's device.
 
 ### Cloudflare specifics
 

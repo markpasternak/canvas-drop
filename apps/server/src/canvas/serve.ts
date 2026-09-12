@@ -17,6 +17,16 @@ import { blobKey } from "./storage-keys.js";
 
 /** Filenames that look content-hashed (e.g. app.a1b2c3d4.js) get immutable caching. */
 const CONTENT_HASH_RE = /\.[0-9a-f]{8,}\.[a-z0-9]+$/i;
+// Astro's default output uses URL-safe base64 hashes. Keep this convention scoped
+// to its generated directory; ambiguous lowercase tokens still revalidate.
+const ASTRO_HASH_RE =
+  /(?:^|\/)_astro\/(?:[^/]+\/)*[^/]+\.([A-Za-z0-9_-]{8})\.(?:js|mjs|css|woff2?|ttf|otf|png|jpe?g|webp|avif|gif|svg)$/;
+
+export function isContentHashed(path: string): boolean {
+  if (CONTENT_HASH_RE.test(path)) return true;
+  const hash = ASTRO_HASH_RE.exec(path)?.[1];
+  return hash !== undefined && /[A-Z]/.test(hash);
+}
 
 /** A "view" is one HTML-document load per viewer per this sliding window (D24).
  *  A refresh/return inside the window doesn't re-count; idle past it = a new view. */
@@ -67,7 +77,7 @@ export function serveCanvas(deps: ServeDeps) {
       now,
     );
     const cacheControl = canvasCacheControl({
-      contentHashed: CONTENT_HASH_RE.test(resolved.path),
+      contentHashed: isContentHashed(resolved.path),
       anonymouslyPublic,
       edgeTtlSec: effectiveEdgeTtlSec(
         deps.config.serving.publicEdgeCacheTtlSec,

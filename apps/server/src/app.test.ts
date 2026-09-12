@@ -61,6 +61,132 @@ describe("buildApp", () => {
     await client?.close();
   });
 
+  it.each(["path", "subdomain"] as const)(
+    "Astro assets recheck access before bytes or 304s (%s)",
+    async (urlMode) => {
+      client = await makeTestDb("sqlite");
+      const config = loadConfig({
+        CANVAS_DROP_AUTH_MODE: "dev",
+        CANVAS_DROP_URL_MODE: urlMode,
+        CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+        CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      });
+      const users = usersRepository(client);
+      const owner = await users.upsert({
+        providerSub: "owner",
+        email: "owner@example.com",
+        name: "Owner",
+        isAdmin: false,
+      });
+      const viewer = await users.upsert({
+        providerSub: "viewer",
+        email: "viewer@example.com",
+        name: "Viewer",
+        isAdmin: false,
+      });
+      const canvases = canvasesRepository(client);
+      const versions = versionsRepository(client);
+      const drafts = draftsRepository(client);
+      const storage = memStorage();
+      const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+      const cv = await canvases.create({
+        ownerId: owner.id,
+        slug: "asset-access",
+        apiKeyHash: "h",
+      });
+      await engine.deploy(
+        cv,
+        "api",
+        folder({ "index.html": "home", "_astro/sections.B3rvd3pb.js": "private bundle" }),
+        owner.id,
+      );
+      const a = buildApp({
+        config,
+        db: client,
+        rootLogger: silent,
+        strategy: {
+          async resolveIdentity(c) {
+            const who = c.req.header("x-test-user");
+            return who ? { sub: who, email: `${who}@example.com` } : null;
+          },
+        },
+        users,
+        canvases,
+        versions,
+        drafts,
+        storage,
+        engine,
+        audit: createAuditLog(auditRepository(client), silent),
+        peerIp: () => "127.0.0.1",
+      });
+      const host =
+        urlMode === "subdomain" ? "asset-access.canvases.example.com" : "canvases.example.com";
+      const prefix = urlMode === "path" ? "/c/asset-access" : "";
+      const get = (who?: string, etag?: string) =>
+        a.request(`${prefix}/_astro/sections.B3rvd3pb.js`, {
+          headers: {
+            host,
+            ...(who ? { "x-test-user": who } : {}),
+            ...(etag ? { "if-none-match": etag } : {}),
+          },
+        });
+      for (const who of [undefined, "viewer"]) {
+        const r = await get(who);
+        expect(r.status).not.toBe(200);
+        expect(await r.text()).not.toContain("private bundle");
+      }
+      const allowed = await get("owner");
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+      expect(await allowed.text()).toBe("private bundle");
+      const etag = allowed.headers.get("etag") ?? "";
+      expect(etag).not.toBe("");
+      const grant = await canvases.addAllowlistEntry({
+        canvasId: cv.id,
+        principalKind: "member",
+        userId: viewer.id,
+      });
+      const conditional = await get("viewer", etag);
+      expect(conditional.status).toBe(304);
+      expect(conditional.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+      await conditional.text();
+      await canvases.removeAllowlistEntry(cv.id, grant.id);
+      for (const who of [undefined, "viewer"]) {
+        const r = await get(who, etag);
+        expect(r.status).not.toBe(200);
+        expect(r.status).not.toBe(304);
+        expect(await r.text()).not.toContain("private bundle");
+      }
+      await canvases.setAccess(cv.id, "public_link");
+      const publicAsset = await get();
+      expect(publicAsset.status).toBe(200);
+      expect(publicAsset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      await publicAsset.text();
+      const publicConditional = await get(undefined, etag);
+      expect(publicConditional.status).toBe(304);
+      expect(publicConditional.headers.get("cache-control")).toBe(
+        "public, max-age=31536000, immutable",
+      );
+      await publicConditional.text();
+      await canvases.setPassword(cv.id, "protected");
+      const password = await get(undefined, etag);
+      expect(password.status).not.toBe(304);
+      expect(await password.text()).not.toContain("private bundle");
+      await canvases.setPassword(cv.id, null);
+      await canvases.updateSettings(cv.id, { sharedExpiresAt: Date.now() - 1000 });
+      const expired = await get(undefined, etag);
+      expect(expired.status).not.toBe(304);
+      expect(await expired.text()).not.toContain("private bundle");
+      await canvases.updateSettings(cv.id, { sharedExpiresAt: null });
+      for (const status of ["archived", "disabled"] as const) {
+        await canvases.setStatus(cv.id, status);
+        const r = await get(undefined, etag);
+        expect(r.status).not.toBe(304);
+        expect(await r.text()).not.toContain("private bundle");
+      }
+    },
+  );
+
   it("GET /healthz returns 200 with db: ok when the database is reachable", async () => {
     client = await makeTestDb("sqlite");
     const res = await app(client).request("/healthz");
