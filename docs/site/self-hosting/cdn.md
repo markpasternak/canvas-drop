@@ -20,7 +20,7 @@ to reason about it per canvas — just honor the origin headers:
 |----------|-----------------|-------------------|
 | HTML of a **public** canvas (`public_link`, no password) | `public, max-age=0, s-maxage=<TTL>` | cache at the edge for the TTL; the browser still revalidates |
 | HTML of any **auth-gated** canvas (Restricted / Whole org / password) | `private, no-cache` | **never** store it |
-| Content-hashed asset (`app.a1b2c3d4.js`) of a **public** canvas | `public, max-age=1y, immutable` | cache forever |
+| Content-hashed asset (`app.a1b2c3d4.js`) of a **public** canvas | `public, max-age=1y, immutable` | cache for up to a year |
 | Content-hashed asset of an **auth-gated** canvas | `private, max-age=1y, immutable` | **never** store it (the browser still caches) |
 
 Only the **`public_link`, no-password** rung is reachable by an anonymous request, so
@@ -46,6 +46,11 @@ Restricted assets use the browser's **private** cache. Every network request sti
 passes current access checks, but bytes already downloaded or cached on a device
 remain available after logout or access removal. Reverting cache headers cannot purge
 an existing fresh browser response; publish a new URL when correcting cached content.
+
+Previously public hashed assets can also remain in **shared** caches for up to a
+year after access is restricted, even if the HTML edge TTL is zero. Purge the
+canvas's CDN cache to remove those shared copies. This cannot erase files already
+downloaded to a viewer's device.
 
 ### Cloudflare specifics
 

@@ -67,9 +67,12 @@ describe("cdnAccessDowngradeWarning", () => {
     const w = cdnAccessDowngradeWarning(300);
     expect(w).toContain("about 5 minutes");
     expect(w).toMatch(/CDN/);
+    expect(w).toContain("up to a year");
+    expect(w).toContain("Purge");
   });
 
-  it("returns null when shared caching is off (nothing to warn about)", () => {
-    expect(cdnAccessDowngradeWarning(0)).toBeNull();
+  it("warns about immutable assets even when HTML edge caching is off", () => {
+    expect(cdnAccessDowngradeWarning(0)).toContain("up to a year");
+    expect(cdnAccessDowngradeWarning(0)).not.toContain("HTML pages");
   });
 });

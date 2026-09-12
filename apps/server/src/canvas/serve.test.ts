@@ -182,6 +182,8 @@ describe("serveCanvas (integration)", () => {
     expect(html.headers.get("Cache-Control")).toBe("private, no-cache");
     const hashed = await app.request("/c/s/_astro/sections.B3rvd3pb.js");
     expect(hashed.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    const hex = await app.request("/c/s/assets/app.abcdef12.js");
+    expect(hex.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
   });
 
   it("public_link canvas: HTML is shared-cacheable (s-maxage), hashed is public/immutable", async () => {
@@ -192,6 +194,8 @@ describe("serveCanvas (integration)", () => {
     expect(html.headers.get("Cache-Control")).toBe("public, max-age=0, s-maxage=300");
     const hashed = await app.request("/c/s/_astro/sections.B3rvd3pb.js");
     expect(hashed.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    const hex = await app.request("/c/s/assets/app.abcdef12.js");
+    expect(hex.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
   });
 
   it("public_link HTML falls back to public/no-cache when edge caching is off (TTL 0)", async () => {
@@ -210,6 +214,8 @@ describe("serveCanvas (integration)", () => {
     expect(html.headers.get("Cache-Control")).toBe("private, no-cache");
     const hashed = await app.request("/c/s/_astro/sections.B3rvd3pb.js");
     expect(hashed.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    const hex = await app.request("/c/s/assets/app.abcdef12.js");
+    expect(hex.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
   });
 
   it("EXPIRED public_link is private — an expired share is no longer shared-cacheable", async () => {
@@ -471,6 +477,8 @@ describe("content-hashed filenames", () => {
   it.each([
     "assets/app.abcdef12.js",
     "_astro/sections.B3rvd3pb.js",
+    // Accepted naming-convention match: publishers must not reuse this URL.
+    "_astro/config.Settings.js",
     "_astro/preload-helper.CxFQXtKk.js",
     "_astro/ItemEditor.CZUfIwGT.css",
     "_astro/Inter-Regular.CcCsk3RA.woff2",

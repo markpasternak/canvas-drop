@@ -24,6 +24,11 @@ Never publish different bytes at the same recognized URL. Private browser caches
 can retain downloaded bytes after logout or access removal; reverting server headers
 does not purge those responses. A content correction needs a new URL.
 
+The independent review also caught a misleading public-to-restricted warning: it
+quoted the HTML TTL while public hashed assets could remain shared-cacheable for
+a year, including with HTML edge caching disabled. The shared warning helper now
+explains both windows for dashboard and MCP callers. Cache headers are unchanged.
+
 The combined release plan is
 [resource serving performance](../plans/2026-09-12-2303-fix-resource-serving-performance-plan.md).
 Tracking issue #121 holds CI, deployed revision and measurement receipts. The roadmap

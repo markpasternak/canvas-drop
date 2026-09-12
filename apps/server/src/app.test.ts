@@ -162,6 +162,12 @@ describe("buildApp", () => {
       expect(publicAsset.status).toBe(200);
       expect(publicAsset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
       await publicAsset.text();
+      const publicConditional = await get(undefined, etag);
+      expect(publicConditional.status).toBe(304);
+      expect(publicConditional.headers.get("cache-control")).toBe(
+        "public, max-age=31536000, immutable",
+      );
+      await publicConditional.text();
       await canvases.setPassword(cv.id, "protected");
       const password = await get(undefined, etag);
       expect(password.status).not.toBe(304);

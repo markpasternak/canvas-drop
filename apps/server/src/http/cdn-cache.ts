@@ -18,7 +18,7 @@ export interface CanvasCachePolicy {
   contentHashed: boolean;
   /** `public_link` rung AND no password gate — reachable by an anonymous request. */
   anonymouslyPublic: boolean;
-  /** Shared-cache TTL (seconds) for public HTML; 0 disables shared caching. */
+  /** Shared-cache TTL (seconds) for public HTML; 0 disables shared HTML caching. */
   edgeTtlSec: number;
 }
 
@@ -78,18 +78,18 @@ export function humanizeDuration(totalSeconds: number): string {
   return hours === 1 ? "about an hour" : `about ${hours} hours`;
 }
 
-/**
- * Warning shown when an owner moves a canvas OFF the anonymously-public rung while
- * shared caching is enabled — the page can linger at a CDN edge for up to the TTL.
- * Returns null when there's nothing to warn about (edge caching off). The wording is
- * deliberately conditional ("if you serve through a CDN") because the server can't
- * know whether one is actually deployed in front of it.
+/** A public-to-restricted transition cannot invalidate already shared responses.
+ * Hashed assets keep their own immutable lifetime even when the HTML edge TTL is 0.
  */
 export function cdnAccessDowngradeWarning(edgeTtlSec: number): string | null {
-  if (edgeTtlSec <= 0) return null;
+  const html =
+    edgeTtlSec > 0
+      ? `HTML pages may remain cached for up to ${humanizeDuration(edgeTtlSec)}. `
+      : "";
   return (
-    `If you serve this instance through a CDN, this canvas may stay visible at the ` +
-    `CDN's edge cache for up to ${humanizeDuration(edgeTtlSec)} after this change, ` +
-    `until the cached copy expires.`
+    `If you serve this instance through a CDN, ${html}` +
+    `previously public images, scripts and fonts with content-hashed filenames may remain ` +
+    `accessible from its cache for up to a year. Purge the canvas's CDN cache to remove ` +
+    `those shared copies. Files already downloaded to a viewer's device cannot be revoked.`
   );
 }
