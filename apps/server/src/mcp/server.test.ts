@@ -123,6 +123,7 @@ async function connect(
     log: silent,
     // Wired like production: the blob GC must see staged upload sessions.
     uploadSessions: uploadSessionsRepository(client),
+    waitOptions: { intervalMs: 5 },
   });
   const server = buildMcpServer(
     {
@@ -3731,5 +3732,92 @@ describe.each(DIALECTS)("MCP deployment coordination parity [%s]", (dialect) => 
     });
     expect(isError(denied)).toBe(true);
     expect(text(denied)).toBe("canvas not found");
+  });
+
+  it("finalize_deploy that itself resolves to already_current writes no deploy audit row (two sessions, one release)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const open = async (content: string) => {
+      const begun = payload(
+        await mcp.callTool({
+          name: "begin_deploy",
+          arguments: { id: made.id, manifest: manifestOf({ "index.html": content }), releaseId: R },
+        }),
+      );
+      expect(begun.uploadId).toBeTruthy();
+      await mcp.callTool({
+        name: "add_files",
+        arguments: {
+          id: made.id,
+          uploadId: begun.uploadId,
+          files: [{ path: "index.html", content }],
+        },
+      });
+      return begun.uploadId as string;
+    };
+    const first = await open("one");
+    const second = await open("two");
+    const f1 = payload(
+      await mcp.callTool({ name: "finalize_deploy", arguments: { id: made.id, uploadId: first } }),
+    );
+    expect(f1).toMatchObject({ outcome: "published", releaseId: R, version: 1 });
+    expect(await deployAudits()).toBe(1);
+    const f2 = payload(
+      await mcp.callTool({ name: "finalize_deploy", arguments: { id: made.id, uploadId: second } }),
+    );
+    expect(f2).toMatchObject({ outcome: "already_current", versionId: f1.versionId });
+    expect(await deployAudits()).toBe(1);
+  });
+
+  it("deploy_canvas for a release that exists only in history fails RELEASE_NOT_CURRENT naming it, with the live publication", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const v1 = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, files: [{ path: "index.html", content: "one" }], releaseId: R },
+      }),
+    );
+    const v2 = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: {
+          id: made.id,
+          files: [{ path: "index.html", content: "two" }],
+          releaseId: "gh:acme/roadmap@77aa01b:prod",
+        },
+      }),
+    );
+    const rolled = payload(
+      await mcp.callTool({ name: "rollback_canvas", arguments: { id: made.id, version: 1 } }),
+    );
+    expect(rolled.version).toBe(1);
+    const res = await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: {
+        id: made.id,
+        files: [{ path: "index.html", content: "again" }],
+        releaseId: "gh:acme/roadmap@77aa01b:prod",
+      },
+    });
+    expect(isError(res)).toBe(true);
+    const msg = text(res);
+    expect(msg.startsWith("RELEASE_NOT_CURRENT: ")).toBe(true);
+    const detail = JSON.parse(msg.slice(msg.indexOf("{"))) as {
+      current: Record<string, unknown>;
+      release: Record<string, unknown>;
+    };
+    expect(detail.release).toEqual({ versionId: v2.versionId, version: 2 });
+    expect(detail.current).toMatchObject({ versionId: v1.versionId, version: 1, releaseId: R });
+    // Nothing was reactivated: the rollback target is still live and no version was added.
+    const listed = payload(
+      await mcp.callTool({ name: "list_versions", arguments: { id: made.id } }),
+    );
+    expect(listed.versions).toHaveLength(2);
+    expect(await deployAudits()).toBe(2);
   });
 });

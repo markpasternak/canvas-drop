@@ -12,6 +12,8 @@ import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
+import { isUniqueViolation, RELEASE_READY_UNIQUE } from "../db/unique-violation.js";
+import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
 import { deployEngine } from "./engine.js";
@@ -400,6 +402,8 @@ describe.each(DIALECTS)("deployEngine — deployment coordination [%s]", (dialec
     /** Called on the first storage put of a deploy — a window between pre-check and markReady. */
     onFirstPut?: () => Promise<void>;
     waitOptions?: WaitOptions;
+    /** Replaces the silent logger (to assert on error-level cleanup reports). */
+    log?: Logger;
   }
 
   async function setup(hooks: Hooks = {}) {
@@ -436,7 +440,7 @@ describe.each(DIALECTS)("deployEngine — deployment coordination [%s]", (dialec
       versions,
       drafts,
       storage,
-      log: silent,
+      log: hooks.log ?? silent,
       screenshots: { enqueue } as never,
       waitOptions: hooks.waitOptions ?? { intervalMs: 5 },
     });
@@ -788,5 +792,86 @@ describe.each(DIALECTS)("deployEngine — deployment coordination [%s]", (dialec
     expect(hooked).toBe(r.versionId);
     expect(r.publicationToken).toBe(await t.token());
     expect(r.publicationToken).not.toBe(t.canvas.publicationToken);
+  });
+
+  it("a transient failure removing the lost candidate is retried; the conflict still surfaces and no orphan remains", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    t = await setup({
+      onFirstPut: async () => {
+        const v = await t.readyVersion(); // someone publishes mid-ingest
+        await t.canvases.setCurrentVersion(t.canvas.id, v.id);
+      },
+      waitOptions: { intervalMs: 5, sleep: async () => {} },
+    });
+    const original = t.versions.deleteReadyNonCurrentById.bind(t.versions);
+    const cleanup = vi
+      .spyOn(t.versions, "deleteReadyNonCurrentById")
+      .mockRejectedValueOnce(new Error("db blip"))
+      .mockRejectedValueOnce(new Error("db blip"))
+      .mockImplementation(original);
+    const t0 = await t.token();
+    const err = await conflictOf(
+      deploy(t, { "index.html": "x" }, { expectedPublicationToken: t0 }),
+    );
+    expect(err.code).toBe("PUBLICATION_CHANGED");
+    expect(cleanup).toHaveBeenCalledTimes(3);
+    expect(await t.readyRows()).toHaveLength(1); // only the mid-ingest publish; our candidate is gone
+  });
+
+  it("when removing the lost candidate keeps failing, the conflict is still raised and the orphan is reported at error level", async () => {
+    const log = silent.child({});
+    const errorLog = vi.spyOn(log, "error");
+    let t: Awaited<ReturnType<typeof setup>>;
+    t = await setup({
+      onFirstPut: async () => {
+        const v = await t.readyVersion();
+        await t.canvases.setCurrentVersion(t.canvas.id, v.id);
+      },
+      waitOptions: { intervalMs: 5, sleep: async () => {} },
+      log,
+    });
+    const cleanup = vi
+      .spyOn(t.versions, "deleteReadyNonCurrentById")
+      .mockRejectedValue(new Error("db down"));
+    const t0 = await t.token();
+    const err = await conflictOf(
+      deploy(t, { "index.html": "x" }, { expectedPublicationToken: t0 }),
+    );
+    expect(err.code).toBe("PUBLICATION_CHANGED");
+    expect(cleanup).toHaveBeenCalledTimes(3);
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    const orphan = (await t.readyRows()).find((v) => v.id !== err.current.versionId);
+    expect(orphan).toBeDefined(); // the ready orphan remains, named in the log for manual removal
+    const logged = errorLog.mock.calls[0]?.[0] as { versionId?: string; attempts?: number };
+    expect(logged.versionId).toBe(orphan?.id);
+    expect(logged.attempts).toBe(3);
+  });
+
+  it("a unique violation that persists while the holder reads absent surfaces the raw error after the retry cap; the candidate is discarded", async () => {
+    let t: Awaited<ReturnType<typeof setup>>;
+    let holderId = "";
+    t = await setup({
+      onFirstPut: async () => {
+        holderId = (await t.readyVersion(R)).id; // a rival lands after our pre-check
+      },
+      waitOptions: { attempts: 1, sleep: async () => {} },
+    });
+    // The classifier never sees the holder (as if it had withdrawn), so every retry collides again.
+    vi.spyOn(t.versions, "findReadyByRelease").mockResolvedValue(null);
+    const markReady = vi.spyOn(t.versions, "markReady");
+    let caught: unknown;
+    try {
+      await deploy(t, { "index.html": "x" }, { releaseId: R });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(caught).not.toBeInstanceOf(PublicationConflictError);
+    expect(isUniqueViolation(caught, RELEASE_READY_UNIQUE)).toBe(true);
+    // The rival's own markReady (from readyVersion) aside: our first attempt plus three retries.
+    expect(markReady.mock.calls.filter(([id]) => id !== holderId)).toHaveLength(4);
+    const rows = await t.versions.listByCanvas(t.canvas.id);
+    expect(rows.map((v) => v.id)).toEqual([holderId]); // no pending candidate remains
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBeNull();
   });
 });

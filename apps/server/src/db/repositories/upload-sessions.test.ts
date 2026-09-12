@@ -139,14 +139,34 @@ describe.each(DIALECTS)("uploadSessionsRepository (%s)", (dialect) => {
 
   it("unconsume clears both the consumed marker and the finalize lease", async () => {
     const s = await sessions.create(base());
-    expect(await sessions.claimForFinalize(s.handleHash, 0)).not.toBeNull();
+    const claimed = await sessions.claimForFinalize(s.handleHash, 0);
+    expect(claimed).not.toBeNull();
     await sessions.markConsumed(s.id);
-    await sessions.unconsume(s.id);
+    expect(await sessions.unconsume(s.id, claimed?.finalizingAt ?? null)).toBe(true);
     const again = await sessions.findByHandleHash(s.handleHash);
     expect(again?.consumedAt).toBeNull();
     expect(again?.finalizingAt).toBeNull();
     // and the handle can be claimed again
     expect(await sessions.claimForFinalize(s.handleHash, 0)).not.toBeNull();
+  });
+
+  it("unconsume is fenced on the lease: a stale claimant cannot reopen a handle a newer attempt consumed", async () => {
+    const s = await sessions.create(base());
+    const stale = await sessions.claimForFinalize(s.handleHash, 0);
+    expect(stale).not.toBeNull();
+    // The first attempt outlives its lease; the retry re-claims with a newer stamp and consumes.
+    await new Promise((r) => setTimeout(r, 5));
+    const newer = await sessions.claimForFinalize(s.handleHash, Date.now() + 1);
+    expect(newer).not.toBeNull();
+    expect(newer?.finalizingAt).not.toBe(stale?.finalizingAt);
+    await sessions.markConsumed(s.id);
+    expect(await sessions.unconsume(s.id, stale?.finalizingAt ?? null)).toBe(false);
+    const row = await sessions.findByHandleHash(s.handleHash);
+    expect(row?.consumedAt).not.toBeNull();
+    expect(row?.finalizingAt).toBe(newer?.finalizingAt);
+    // The attempt that holds the current lease may still reopen it.
+    expect(await sessions.unconsume(s.id, newer?.finalizingAt ?? null)).toBe(true);
+    expect((await sessions.findByHandleHash(s.handleHash))?.consumedAt).toBeNull();
   });
 
   it("deleteExpired removes only rows past the cutoff", async () => {

@@ -80,7 +80,7 @@ describe("migrating a populated database (FK-on table-recreation regression)", (
     const config = loadConfig({ CANVAS_DROP_DB: "sqlite", CANVAS_DROP_SQLITE_PATH: dbFile });
     const client = makeDb(config);
     if (client.dialect !== "sqlite") throw new Error("expected a sqlite client");
-    await expect(runMigrations(client)).resolves.toBeUndefined();
+    await expect(runMigrations(client)).resolves.toEqual({ repairedPublicationTokens: 0 });
 
     // Data preserved + shared→access mapped; new table present; integrity intact.
     const access = client.db.all<{ access: string }>(
@@ -164,7 +164,7 @@ describe("0036 canvas_access_roles on a populated database", () => {
     const config = loadConfig({ CANVAS_DROP_DB: "sqlite", CANVAS_DROP_SQLITE_PATH: dbFile });
     const client = makeDb(config);
     if (client.dialect !== "sqlite") throw new Error("expected a sqlite client");
-    await expect(runMigrations(client)).resolves.toBeUndefined();
+    await expect(runMigrations(client)).resolves.toEqual({ repairedPublicationTokens: 0 });
 
     const allowlist = client.db.all<{ id: string; role: string }>(
       sql`SELECT id, role FROM canvas_allowlist ORDER BY id`,
@@ -210,7 +210,7 @@ describe("0043 deployment coordination on a populated database (AE14)", () => {
     const config = loadConfig({ CANVAS_DROP_DB: "sqlite", CANVAS_DROP_SQLITE_PATH: dbFile });
     const client = makeDb(config);
     if (client.dialect !== "sqlite") throw new Error("expected a sqlite client");
-    await expect(runMigrations(client)).resolves.toBeUndefined();
+    await expect(runMigrations(client)).resolves.toEqual({ repairedPublicationTokens: 0 });
 
     const tokens = client.db.all<{ id: string; publication_token: string }>(
       sql`SELECT id, publication_token FROM canvases ORDER BY id`,

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { type Config, loadConfig } from "@canvas-drop/shared";
+import { sql } from "drizzle-orm";
 import { pino } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
@@ -14,9 +15,10 @@ import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
+import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
 import { hashUploadId } from "./handle.js";
-import { type ManifestInput, uploadService } from "./service.js";
+import { FINALIZE_LEASE_MS, type ManifestInput, uploadService } from "./service.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 const silent = pino({ level: "silent" });
@@ -464,7 +466,20 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
     const versions = versionsRepository(client);
     const drafts = draftsRepository(client);
     const uploadSessions = uploadSessionsRepository(client);
-    const storage = memStorage();
+    const base = memStorage();
+    /** A one-shot hook fired on the next storage existence check (finalize's slow phase). */
+    const hooks: { onExists?: () => Promise<void> } = {};
+    const storage: StorageDriver = {
+      ...base,
+      async exists(key) {
+        const fire = hooks.onExists;
+        if (fire) {
+          hooks.onExists = undefined;
+          await fire();
+        }
+        return base.exists(key);
+      },
+    };
     const engine = deployEngine({
       config,
       canvases,
@@ -527,6 +542,7 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
       token,
       session,
       readyRows,
+      hooks,
     };
   }
 
@@ -611,6 +627,34 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
     const r = await t.svc.finalize(id, t.ownerId, t.canvas.id, { expectedPublicationToken: t2 });
     expect(r.outcome).toBe("published");
     expect(await t.readyRows()).toHaveLength(2);
+  });
+
+  it("a finalize that outlives its lease cannot reopen a handle a newer attempt already published (fenced unconsume)", async () => {
+    const t = await setup();
+    const t1 = await t.token();
+    const id = await t.session({ "index.html": "mine" }, { expectedPublicationToken: t1 });
+    const handle = hashUploadId(id);
+    let newer: Awaited<ReturnType<typeof t.svc.finalize>> | undefined;
+    // Attempt A claims, then stalls on its storage checks past FINALIZE_LEASE_MS; the
+    // client's retry (B) re-claims the stale lease, publishes with the captured token and
+    // rotates it. A then loses its own activation and must NOT reopen B's consumed handle.
+    t.hooks.onExists = async () => {
+      const q = sql`update upload_sessions set finalizing_at = finalizing_at - ${FINALIZE_LEASE_MS + 1000} where handle_hash = ${handle}`;
+      if (client.dialect === "sqlite") client.db.run(q);
+      else await client.db.execute(q);
+      newer = await t.svc.finalize(id, t.ownerId, t.canvas.id);
+    };
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "PUBLICATION_CHANGED",
+    });
+    expect(newer?.outcome).toBe("published");
+    const s = await t.uploadSessions.findByHandleHash(handle);
+    expect(s?.consumedAt).not.toBeNull(); // B's consume stands; A's stale unconsume matched nothing
+    expect(await t.readyRows()).toHaveLength(1);
+    expect((await t.canvases.findById(t.canvas.id))?.currentVersionId).toBe(newer?.versionId);
+    await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_ALREADY_FINALIZED",
+    });
   });
 
   it("a finalize releaseId that differs from begin's is RELEASE_ID_MISMATCH and touches nothing", async () => {

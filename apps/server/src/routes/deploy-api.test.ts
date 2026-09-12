@@ -724,6 +724,7 @@ describe.each(DIALECTS)("deployApiRoutes — deployment coordination [%s]", (dia
       canvases,
       versions,
       storage,
+      uploadSessions,
       mkCanvas,
       get,
       put,
@@ -1012,5 +1013,64 @@ describe.each(DIALECTS)("deployApiRoutes — deployment coordination [%s]", (dia
     expect(second.status).toBe(200);
     expect(second.body.outcome).toBe("already_current");
     expect((await t.put(a.id, a.key, { "index.html": "x" }, { releaseId: R })).status).toBe(429);
+  });
+
+  it("a non-string coordination field is 400 INVALID_REQUEST at begin and at finalize, and opens or changes nothing", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const manifest = [{ path: "index.html", hash: t.sha("x"), size: 1 }];
+    const bad = await t.json("POST", `/${a.id}/uploads`, a.key, { manifest, releaseId: 42 });
+    expect(bad.status).toBe(400);
+    expect(bad.body.code).toBe("INVALID_REQUEST");
+    expect(await t.uploadSessions.listActiveByCanvas(a.id, Date.now())).toHaveLength(0);
+    const begun = await t.json("POST", `/${a.id}/uploads`, a.key, { manifest });
+    expect(begun.status).toBe(200);
+    const worse = await t.json("POST", `/${a.id}/uploads/${begun.body.uploadId}/finalize`, a.key, {
+      expectedPublicationToken: ["x"],
+    });
+    expect(worse.status).toBe(400);
+    expect(worse.body.code).toBe("INVALID_REQUEST");
+    expect((await t.get(a.id, a.key)).body.currentVersion).toBeNull();
+  });
+
+  it("a finalize that itself resolves to already_current writes no deploy audit row (two sessions, one release)", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const open = async (content: string) => {
+      const b = await t.json("POST", `/${a.id}/uploads`, a.key, {
+        manifest: [{ path: "index.html", hash: t.sha(content), size: content.length }],
+        releaseId: R,
+      });
+      expect(b.status).toBe(200);
+      const staged = await t.app.request(
+        `/v1/canvases/${a.id}/uploads/${b.body.uploadId}/blobs/${t.sha(content)}`,
+        { method: "PUT", headers: { Authorization: `Bearer ${a.key}` }, body: enc3(content) },
+      );
+      expect(staged.status).toBe(204);
+      return b.body.uploadId as string;
+    };
+    const first = await open("one");
+    const second = await open("two");
+    const f1 = await t.json("POST", `/${a.id}/uploads/${first}/finalize`, a.key);
+    expect(f1.status).toBe(200);
+    expect(f1.body).toMatchObject({ outcome: "published", releaseId: R });
+    expect(await t.deployAudits()).toBe(1);
+    const f2 = await t.json("POST", `/${a.id}/uploads/${second}/finalize`, a.key);
+    expect(f2.status).toBe(200);
+    expect(f2.body).toMatchObject({ outcome: "already_current", versionId: f1.body.versionId });
+    expect(await t.deployAudits()).toBe(1);
+  });
+
+  it("an oversized finalize body is refused with 413 INVALID_REQUEST before it is buffered", async () => {
+    const t = await setup();
+    const a = await t.mkCanvas();
+    const res = await t.json(
+      "POST",
+      `/${a.id}/uploads/${"0".repeat(32)}/finalize`,
+      a.key,
+      "x".repeat(17 * 1024),
+    );
+    expect(res.status).toBe(413);
+    expect(res.body.code).toBe("INVALID_REQUEST");
   });
 });

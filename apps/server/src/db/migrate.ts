@@ -7,7 +7,13 @@ import { canvasesRepository } from "./repositories/canvases.js";
  * coordination plan, KTD1 / R6) — rows a pre-0043 backup restore or another writer left
  * behind. Idempotent: a fully minted database changes nothing.
  */
-export async function runMigrations(client: DbClient): Promise<void> {
+export interface MigrationReport {
+  /** Canvas rows whose empty publication token was minted after the migrations ran. */
+  repairedPublicationTokens: number;
+}
+
+export async function runMigrations(client: DbClient): Promise<MigrationReport> {
   await client.migrate();
-  await canvasesRepository(client).mintMissingPublicationTokens();
+  const repairedPublicationTokens = await canvasesRepository(client).mintMissingPublicationTokens();
+  return { repairedPublicationTokens };
 }

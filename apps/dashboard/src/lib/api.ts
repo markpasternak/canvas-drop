@@ -248,8 +248,13 @@ export interface VersionInfo {
 }
 
 export interface DeployResult {
+  /** `already_current` when the release was live already and nothing was activated. */
+  outcome: "published" | "already_current";
   url: string;
   version: number;
+  versionId: string;
+  releaseId: string | null;
+  publicationToken: string;
   fileCount: number;
   totalBytes: number;
   warnings: string[];

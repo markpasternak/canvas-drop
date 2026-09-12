@@ -196,3 +196,25 @@ moves with the stack. The same two jobs as Option A.
 | Purge / prune | `… index.js purge [days]` | weekly |
 
 All three are also available in dev as `pnpm backup`, `pnpm restore`, `pnpm purge`.
+
+## 6. Upgrade checks
+
+Pending migrations run at boot, so upgrading is: back up (§1), deploy the new build,
+watch the boot log. A failed migration exits 1 with a `fatal:` line and rolls back
+(both dialects wrap each migration file in a transaction), so fix the cause and redeploy.
+
+Migration `0043_deployment-coordination` (September 2026) backfills a publication
+token onto every canvas; on Postgres it uses `gen_random_uuid()`, so the server must be
+PostgreSQL 13 or newer (the compose stack pins `postgres:16`). After boot, confirm the
+backfill on either dialect — expect `0` and two equal counts:
+
+```sql
+SELECT count(*) AS bad FROM canvases
+  WHERE publication_token = '' OR length(publication_token) <> 32;
+SELECT count(*) AS total, count(DISTINCT publication_token) AS distinct_tokens FROM canvases;
+```
+
+The boot log line `publication tokens minted …` reports how many rows the repair
+touched; it is absent when nothing needed repair. The same repair runs at the end of
+`restore`, so a backup taken before 0043 restores cleanly. Upgrade notes per release
+live in the install guide (`docs/site/self-hosting/install.md`).

@@ -456,8 +456,18 @@ export function uploadService(deps: UploadServiceDeps) {
         if (err instanceof PublicationConflictError) {
           // The pointer never moved and the candidate is gone (KTD3): reopen the handle
           // so the caller can reassess and finalize again without re-staging (R16).
+          // Fenced on the lease this attempt claimed: a finalize that outlived
+          // FINALIZE_LEASE_MS must never reopen a handle a newer attempt consumed.
           await deps.uploadSessions
-            .unconsume(claimed.id)
+            .unconsume(claimed.id, claimed.finalizingAt)
+            .then((reopened) => {
+              if (!reopened) {
+                deps.log?.warn(
+                  { sessionId: claimed.id },
+                  "unconsume skipped: the finalize lease was re-claimed by a newer attempt",
+                );
+              }
+            })
             .catch((e) =>
               deps.log?.warn({ err: e, sessionId: claimed.id }, "unconsume after conflict failed"),
             );

@@ -86,6 +86,10 @@ export interface DeployEngineDeps {
 // service); re-exported here for the existing import surface.
 export { KEEP_VERSIONS };
 
+/** Attempts to remove a candidate that lost its conditional activation before the orphan is logged. */
+const CLEANUP_ATTEMPTS = 3;
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /**
  * How many file uploads run concurrently within one deploy. Each storage `put`
  * is a network round-trip on S3; uploading in parallel turns an N-round-trip
@@ -396,11 +400,7 @@ export function deployEngine(deps: DeployEngineDeps) {
           // Nothing matched: the token moved, the canvas is being purged, or the row is
           // gone. The candidate is ready-but-never-current — remove it (its blobs may be
           // shared with the live version, so they are left to GC) and classify (R9).
-          await deps.versions
-            .deleteReadyNonCurrentById(canvas.id, version.id)
-            .catch((e) =>
-              deps.log.warn({ err: e, canvasId: canvas.id }, "candidate cleanup failed"),
-            );
+          await this.removeLostCandidate(canvas.id, version.id);
           if (releaseId !== undefined) {
             const c = await classifyPublication(deps, canvas.id, releaseId);
             if (c.kind === "already_current") return alreadyCurrentOutcome(c);
@@ -474,6 +474,34 @@ export function deployEngine(deps: DeployEngineDeps) {
       await deps.versions
         .deletePending(versionId)
         .catch((e) => deps.log.warn({ err: e, canvasId }, "pending candidate cleanup failed"));
+    },
+
+    /**
+     * Remove a ready candidate that lost the conditional activation. Best-effort but
+     * retried: a candidate left behind is a ready row still carrying its release identity,
+     * so a later deploy of that release would read RELEASE_NOT_CURRENT naming a cleanup
+     * artifact. A transient failure is retried a bounded number of times; the final
+     * failure is logged at error level naming the orphan so an operator can delete it
+     * (`delete_version` / `DELETE …/versions/{n}`). The conflict is thrown regardless.
+     */
+    async removeLostCandidate(canvasId: string, versionId: string): Promise<void> {
+      const sleep = deps.waitOptions?.sleep ?? defaultSleep;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await deps.versions.deleteReadyNonCurrentById(canvasId, versionId);
+          return;
+        } catch (err) {
+          if (attempt < CLEANUP_ATTEMPTS) {
+            await sleep(deps.waitOptions?.intervalMs ?? 100);
+            continue;
+          }
+          deps.log.error(
+            { err, canvasId, versionId, attempts: attempt },
+            "candidate cleanup failed; a ready orphan still holds its release id — delete the version manually",
+          );
+          return;
+        }
+      }
     },
 
     /** Create the pending version, retrying on a (canvas_id, number) collision. */

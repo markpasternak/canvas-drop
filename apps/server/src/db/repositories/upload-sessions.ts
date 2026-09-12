@@ -120,9 +120,25 @@ export function uploadSessionsRepository(client: DbClient) {
      * Reopen a consumed session after a publication conflict (deployment-coordination
      * plan, KTD11): the pointer never moved, so the handle may finalize again once the
      * caller has reassessed. Clears the consumed marker AND the finalize lease.
+     *
+     * Fenced on `leaseStamp`, the `finalizingAt` this attempt received from
+     * `claimForFinalize`: a finalize that outlived `FINALIZE_LEASE_MS` and lost its lease
+     * to a retry must not reopen a handle that retry already consumed and published (the
+     * newer claim carries a newer stamp, so the stale attempt matches nothing). Returns
+     * whether the handle was reopened.
      */
-    async unconsume(id: string): Promise<void> {
-      await db.update(t).set({ consumedAt: null, finalizingAt: null }).where(eq(t.id, id));
+    async unconsume(id: string, leaseStamp: number | null): Promise<boolean> {
+      const rows = await db
+        .update(t)
+        .set({ consumedAt: null, finalizingAt: null })
+        .where(
+          and(
+            eq(t.id, id),
+            leaseStamp === null ? isNull(t.finalizingAt) : eq(t.finalizingAt, leaseStamp),
+          ),
+        )
+        .returning({ id: t.id });
+      return rows.length === 1;
     },
 
     /**

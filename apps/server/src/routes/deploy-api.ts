@@ -24,6 +24,7 @@ import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 import {
   blobBodyLimit,
+  coordinationBodyLimit,
   coordinationFrom,
   deployBodyLimit,
   deployErrorResponse,
@@ -168,7 +169,7 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     });
 
     // Finalize: publish a new version from the staged manifest.
-    app.post("/:id/uploads/:uploadId/finalize", async (c) => {
+    app.post("/:id/uploads/:uploadId/finalize", coordinationBodyLimit, async (c) => {
       const auth = await authCanvas(c);
       if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
       const limited = deployThrottle(c, auth.id);

@@ -36,6 +36,17 @@ export const blobBodyLimit = bodyLimit({
 });
 
 /**
+ * The optional finalize body carries at most two short strings (deployment-coordination
+ * plan, KTD11); cap it like the sibling deploy routes so a key holder cannot make the
+ * server buffer an arbitrary body before the handler reads it.
+ */
+export const coordinationBodyLimit = bodyLimit({
+  maxSize: 16 * 1024,
+  onError: (c) =>
+    c.json({ code: "INVALID_REQUEST", message: "finalize body exceeds the size limit" }, 413),
+});
+
+/**
  * Map a stable {@link DeployErrorCode} to its HTTP status (plan 003 F4). The
  * legacy `deployResponse` path keeps its blanket 400; the upload routes use this
  * richer mapping so size caps surface as 413, an invalid/foreign handle as 404

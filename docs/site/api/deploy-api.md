@@ -213,8 +213,9 @@ Authorization: Bearer cd_...
 
 An optional JSON body `{ "expectedPublicationToken": "…", "releaseId": "…" }` refreshes
 the token captured at begin (after you reassessed a conflict) or repeats the release;
-a `releaseId` that differs from begin's is `400 RELEASE_ID_MISMATCH`, and a body that
-is not a JSON object is `400 INVALID_REQUEST`. Returns the same `DeployResult` as
+a `releaseId` that differs from begin's is `400 RELEASE_ID_MISMATCH`, a body that
+is not a JSON object is `400 INVALID_REQUEST`, and a body over 16 KB is
+`413 INVALID_REQUEST`. Returns the same `DeployResult` as
 `PUT .../deploy`; the version's `source` is `"upload"`. Finalize re-checks that the actor who began the upload is still active
 and still an owner or editor of the canvas (else `404 UPLOAD_HANDLE_INVALID`). The
 handle is **single-use** and lives 15 minutes from begin (then `400 UPLOAD_EXPIRED`
@@ -550,7 +551,7 @@ these on every deploy path, including the MCP deploy tools:
 | `RELEASE_NOT_CURRENT` | `409` | `releaseId` is on a kept version that is not live; the body's `release` names it and `current` the live publication |
 | `INVALID_RELEASE_ID` | `400` | `releaseId` is empty, longer than 200 characters, or contains control characters |
 | `RELEASE_ID_MISMATCH` | `400` | The `releaseId` given at finalize differs from the one captured at begin |
-| `INVALID_REQUEST` | `400` | A coordination field is not a string, or the optional finalize body is not a JSON object |
+| `INVALID_REQUEST` | `400` | A coordination field is not a string, or the optional finalize body is not a JSON object (`413` when that body exceeds 16 KB) |
 
 The staged-upload routes map the same shape to richer statuses:
 
