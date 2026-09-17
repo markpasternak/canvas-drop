@@ -188,6 +188,8 @@ caller belongs to, each with the role that grant carries here (`viewer` or
 memberships, and only teams granted on this canvas, so a page never learns about
 unrelated teams. Owners and members with no team grant get `[]`; so do legacy
 guest sessions. Team names can be renamed, so branch on the `id` where it matters.
+A team's `role` is reported as it applies to you on this canvas, so it never exceeds
+`canvasRole`; `canvasRole` is the authoritative role.
 
 ```js
 const { teams } = await canvasdrop.me();

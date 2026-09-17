@@ -260,7 +260,11 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
     // role each grant carries here — so canvas code can shape its UI per team. Only the
     // caller's own memberships, and only teams granted on this canvas: unrelated
     // memberships never reach the page. A UI hint like `permissions`; every server
-    // operation rechecks authority.
+    // operation rechecks authority. A team's role is reported as it applies to THIS
+    // caller: `canvasRole` is authoritative, so an editor grant that does not lift the
+    // caller's role here (the editor predicate also requires the canvas's home org under
+    // active tenancy, a personal team's grant does not) reads as `viewer`.
+    const editorHere = canvasRole === "owner" || canvasRole === "editor";
     const teams =
       kind === "member" && deps.teams
         ? (
@@ -270,7 +274,11 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
               c.get("orgIds") ?? new Set<string>(),
             )
           )
-            .map((grant) => ({ id: grant.teamId, name: grant.teamName, role: grant.role }))
+            .map((grant) => ({
+              id: grant.teamId,
+              name: grant.teamName,
+              role: editorHere ? grant.role : ("viewer" as const),
+            }))
             .sort((a, b) => a.name.localeCompare(b.name))
         : [];
     c.header("Cache-Control", "private, no-store");
