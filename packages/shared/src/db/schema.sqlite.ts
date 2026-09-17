@@ -9,6 +9,7 @@ import type {
   ConnectionMethod,
   GuestInviteState,
   McpTokenKind,
+  PublicConnectionPolicy,
   UsageEventType,
   VersionSource,
   VersionStatus,
@@ -369,6 +370,10 @@ export const canvasConnections = sqliteTable(
       .notNull()
       .references(() => users.id),
     createdAt: c.epochMs("created_at").notNull(),
+    publicPolicy: c.json("public_policy").$type<PublicConnectionPolicy>(),
+    publicRevision: c.text("public_revision"),
+    publicDay: c.int("public_day").notNull().default(0),
+    publicRequests: c.int("public_requests").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.canvasId, t.connectionId] }),

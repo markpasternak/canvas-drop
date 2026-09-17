@@ -1,10 +1,12 @@
 import {
   type CanvasConnection,
   type ConnectionProfile,
+  type NewCanvasConnection,
+  type PublicConnectionPolicy,
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 export const CONNECTION_KEY_UNIQUE = {
@@ -21,6 +23,9 @@ export interface GrantedCanvasSummary {
   id: string;
   slug: string;
   title: string;
+  publicPolicy: PublicConnectionPolicy | null;
+  publicDay: number;
+  publicRequests: number;
 }
 
 /** Dual-dialect persistence for reusable profiles and explicit canvas grants. */
@@ -103,7 +108,7 @@ export function connectionsRepository(client: DbClient) {
 
     countGrants,
 
-    async attach(grant: CanvasConnection): Promise<boolean> {
+    async attach(grant: NewCanvasConnection): Promise<boolean> {
       const rows = (await db
         .insert(grants)
         .values(grant)
@@ -117,6 +122,48 @@ export function connectionsRepository(client: DbClient) {
         .delete(grants)
         .where(and(eq(grants.connectionId, connectionId), eq(grants.canvasId, canvasId)))
         .returning({ canvasId: grants.canvasId })) as Array<{ canvasId: string }>;
+      return rows.length === 1;
+    },
+
+    async setPublicPolicy(
+      connectionId: string,
+      canvasId: string,
+      publicPolicy: PublicConnectionPolicy | null,
+      publicRevision: string,
+    ): Promise<boolean> {
+      const rows = await db
+        .update(grants)
+        .set({ publicPolicy, publicRevision })
+        .where(and(eq(grants.connectionId, connectionId), eq(grants.canvasId, canvasId)))
+        .returning({ canvasId: grants.canvasId });
+      return rows.length === 1;
+    },
+
+    /** One atomic admission, bounded across concurrent requests and process restarts.
+     * A changed/revoked policy invalidates in-flight admissions using its revision. */
+    async consumePublicRequest(
+      connectionId: string,
+      canvasId: string,
+      revision: string,
+      day: number,
+      maximum: number,
+    ): Promise<boolean> {
+      const rows = await db
+        .update(grants)
+        .set({
+          publicDay: day,
+          publicRequests: sql`case when ${grants.publicDay} = ${day} then ${grants.publicRequests} + 1 else 1 end`,
+        })
+        .where(
+          and(
+            eq(grants.connectionId, connectionId),
+            eq(grants.canvasId, canvasId),
+            eq(grants.publicRevision, revision),
+            isNotNull(grants.publicPolicy),
+            or(ne(grants.publicDay, day), lt(grants.publicRequests, maximum)),
+          ),
+        )
+        .returning({ canvasId: grants.canvasId });
       return rows.length === 1;
     },
 
@@ -142,7 +189,14 @@ export function connectionsRepository(client: DbClient) {
 
     async listCanvases(connectionId: string): Promise<GrantedCanvasSummary[]> {
       return (await db
-        .select({ id: canvases.id, slug: canvases.slug, title: canvases.title })
+        .select({
+          id: canvases.id,
+          slug: canvases.slug,
+          title: canvases.title,
+          publicPolicy: grants.publicPolicy,
+          publicDay: grants.publicDay,
+          publicRequests: grants.publicRequests,
+        })
         .from(grants)
         .innerJoin(canvases, eq(grants.canvasId, canvases.id))
         .where(eq(grants.connectionId, connectionId))

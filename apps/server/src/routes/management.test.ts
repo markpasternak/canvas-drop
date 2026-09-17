@@ -248,6 +248,7 @@ describe("managementRoutes", () => {
           allowedMethods: ["GET"],
           available: false,
           unavailableReason: "encryption_key_unavailable",
+          publicPolicy: null,
         },
       ],
     });

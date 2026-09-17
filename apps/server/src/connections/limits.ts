@@ -1,6 +1,9 @@
 import { inProcessRateLimitStore } from "../http/rate-limit.js";
 
-export type ConnectionLimitCode = "CONNECTION_RATE_LIMIT" | "CONNECTION_LIMIT";
+export type ConnectionLimitCode =
+  | "CONNECTION_RATE_LIMIT"
+  | "CONNECTION_LIMIT"
+  | "CONNECTION_DAILY_LIMIT";
 
 export class ConnectionLimitError extends Error {
   constructor(
@@ -8,9 +11,11 @@ export class ConnectionLimitError extends Error {
     readonly retryAfterSeconds: number,
   ) {
     super(
-      code === "CONNECTION_RATE_LIMIT"
-        ? "connection rate limit exceeded"
-        : "connection concurrency limit exceeded",
+      code === "CONNECTION_DAILY_LIMIT"
+        ? "public connection daily request limit exceeded"
+        : code === "CONNECTION_RATE_LIMIT"
+          ? "connection rate limit exceeded"
+          : "connection concurrency limit exceeded",
     );
     this.name = "ConnectionLimitError";
   }

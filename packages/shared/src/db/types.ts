@@ -35,6 +35,13 @@ import type {
 /** JSON value stored in `jsonb` (Postgres) / TEXT-json (SQLite) columns. */
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 
+/** Explicit administrator opt-in for a single canvas/profile grant. */
+export interface PublicConnectionPolicy {
+  paths: string[];
+  methods: ConnectionMethod[];
+  requestsPerDay: number;
+}
+
 /**
  * Shared row types the repository layer codes against. Derived from the
  * Postgres schema as the canonical shape; `schema.test.ts` asserts the SQLite

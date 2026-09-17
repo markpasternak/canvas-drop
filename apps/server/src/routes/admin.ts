@@ -573,6 +573,26 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     }
   });
 
+  app.put("/connections/:id/canvases/:canvasId/public", sameOrigin, async (c) => {
+    const body = z
+      .object({ policy: z.unknown() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      return c.json(
+        await deps.connections.setPublicPolicy(
+          c.get("user").id,
+          c.req.param("id"),
+          c.req.param("canvasId"),
+          body.data.policy,
+        ),
+      );
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
   app.delete("/connections/:id/canvases/:canvasId", sameOrigin, async (c) => {
     try {
       return c.json(

@@ -76,4 +76,31 @@ describe.each(DIALECTS)("connectionsRepository [%s]", (dialect) => {
     await expect(repo.findGranted(canvas.id, "stocks")).resolves.toBeNull();
     await expect(repo.findById(profile.id)).resolves.toBeNull();
   });
+
+  it("defaults grants to private and atomically bounds public requests across repository instances", async () => {
+    const { repo, user, canvas, profile } = await fixture();
+    await repo.create(profile);
+    await repo.attach({
+      canvasId: canvas.id,
+      connectionId: profile.id,
+      createdBy: user.id,
+      createdAt: 2,
+    });
+    expect((await repo.findGranted(canvas.id, profile.key))?.grant.publicPolicy).toBeNull();
+    const policy = { paths: ["/quote"], methods: ["GET" as const], requestsPerDay: 3 };
+    await repo.setPublicPolicy(profile.id, canvas.id, policy, "v1");
+    const another = connectionsRepository(client);
+    const consume = (revision = "v1", day = 20) =>
+      another.consumePublicRequest(profile.id, canvas.id, revision, day, 3);
+    const results = await Promise.all(Array.from({ length: 10 }, () => consume()));
+    expect(results.filter(Boolean)).toHaveLength(3);
+    expect(await consume("stale", 21)).toBe(false);
+    expect(await consume("v1", 21)).toBe(true);
+    await repo.setPublicPolicy(profile.id, canvas.id, null, "v2");
+    expect(await consume("v1", 22)).toBe(false);
+    await repo.setPublicPolicy(profile.id, canvas.id, policy, "v3");
+    expect(await consume("v3", 21)).toBe(true);
+    expect(await consume("v3", 21)).toBe(true);
+    expect(await consume("v3", 21)).toBe(false);
+  });
 });

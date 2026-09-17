@@ -1,4 +1,8 @@
-import type { ConnectionMethod, ConnectionProfile } from "@canvas-drop/shared/db";
+import type {
+  ConnectionMethod,
+  ConnectionProfile,
+  PublicConnectionPolicy,
+} from "@canvas-drop/shared/db";
 import { v7 as uuidv7 } from "uuid";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
@@ -7,6 +11,8 @@ import {
   type ConnectionsRepository,
 } from "../db/repositories/connections.js";
 import { isUniqueViolation } from "../db/unique-violation.js";
+import { ConnectionLimitError } from "./limits.js";
+import { validatePublicPolicy } from "./public-policy.js";
 import type { SecretCipher } from "./secret-cipher.js";
 import { ConnectionTransportError, defaultConnectionTransport } from "./transport.js";
 import {
@@ -59,6 +65,7 @@ export interface CanvasConnectionView {
   origin: string;
   allowedMethods: ConnectionMethod[];
   available: boolean;
+  publicPolicy: PublicConnectionPolicy | null;
   unavailableReason: "backend_off" | "disabled" | "encryption_key_unavailable" | null;
 }
 
@@ -129,7 +136,11 @@ export function connectionService(deps: {
     };
   };
 
-  const managerView = (profile: ConnectionProfile, backendEnabled = true): CanvasConnectionView => {
+  const managerView = (
+    profile: ConnectionProfile,
+    backendEnabled = true,
+    publicPolicy: PublicConnectionPolicy | null = null,
+  ): CanvasConnectionView => {
     const keyUnavailable = !!profile.protectedHeadersEnvelope && !deps.cipher.available;
     let unavailableReason: CanvasConnectionView["unavailableReason"] = null;
     if (keyUnavailable) unavailableReason = "encryption_key_unavailable";
@@ -141,6 +152,7 @@ export function connectionService(deps: {
       origin: profile.origin,
       allowedMethods: profile.allowedMethods,
       available: backendEnabled && profile.enabled && !keyUnavailable,
+      publicPolicy,
       unavailableReason,
     };
   };
@@ -371,17 +383,81 @@ export function connectionService(deps: {
       return deps.repository.listCanvases(id);
     },
 
+    /** Admin-only grant mutation; counters survive policy edits and disable/re-enable. */
+    async setPublicPolicy(actorId: string, id: string, canvasId: string, input: unknown) {
+      return withProfileMutation(id, async () => {
+        const profile = await find(id);
+        const publicPolicy = validatePublicPolicy(input, profile.allowedMethods);
+        if (!(await deps.repository.setPublicPolicy(id, canvasId, publicPolicy, uuidv7()))) {
+          throw new ConnectionServiceError("CONNECTION_NOT_GRANTED", "connection is not granted");
+        }
+        deps.audit.recordAudit({
+          actorId,
+          action: "connection_public_policy_update",
+          targetType: "canvas",
+          targetId: canvasId,
+          meta: {
+            connectionId: id,
+            key: profile.key,
+            publicPolicy: publicPolicy
+              ? {
+                  paths: publicPolicy.paths,
+                  methods: publicPolicy.methods,
+                  requestsPerDay: publicPolicy.requestsPerDay,
+                }
+              : null,
+          },
+        });
+        return { publicPolicy };
+      });
+    },
+
+    async consumePublicRequest(
+      canvasId: string,
+      profile: {
+        id: string;
+        publicRevision: string | null;
+        publicPolicy: PublicConnectionPolicy | null;
+      },
+    ) {
+      const now = Date.now();
+      const day = Math.floor(now / 86_400_000);
+      if (
+        !profile.publicPolicy ||
+        !profile.publicRevision ||
+        !(await deps.repository.consumePublicRequest(
+          profile.id,
+          canvasId,
+          profile.publicRevision,
+          day,
+          profile.publicPolicy.requestsPerDay,
+        ))
+      ) {
+        throw new ConnectionLimitError(
+          "CONNECTION_DAILY_LIMIT",
+          Math.max(1, Math.ceil(((day + 1) * 86_400_000 - now) / 1000)),
+        );
+      }
+    },
+
     async listForCanvas(canvasId: string): Promise<CanvasConnectionView[]> {
       const canvas = await deps.canvases.findById(canvasId);
-      return (await deps.repository.listForCanvas(canvasId)).map(({ profile }) =>
-        managerView(profile, canvas?.backendEnabled ?? false),
+      return (await deps.repository.listForCanvas(canvasId)).map(({ profile, grant }) =>
+        managerView(profile, canvas?.backendEnabled ?? false, grant.publicPolicy),
       );
     },
 
-    /** Internal runtime projection. Never serialize this result: it contains credentials. */
-    async resolveRuntime(canvasId: string, key: string) {
+    /** Availability never needs to decrypt credentials or disclose non-public grants. */
+    async runtimeAvailability(canvasId: string, key: string) {
       const granted = await deps.repository.findGranted(canvasId, key);
-      if (!granted) {
+      if (!granted) return null;
+      return managerView(granted.profile, true, granted.grant.publicPolicy);
+    },
+
+    /** Internal runtime projection. Never serialize this result: it contains credentials. */
+    async resolveRuntime(canvasId: string, key: string, publicOnly = false) {
+      const granted = await deps.repository.findGranted(canvasId, key);
+      if (!granted || (publicOnly && !granted.grant.publicPolicy)) {
         throw new ConnectionServiceError("CONNECTION_NOT_GRANTED", "connection is not granted");
       }
       if (!granted.profile.enabled) {
@@ -398,6 +474,8 @@ export function connectionService(deps: {
         key: granted.profile.key,
         origin: granted.profile.origin,
         allowedMethods: granted.profile.allowedMethods,
+        publicPolicy: granted.grant.publicPolicy,
+        publicRevision: granted.grant.publicRevision,
         protectedHeaders: granted.profile.protectedHeadersEnvelope
           ? deps.cipher.decrypt(granted.profile.id, granted.profile.protectedHeadersEnvelope)
           : {},
