@@ -162,6 +162,23 @@ describe("errorFromResponse", () => {
 });
 
 describe("createClient", () => {
+  it("checks named connection availability without calling identity", async () => {
+    const fetch = fetchMock().mockResolvedValueOnce(
+      res(200, { invoke: true, methods: ["POST"], publicAccess: true }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    expect(await client.connections.status("typesafe")).toEqual({
+      invoke: true,
+      methods: ["POST"],
+      publicAccess: true,
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://canvases.example.com/v1/c/foo/connection-status/typesafe",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    expect(() => client.connections.status("../me")).toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it("connections.fetch returns upstream success and error responses without flattening them", async () => {
     const fetch = fetchMock()
       .mockResolvedValueOnce(

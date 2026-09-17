@@ -10,6 +10,7 @@ import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Field } from "../components/Field.js";
+import { PublicConnectionGrant } from "../components/PublicConnectionGrant.js";
 import { InlineNotice, MetaGrid, MetaItem, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import {
@@ -257,25 +258,33 @@ function GrantEditor({ profile }: { profile: AdminConnection }) {
       ) : (
         <ul className="space-y-2">
           {attached.map((canvas) => (
-            <li key={canvas.id} className="flex items-center justify-between gap-3 text-sm">
-              <span className="min-w-0 truncate">
-                {canvas.title} <span className="font-mono text-xs text-muted">/{canvas.slug}</span>
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                loading={detach.isPending && detach.variables?.canvasId === canvas.id}
-                onClick={async () => {
-                  try {
-                    await detach.mutateAsync({ id: profile.id, canvasId: canvas.id });
-                    toast(`Revoked ${profile.label} from ${canvas.title}`);
-                  } catch (error) {
-                    toast(errorHint(error), "error");
-                  }
-                }}
-              >
-                Revoke
-              </Button>
+            <li key={canvas.id} className="space-y-2 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate">
+                  {canvas.title}{" "}
+                  <span className="font-mono text-xs text-muted">/{canvas.slug}</span>
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={detach.isPending && detach.variables?.canvasId === canvas.id}
+                  onClick={async () => {
+                    try {
+                      await detach.mutateAsync({ id: profile.id, canvasId: canvas.id });
+                      toast(`Revoked ${profile.label} from ${canvas.title}`);
+                    } catch (error) {
+                      toast(errorHint(error), "error");
+                    }
+                  }}
+                >
+                  Revoke
+                </Button>
+              </div>
+              <PublicConnectionGrant
+                key={JSON.stringify(canvas.publicPolicy)}
+                profile={profile}
+                canvas={canvas}
+              />
             </li>
           ))}
         </ul>

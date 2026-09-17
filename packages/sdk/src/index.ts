@@ -521,6 +521,10 @@ export interface ConnectionRequestInit {
   signal?: RequestInit["signal"];
 }
 export interface ConnectionsNamespace {
+  /** Minimal availability without requiring identity access (works on public canvases). */
+  status(
+    profile: string,
+  ): Promise<{ invoke: boolean; methods: ConnectionMethod[]; publicAccess: boolean }>;
   /** Fetch a relative path through an admin-approved profile. Upstream HTTP errors
    *  are returned as Response; Canvas Drop policy/platform errors are thrown. */
   fetch(profile: string, path: string, init?: ConnectionRequestInit): Promise<Response>;
@@ -1162,6 +1166,12 @@ export function createClient(options: ClientOptions): CanvasdropClient {
   const shared = kvNamespace(opts, "/kv");
   const base = (p: string) => `${opts.context.apiBase}/v1/c/${opts.context.slug}${p}`;
   const connections: ConnectionsNamespace = {
+    status(profile) {
+      if (!/^[a-z][a-z0-9_-]{0,62}$/.test(profile)) {
+        throw new CanvasdropError("INVALID_CONNECTION", 0, "invalid connection profile key");
+      }
+      return request(opts, "GET", `/connection-status/${profile}`);
+    },
     async fetch(profile, path, init = {}) {
       if (!/^[a-z][a-z0-9_-]{0,62}$/.test(profile)) {
         throw new CanvasdropError("INVALID_CONNECTION", 0, "invalid connection profile key");

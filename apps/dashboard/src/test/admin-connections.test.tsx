@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
-import type { AdminConnection } from "../lib/api.js";
+import type { AdminConnection, PublicConnectionPolicy } from "../lib/api.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
 
@@ -76,6 +76,48 @@ afterEach(() => {
 });
 
 describe("admin connections", () => {
+  it("requires explicit endpoint, method and cap before enabling a public grant, and can revoke it", async () => {
+    let publicPolicy: PublicConnectionPolicy | null = null;
+    const calls = mockFetch({
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/connections": () => json({ connections: [PROFILE] }),
+      "GET /api/admin/connections/health": () => json({ sinceMs: 1, profiles: [] }),
+      "GET /api/admin/canvases": () => json({ canvases: [], total: 0 }),
+      "GET /api/admin/connections/p1/canvases": () =>
+        json({
+          canvases: [
+            {
+              id: "c1",
+              slug: "margin",
+              title: "Margin",
+              publicPolicy,
+              publicDay: 0,
+              publicRequests: 0,
+            },
+          ],
+        }),
+      "GET /api/admin/connections/p1/events": () => json({ events: [], limit: 25, offset: 0 }),
+      "PUT /api/admin/connections/p1/canvases/c1/public": (init) => {
+        publicPolicy = JSON.parse(String(init?.body)).policy;
+        return json({ publicPolicy });
+      },
+    });
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Manage" }));
+    expect(await screen.findByText("Public access off")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Configure public access" }));
+    expect(calls.filter((call) => call.method === "PUT")).toHaveLength(0);
+    await user.type(screen.getByLabelText("Public endpoint paths"), "/quote");
+    await user.clear(screen.getByLabelText("Public requests per day"));
+    await user.type(screen.getByLabelText("Public requests per day"), "2000");
+    await user.click(screen.getByRole("button", { name: "Enable public access" }));
+    expect(await screen.findByText("Public access enabled")).toBeInTheDocument();
+    expect(publicPolicy).toEqual({ paths: ["/quote"], methods: ["GET"], requestsPerDay: 2000 });
+    await user.click(screen.getByRole("button", { name: "Disable public access" }));
+    expect(await screen.findByText("Public access off")).toBeInTheDocument();
+    expect(publicPolicy).toBeNull();
+  });
   it("shows observed failures, named canvases and a bounded diagnostic outcome", async () => {
     const calls = mockFetch({
       "GET /api/me": () => json(ME),

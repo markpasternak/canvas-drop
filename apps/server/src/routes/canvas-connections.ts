@@ -1,9 +1,11 @@
+import { createHmac } from "node:crypto";
 import { type Config, parseRuntimePolicy, rightAllows } from "@canvas-drop/shared";
 import type { ConnectionMethod, Json } from "@canvas-drop/shared/db";
 import { type Context, Hono } from "hono";
 import type { StatusCode } from "hono/utils/http-status";
 import { permissionDenied, runtimeAudienceAllows } from "../canvas/runtime-permissions.js";
 import { ConnectionLimitError, type ConnectionLimits } from "../connections/limits.js";
+import { isPublicConnectionPath } from "../connections/public-policy.js";
 import { SecretCipherError } from "../connections/secret-cipher.js";
 import { type ConnectionService, ConnectionServiceError } from "../connections/service.js";
 import {
@@ -17,6 +19,53 @@ import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
 
 export const CONNECTION_RESPONSE_MARKER = "x-canvas-drop-connection-response";
+
+/** The sole exception to static-only runtime access. Both handlers below still
+ * require a live, explicit public grant; every other primitive stays closed. */
+export function isConnectionRuntimeRoute(c: Context<AppEnv>): boolean {
+  const path = c.req.path.slice(`/v1/c/${c.req.param("slug")}`.length);
+  return (
+    /^\/connections\/[a-z][a-z0-9_-]{0,62}(?:\/.*)?$/.test(path) ||
+    (c.req.method === "GET" && /^\/connection-status\/[a-z][a-z0-9_-]{0,62}$/.test(path))
+  );
+}
+
+function audienceAllows(c: Context<AppEnv>, key: string): boolean {
+  const canvas = requireCanvas(c);
+  const policy = parseRuntimePolicy(canvas.runtimePolicy).connections[key];
+  return (
+    canvas.backendEnabled &&
+    (policy
+      ? rightAllows(policy.audience, c.get("runtimeRole") ?? "viewer", c.get("user")?.id ?? "")
+      : runtimeAudienceAllows(c, canvas.connectionsAudience))
+  );
+}
+
+export function canvasConnectionStatusRoutes(deps: CanvasConnectionsDeps) {
+  const app = new Hono<AppEnv>();
+  app.get("/:key", async (c) => {
+    c.header("Cache-Control", "private, no-store");
+    const canvas = requireCanvas(c);
+    const key = c.req.param("key");
+    try {
+      const profile = await deps.service.runtimeAvailability(canvas.id, key);
+      const publicAccess = c.get("staticOnly") === true;
+      const setting = parseRuntimePolicy(canvas.runtimePolicy).connections[key];
+      const methods =
+        profile?.available && audienceAllows(c, key)
+          ? profile.allowedMethods.filter(
+              (method) =>
+                (!setting?.methods || setting.methods.includes(method)) &&
+                (!publicAccess || profile.publicPolicy?.methods.includes(method)),
+            )
+          : [];
+      return c.json({ invoke: methods.length > 0, methods, publicAccess });
+    } catch (error) {
+      return platformResponse(c, runtimeError(error));
+    }
+  });
+  return app;
+}
 
 // Browsers attach User-Agent to every fetch but do not let canvas JavaScript author it.
 // It is transport metadata, not a caller override of an admin-protected upstream header.
@@ -63,6 +112,7 @@ function runtimeError(error: unknown): RuntimeErrorView {
   if (error instanceof ConnectionTransportError) {
     const statuses: Record<string, number> = {
       INVALID_BODY: 400,
+      REQUEST_TIMEOUT: 408,
       REQUEST_TOO_LARGE: 413,
       METHOD_NOT_ALLOWED: 405,
       DESTINATION_BLOCKED: 403,
@@ -113,14 +163,35 @@ function callerHeaders(request: Request): [string, string][] {
 async function readRequestBody(
   request: Request,
   maxBytes: number,
+  timeoutMs?: number,
 ): Promise<Uint8Array | undefined> {
   if (!request.body) return undefined;
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let stopped: ConnectionTransportError | undefined;
+  const stop = (error: ConnectionTransportError) => {
+    stopped ??= error;
+    void reader.cancel().catch(() => {});
+  };
+  const abort = () =>
+    stop(new ConnectionTransportError("INVALID_BODY", "connection request was cancelled"));
+  const timer =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(
+          () =>
+            stop(
+              new ConnectionTransportError("REQUEST_TIMEOUT", "connection request body timed out"),
+            ),
+          timeoutMs,
+        );
+  request.signal.addEventListener("abort", abort, { once: true });
+  if (request.signal.aborted) abort();
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      if (stopped) throw stopped;
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
@@ -133,6 +204,8 @@ async function readRequestBody(
       chunks.push(value);
     }
   } finally {
+    clearTimeout(timer);
+    request.signal.removeEventListener("abort", abort);
     reader.releaseLock();
   }
   const body = new Uint8Array(total);
@@ -151,7 +224,14 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
   const handle = async (c: Context<AppEnv>) => {
     const startedAt = Date.now();
     const canvas = requireCanvas(c);
-    const user = c.get("user");
+    const publicAccess = c.get("staticOnly") === true;
+    const actorId = publicAccess
+      ? `public:${createHmac("sha256", deps.config.sessionSecret)
+          .update(
+            `${canvas.id}\0${Math.floor(Date.now() / 86_400_000)}\0${c.get("clientIp") ?? "unknown"}`,
+          )
+          .digest("hex")}`
+      : c.get("user").id;
     const key = c.req.param("key") ?? "";
     let profileId: string | undefined;
     let origin: string | undefined;
@@ -176,12 +256,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
         );
       }
       const policy = parseRuntimePolicy(canvas.runtimePolicy).connections[key];
-      if (
-        policy
-          ? !rightAllows(policy.audience, c.get("runtimeRole") ?? "viewer", user.id)
-          : !runtimeAudienceAllows(c, canvas.connectionsAudience)
-      )
-        return permissionDenied(c, "use outbound connections");
+      if (!audienceAllows(c, key)) return permissionDenied(c, "use outbound connections");
       if (policy?.methods && !policy.methods.includes(method as ConnectionMethod))
         return permissionDenied(c, "use this connection method");
       if (!(CONNECTION_METHODS as readonly string[]).includes(method)) {
@@ -190,9 +265,25 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
           "connection method is not supported",
         );
       }
-      const profile = await deps.service.resolveRuntime(canvas.id, key);
+      const profile = await deps.service.resolveRuntime(canvas.id, key, publicAccess);
       profileId = profile.id;
       origin = profile.origin;
+      const routePrefix = `/v1/c/${c.req.param("slug")}/connections/${key}`;
+      // Hono decodes req.path. Validate the original encoded URL before forwarding.
+      const requestUrl = new URL(c.req.url);
+      const relativePath =
+        (publicAccess ? requestUrl.pathname : c.req.path).slice(routePrefix.length) || "/";
+      const search = requestUrl.search;
+      if (
+        publicAccess &&
+        (!profile.publicPolicy ||
+          search ||
+          !isPublicConnectionPath(relativePath) ||
+          !profile.publicPolicy.paths.includes(relativePath) ||
+          !profile.publicPolicy.methods.includes(method as ConnectionMethod))
+      ) {
+        return permissionDenied(c, "use this public connection endpoint");
+      }
       if (!profile.allowedMethods.includes(method as ConnectionMethod)) {
         throw new ConnectionTransportError(
           "METHOD_NOT_ALLOWED",
@@ -200,7 +291,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
         );
       }
       admission = deps.limits.acquire({
-        actorId: user.id,
+        actorId,
         canvasId: canvas.id,
         profileId: profile.id,
       });
@@ -217,16 +308,18 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
           "connection request body is too large",
         );
       }
+      // Charge public admission before accepting a body so unfinished uploads also
+      // consume the finite grant budget. The read deadline bounds occupied slots.
+      if (publicAccess) await deps.service.consumePublicRequest(canvas.id, profile);
       const rawBody =
         method === "GET" || method === "HEAD"
           ? undefined
-          : await readRequestBody(c.req.raw, deps.config.connections.maxBodyBytes);
+          : await readRequestBody(
+              c.req.raw,
+              deps.config.connections.maxBodyBytes,
+              publicAccess ? deps.config.connections.timeoutMs : undefined,
+            );
       requestBytes = rawBody?.byteLength ?? 0;
-      const routePrefix = `/v1/c/${c.req.param("slug")}/connections/${key}`;
-      const relativePath = c.req.path.startsWith(routePrefix)
-        ? c.req.path.slice(routePrefix.length) || "/"
-        : "/";
-      const search = new URL(c.req.url).search;
       const result = await deps.transport.fetch({
         origin: profile.origin,
         path: `${relativePath}${search}`,
@@ -237,7 +330,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
         body: rawBody,
         maxResponseBytes: deps.config.connections.maxResponseBytes,
         timeoutMs: deps.config.connections.timeoutMs,
-        maxRedirects: deps.config.connections.maxRedirects,
+        maxRedirects: publicAccess ? 0 : deps.config.connections.maxRedirects,
         maxUrlBytes: deps.config.connections.maxUrlBytes,
         maxCallerHeaders: deps.config.connections.maxCallerHeaders,
         maxCallerHeaderBytes: deps.config.connections.maxCallerHeaderBytes,
@@ -266,7 +359,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
       if (origin) meta.origin = origin;
       if (upstreamStatus !== undefined) meta.upstreamStatus = upstreamStatus;
       void deps.usage
-        .record({ canvasId: canvas.id, userId: user.id, type: "connection_op", meta })
+        .record({ canvasId: canvas.id, userId: actorId, type: "connection_op", meta })
         .catch(() => {});
     }
   };

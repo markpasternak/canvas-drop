@@ -5,9 +5,12 @@ import { buildApp } from "./app.js";
 import { createAuditLog } from "./audit/audit-log.js";
 import { devStrategy } from "./auth/dev.js";
 import { sessionService } from "./auth/session.js";
+import { createSecretCipher } from "./connections/secret-cipher.js";
+import { connectionService } from "./connections/service.js";
 import type { DbClient } from "./db/factory.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
+import { connectionsRepository } from "./db/repositories/connections.js";
 import { draftsRepository } from "./db/repositories/drafts.js";
 import { sessionsRepository } from "./db/repositories/sessions.js";
 import { usersRepository } from "./db/repositories/users.js";
@@ -480,6 +483,44 @@ describe("buildApp", () => {
     });
     expect(api.status).toBe(403);
     expect((await jsonOf<{ code: string }>(api)).code).toBe("STATIC_ONLY");
+    const service = connectionService({
+      repository: connectionsRepository(client),
+      canvases,
+      cipher: createSecretCipher(undefined),
+      audit: createAuditLog(auditRepository(client), silent),
+    });
+    const profile = await service.create(owner.id, {
+      key: "public-api",
+      label: "Public API",
+      origin: "https://api.example.com",
+      allowedMethods: ["POST"],
+    });
+    await service.attach(owner.id, profile.id, cv.id);
+    await service.setPublicPolicy(owner.id, profile.id, cv.id, {
+      paths: ["/analyze"],
+      methods: ["POST"],
+      requestsPerDay: 10,
+    });
+    await canvases.updateCapabilities(cv.id, {
+      backendEnabled: true,
+      connectionsAudience: "viewers",
+    });
+    const status = await a.request("/v1/c/public-demo/connection-status/public-api", {
+      headers: { host: "canvases.example.com", origin: "https://public-demo.canvases.example.com" },
+    });
+    expect(status.status).toBe(200);
+    expect(await status.json()).toEqual({ invoke: true, methods: ["POST"], publicAccess: true });
+    expect(status.headers.get("access-control-allow-origin")).toBe(
+      "https://public-demo.canvases.example.com",
+    );
+    await canvases.setDisabled(cv.id, "test");
+    expect(
+      (
+        await a.request("/v1/c/public-demo/connection-status/public-api", {
+          headers: { host: "canvases.example.com" },
+        })
+      ).status,
+    ).toBeGreaterThanOrEqual(400);
   });
 
   it("oidc: a PASSWORD-PROTECTED public_link shows its password gate to an anonymous visitor (not an org sign-in redirect)", async () => {
