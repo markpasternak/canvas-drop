@@ -365,6 +365,29 @@ export function teamsRepository(client: DbClient) {
         teamName: string;
       }>;
     },
+
+    /** The teams on ONE canvas's people-and-teams list the user belongs to, with each
+     *  grant's role — the runtime identity's `teams` field. Same membership-mandatory
+     *  live-org clause as `teamMatch`, so a stale membership row never surfaces a team
+     *  the user can no longer use. */
+    async listCanvasTeamGrantsForUser(
+      canvasId: string,
+      userId: string,
+      viewerOrgIds: Set<string>,
+    ): Promise<Array<{ teamId: string; teamName: string; role: AccessRole }>> {
+      return (await db
+        .selectDistinct({ teamId: teamsT.id, teamName: teamsT.name, role: canvasTeamsT.role })
+        .from(canvasTeamsT)
+        .innerJoin(membersT, eq(membersT.teamId, canvasTeamsT.teamId))
+        .innerJoin(teamsT, eq(teamsT.id, canvasTeamsT.teamId))
+        .where(
+          and(
+            eq(canvasTeamsT.canvasId, canvasId),
+            eq(membersT.userId, userId),
+            accessOrgClause(viewerOrgIds),
+          ),
+        )) as Array<{ teamId: string; teamName: string; role: AccessRole }>;
+    },
   };
 }
 

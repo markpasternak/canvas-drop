@@ -60,7 +60,11 @@ export interface CanvasApiDeps {
    *  no one — fail-closed). */
   teams?: Pick<
     TeamsRepository,
-    "teamMatch" | "setCanvasTeams" | "listCanvasTeamGrants" | "findByIds"
+    | "teamMatch"
+    | "setCanvasTeams"
+    | "listCanvasTeamGrants"
+    | "findByIds"
+    | "listCanvasTeamGrantsForUser"
   >;
   kv: KvRepository;
   files: FilesService;
@@ -252,6 +256,23 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
     permissions.canUseConnections = Object.values(connectionPermissions).some(
       (value) => value.invoke && value.methods.length > 0,
     );
+    // Teams on THIS canvas's people-and-teams list that the caller belongs to, with the
+    // role each grant carries here — so canvas code can shape its UI per team. Only the
+    // caller's own memberships, and only teams granted on this canvas: unrelated
+    // memberships never reach the page. A UI hint like `permissions`; every server
+    // operation rechecks authority.
+    const teams =
+      kind === "member" && deps.teams
+        ? (
+            await deps.teams.listCanvasTeamGrantsForUser(
+              canvas.id,
+              u.id,
+              c.get("orgIds") ?? new Set<string>(),
+            )
+          )
+            .map((grant) => ({ id: grant.teamId, name: grant.teamName, role: grant.role }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        : [];
     c.header("Cache-Control", "private, no-store");
     return c.json({
       id: u.id,
@@ -260,6 +281,7 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       avatarUrl: u.avatarUrl,
       kind,
       canvasRole,
+      teams,
       permissions,
       resources: {
         collections: dataPermissions(policy.collections, permissions.canReadSharedData),

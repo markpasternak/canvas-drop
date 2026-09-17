@@ -329,7 +329,7 @@ for the behavior changes to inventory before an approved deployment.
 12. Message history / replay, KV-backed sync, server-authoritative rooms [later — explicit non-goal for v1, keeps the surface thin (D22)]
 
 ### 6.8 Identity primitive
-1. `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind, canvasRole, permissions }` (`kind`: `member` | `guest`) [v1]
+1. `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind, canvasRole, teams, permissions }` (`kind`: `member` | `guest`; `teams`: the canvas's team grants the caller belongs to, each with its role) [v1]
 2. Served from resolved identity/user row — no provider calls per request [v1]
 3. Shape versioned for later directory fields [v1]
 4. Group membership checks [later]

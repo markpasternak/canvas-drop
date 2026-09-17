@@ -366,7 +366,16 @@ export interface RuntimePermissions {
   canPublishSharedEvents: boolean;
   canPublishParticipantEvents: boolean;
 }
+/** A team on this canvas's people-and-teams list that the caller belongs to, with the
+ *  role that grant carries on this canvas. Only the caller's own memberships, only teams
+ *  granted here. A UI hint, like `permissions`: the server rechecks every operation. */
+export interface CanvasTeamMembership {
+  id: string;
+  name: string;
+  role: "viewer" | "editor";
+}
 export interface Me {
+  teams: CanvasTeamMembership[];
   resources: {
     collections: Record<string, RecordPermissions>;
     fileGroups: Record<string, RecordPermissions>;

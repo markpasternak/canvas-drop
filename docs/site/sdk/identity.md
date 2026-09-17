@@ -21,6 +21,7 @@ const me = await canvasdrop.me();
 //   avatarUrl: null,
 //   kind: "member",
 //   canvasRole: "viewer",
+//   teams: [{ id: "0190a3f2-…", name: "Product", role: "viewer" }],
 //   permissions: { canSubmit: true, canWriteSharedData: false, /* … */ }
 // }
 document.querySelector("#greeting").textContent = `Hi, ${me.name}`;
@@ -43,6 +44,7 @@ interface Me {
   avatarUrl: string | null;
   kind: "member" | "guest";
   canvasRole: "owner" | "editor" | "viewer";
+  teams: { id: string; name: string; role: "viewer" | "editor" }[];
   permissions: RuntimePermissions;
 }
 ```
@@ -177,3 +179,23 @@ editButton.hidden = !permissions.canWriteSharedData;
 submitButton.disabled = !permissions.canSubmit;
 roleLabel.textContent = canvasRole;
 ```
+
+## Teams on this canvas
+
+`me().teams` lists the teams on **this canvas's** people-and-teams list that the
+caller belongs to, each with the role that grant carries here (`viewer` or
+`editor`), sorted by name. It is scoped both ways: only the caller's own
+memberships, and only teams granted on this canvas, so a page never learns about
+unrelated teams. Owners and members with no team grant get `[]`; so do legacy
+guest sessions. Team names can be renamed, so branch on the `id` where it matters.
+
+```js
+const { teams } = await canvasdrop.me();
+const inProduct = teams.some((team) => team.id === PRODUCT_TEAM_ID);
+roadmapPanel.hidden = !inProduct;
+```
+
+This shapes the interface; it does not hide data. A static canvas is delivered in
+full to everyone admitted, so anything the page conceals is still in its files and
+requests. Keep truly private content in a resource whose policy withholds it
+server-side rather than in a hidden element.

@@ -241,7 +241,7 @@ the canvas's own origin in both. Every call goes to `{apiBase}/v1/c/{slug}/...` 
 ```
 
 ```js
-// Identity: { id, email, name, avatarUrl, kind, canvasRole, permissions }; kind is "member", or "guest" for a legacy guest session
+// Identity: { id, email, name, avatarUrl, kind, canvasRole, teams, permissions }; teams = this canvas's team grants the caller belongs to ({ id, name, role }); kind is "member", or "guest" for a legacy guest session
 const me = await canvasdrop.me();
 
 // Shared KV mutations require owner/editor; kv.user stays caller-only.

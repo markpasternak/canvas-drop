@@ -1368,3 +1368,59 @@ describe("canvasAuthoringRoutes — admin-enabled instance switch", () => {
     expect(me.permissions.canCreateCanvas).toBe(true);
   });
 });
+
+describe("runtime identity — teams on this canvas", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("lists only the teams granted on this canvas that the caller belongs to, with each grant's role", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv } = await makeSource(client);
+    const teams = teamsRepository(client);
+    const viewer = await seedUser(client, "viewer");
+    const product = await teams.create({ orgId: null, name: "Product", createdBy: owner.id });
+    const leads = await teams.create({ orgId: null, name: "Leads", createdBy: owner.id });
+    const elsewhere = await teams.create({ orgId: null, name: "Elsewhere", createdBy: owner.id });
+    await teams.addMember(product.id, viewer.id);
+    await teams.addMember(leads.id, viewer.id);
+    await teams.addMember(elsewhere.id, viewer.id);
+    await teams.setCanvasTeams(cv.id, [product.id, leads.id]);
+    await teams.setCanvasTeamRole(cv.id, leads.id, "editor");
+    const { app } = buildApi(client, asMember(viewer.id), ON, { teams });
+    const me = (await (await app.request("/v1/c/app/me")).json()) as {
+      canvasRole: string;
+      teams: { id: string; name: string; role: string }[];
+    };
+    expect(me.canvasRole).toBe("editor");
+    expect(me.teams).toEqual([
+      { id: leads.id, name: "Leads", role: "editor" },
+      { id: product.id, name: "Product", role: "viewer" },
+    ]);
+  });
+
+  it("is empty for a caller without a team grant here and for a guest", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv } = await makeSource(client);
+    const teams = teamsRepository(client);
+    const other = await teams.create({ orgId: null, name: "Other", createdBy: owner.id });
+    await teams.addMember(other.id, owner.id);
+    const asOwner = buildApi(client, asMember(owner.id), ON, { teams });
+    const ownerMe = (await (await asOwner.app.request("/v1/c/app/me")).json()) as {
+      teams: unknown[];
+    };
+    expect(ownerMe.teams).toEqual([]);
+    const guestEmail = "guest@example.com";
+    const repo = canvasesRepository(client);
+    await repo.setAccess(cv.id, "specific_people");
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: guestEmail });
+    const asGuestApi = buildApi(client, asGuest(guestEmail, cv.id), ON, { teams });
+    const guestMe = (await (await asGuestApi.app.request("/v1/c/app/me")).json()) as {
+      kind: string;
+      teams: unknown[];
+    };
+    expect(guestMe.kind).toBe("guest");
+    expect(guestMe.teams).toEqual([]);
+  });
+});
