@@ -236,13 +236,18 @@ their record's policy. [Full policy and API guide](/docs/sdk/permissions).
 
 The Backend tab also has **AI access** and **Connection access**, each set to
 **Owners and editors** by default. Choose **All signed-in viewers** to permit
-an interactive audience to use that backend. Public links remain static-only
-for viewers. An audience choice cannot enable a disabled feature, supply an AI
-key, grant a Connection profile, or bypass quotas and legacy guest restrictions.
+an interactive audience to use that backend. **Authoring access** works the same
+way for page-driven authoring, but defaults to **All signed-in viewers** so
+existing canvases keep working; choose **Owners and editors** to limit creating,
+updating, listing and unpublishing shares from this page to the canvas's
+managers. Public links remain static-only for viewers. An audience choice cannot
+enable a disabled feature, supply an AI key, grant a Connection profile, or
+bypass quotas and legacy guest restrictions.
 
 `PATCH /api/canvases/{id}/capabilities` and MCP `set_capabilities` accept
-`aiAudience` and `connectionsAudience`, each `"editors"` or `"viewers"`.
-The management canvas view exposes both alongside `capabilities` and `effective`.
+`aiAudience`, `connectionsAudience` and `authoringAudience`, each `"editors"` or
+`"viewers"`. The management canvas view exposes all three alongside
+`capabilities` and `effective`.
 Omitted values stay unchanged. Only owners and editors can change them.
 The same endpoint and MCP tool accept `runtimePolicy` plus the exact previous
 `runtimePolicyRevision` as `expectedRuntimePolicy` (initially null). A stale or
@@ -250,7 +255,7 @@ missing revision returns `POLICY_CONFLICT`. Per-Connection policies can override
 the default audience and narrow methods; administrator grants still bound them.
 
 ```json
-{ "backendEnabled": true, "ai": true, "aiAudience": "viewers", "connectionsAudience": "editors" }
+{ "backendEnabled": true, "ai": true, "aiAudience": "viewers", "connectionsAudience": "editors", "authoringAudience": "editors" }
 ```
 
 For an existing installation, read the [runtime upgrade guide](/docs/self-hosting/runtime-upgrade)

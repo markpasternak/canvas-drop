@@ -203,7 +203,8 @@ export function AdminCanvasInspector({
               <p className="text-sm">
                 AI: {RIGHT_LABELS[data.canvas.aiAudience ?? "editors"]}. Connections:{" "}
                 {RIGHT_LABELS[data.canvas.connectionsAudience ?? "editors"]} unless a profile policy
-                overrides it. Feature switches and administrator grants still apply.
+                overrides it. Authoring: {RIGHT_LABELS[data.canvas.authoringAudience ?? "viewers"]}.
+                Feature switches and administrator grants still apply.
               </p>
               {data.canvas.runtimePolicy && (
                 <>

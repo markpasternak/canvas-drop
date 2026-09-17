@@ -178,6 +178,7 @@ export function useUpdateCapabilities(id: string) {
           backendEnabled,
           aiAudience: patch.aiAudience ?? prev.aiAudience,
           connectionsAudience: patch.connectionsAudience ?? prev.connectionsAudience,
+          authoringAudience: patch.authoringAudience ?? prev.authoringAudience,
           capabilities,
           effective: {
             identity: backendEnabled,

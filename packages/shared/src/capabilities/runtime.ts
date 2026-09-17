@@ -16,6 +16,8 @@ export function runtimePermissions(
     status: string;
     aiAudience: string;
     connectionsAudience: string;
+    /** Absent on rows read before the column existed; treated as `viewers`. */
+    authoringAudience?: string;
   },
   role: RuntimeRole,
   globals: CapabilityGlobals,
@@ -27,7 +29,8 @@ export function runtimePermissions(
   return {
     canEditContent: editor && (active || canvas.status === "archived"),
     canManageVersions: editor && (active || canvas.status === "archived"),
-    canCreateCanvas: active && effective.authoring,
+    canCreateCanvas:
+      active && effective.authoring && audienceAllows(canvas.authoringAudience ?? "viewers", role),
     canReadSharedData: active && effective.kv,
     canWriteSharedData: active && effective.kv && editor,
     canSavePreferences: active && effective.kv,

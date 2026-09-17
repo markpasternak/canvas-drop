@@ -264,6 +264,10 @@ export const canvases = sqliteTable(
     capAi: c.bool("cap_ai").notNull().default(true),
     aiAudience: c.text("ai_audience").notNull().default("editors"),
     connectionsAudience: c.text("connections_audience").notNull().default("editors"),
+    // Who may use page-driven authoring (`canvasdrop.canvases`) from this canvas while the
+    // authoring capability is on: `viewers` (every admitted signed-in member, the historical
+    // behaviour, so existing canvases keep working) or `editors` (owners and editors only).
+    authoringAudience: c.text("authoring_audience").notNull().default("viewers"),
     runtimePolicy: c.text("runtime_policy"),
     capRealtime: c.bool("cap_realtime").notNull().default(true),
     // `cap_authoring` (plan 2026-07-04) defaults FALSE, unlike its siblings: letting a

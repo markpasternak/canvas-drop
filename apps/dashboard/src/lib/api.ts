@@ -68,6 +68,7 @@ export interface CanvasCapabilitiesPatch {
   expectedRuntimePolicy?: string | null;
   aiAudience?: "editors" | "viewers";
   connectionsAudience?: "editors" | "viewers";
+  authoringAudience?: "editors" | "viewers";
   backendEnabled?: boolean;
   kv?: boolean;
   files?: boolean;
@@ -167,6 +168,8 @@ export interface Canvas {
   /** Raw stored feature flags (what the toggles control). */
   aiAudience?: "editors" | "viewers";
   connectionsAudience?: "editors" | "viewers";
+  /** Who may use page-driven authoring while it is on; absent on legacy payloads (= viewers). */
+  authoringAudience?: "editors" | "viewers";
   capabilities: StoredCapabilities;
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;
@@ -1041,6 +1044,7 @@ export interface AdminInspection {
     runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
     aiAudience?: "editors" | "viewers";
     connectionsAudience?: "editors" | "viewers";
+    authoringAudience?: "editors" | "viewers";
   };
   owner: {
     id: string;
