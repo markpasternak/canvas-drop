@@ -50,6 +50,7 @@ function fakeCanvas(over: Partial<Canvas> = {}): Canvas {
     capAi: true,
     capRealtime: true,
     capAuthoring: true,
+    authoringAudience: "viewers",
     ...over,
   } as unknown as Canvas;
 }

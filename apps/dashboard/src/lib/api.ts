@@ -1044,6 +1044,7 @@ export interface AdminInspection {
     runtimePolicy?: import("./runtime-policy.js").RuntimePolicy;
     aiAudience?: "editors" | "viewers";
     connectionsAudience?: "editors" | "viewers";
+    authoringAudience?: "editors" | "viewers";
   };
   owner: {
     id: string;
