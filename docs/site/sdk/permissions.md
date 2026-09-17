@@ -57,7 +57,9 @@ remain private; AI, Connections and authoring have separate controls.
 | Collaborative content (`collaborative`) | Participants | Participants | Participants |
 
 Participants means people admitted to this canvas's authenticated backend.
-Public-link viewers remain static-only. An owner/editor does not automatically
+Public-link viewers remain static-only except for an explicitly approved
+[public Connection grant](/docs/sdk/connections#public-connections-opt-in).
+An owner/editor does not automatically
 read Personal records or `kv.user` preferences. Update, delete and increment also
 require read access. Increment initially follows the preset's update right.
 

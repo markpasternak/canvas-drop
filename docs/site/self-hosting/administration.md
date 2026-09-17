@@ -52,7 +52,10 @@ Enter a person's email in the access explanation to check their current account,
 ownership/editor role, direct grants, teams, live organization membership, and pending
 invitations. The explanation also checks sign-in email policy and blocked accounts,
 and identifies lifecycle, expiry, and password gates.
-An anonymous check explains public access, which serves static content only. This
+An anonymous check explains public access. It serves static content plus any
+Connection an administrator separately opens through **Connections → Manage →
+Configure public access**. Public grants require exact paths, methods, and a daily
+request cap; other primitives remain restricted. This
 does not impersonate the person, test their password, or fetch private canvas files.
 
 **Admin → Activity** searches recorded administrative events by text, actor, canvas,

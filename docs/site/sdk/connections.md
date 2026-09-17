@@ -75,14 +75,16 @@ stable codes include:
 | `METHOD_NOT_ALLOWED` | 405 | The method is unsupported or not approved for this profile. |
 | `DESTINATION_BLOCKED` | 403 | Origin, DNS answer, redirect, or content encoding crossed the connection boundary. |
 | `REQUEST_TOO_LARGE` | 413 | URL, headers, or body exceeded a request limit. |
+| `REQUEST_TIMEOUT` | 408 | A public request body did not arrive within the connection deadline. |
 | `RESPONSE_TOO_LARGE` | 502 | The upstream response exceeded the buffer limit. |
 | `CONNECTION_RATE_LIMIT` | 429 | A connection-specific request bucket is spent. |
 | `CONNECTION_LIMIT` | 429 | A per-canvas or process-wide in-flight limit is full. |
+| `CONNECTION_DAILY_LIMIT` | 429 | The public grant's shared daily request cap is spent. Resets at midnight UTC; do not retry immediately. |
 | `UPSTREAM_TIMEOUT` | 504 | The total DNS, request, redirect, and response deadline expired. |
 | `UPSTREAM_UNAVAILABLE` | 502 | DNS or the approved upstream failed. |
 
-The normal canvas gates still run first: identity, canvas access, password,
-lifecycle, Public-link static-only, the broad runtime rate limit, and the
+The normal canvas gates still run first: canvas access, password,
+lifecycle, the public grant when required, the broad runtime rate limit, and the
 Backend master switch. Detaching a grant, disabling its profile or Backend,
 revoking access, adding a password, expiring/archiving/disabling/deleting the
 canvas blocks the next request.
@@ -120,15 +122,57 @@ headers are removed.
 Protected header names are visible only to administrators as “configured”; the
 values are never returned by an API or loaded into the dashboard. Owners,
 editors, and `list_canvas_connections` over MCP see only the profile key, label,
-origin, allowed methods, and availability.
+origin, allowed methods, availability, and any public policy.
 
 One residual trust boundary remains: the approved upstream receives the
 protected value and can deliberately reflect it in its own response body. Use a
 least-privilege credential scoped to that upstream and profile. Operators should
 also restrict the Canvas Drop server's network egress as defense in depth.
 
-Public-link visitors can never use Connections. If an audience needs this
-backend, use Restricted or Whole org access and grant people or teams as needed.
+## Public connections (opt-in)
+
+Public visitors cannot use a connection by default. An administrator can enable
+**Public access** on one canvas grant in **Admin → Connections → Manage**. This
+requires exact endpoint paths, a subset of the profile's methods, and a daily
+request cap. This is an exception for that named connection only: anonymous
+visitors still cannot use `me()`, KV, files, AI, realtime, or authoring.
+
+The canvas must have an active public link, Backend on, and the named Connection
+audience set to viewers (or inherit the viewers audience). Passwords, expiry,
+the instance public-link switch, owner publishing permissions, and profile
+revocation still apply. Turning public access off blocks the next request.
+
+For public calls, query strings, encoded paths and redirects are refused. Only
+the exact configured paths are forwarded. The existing body, response, egress,
+rate and concurrency limits also apply. Public rate buckets use the server-resolved
+client IP; logs retain a per-day, per-canvas keyed hash rather than the address.
+The shared daily counter is database-atomic, survives restarts and policy edits,
+and counts admitted attempts, including unfinished uploads and upstream failures. Public
+body reads have the same configured deadline as upstream calls. It is a request cap,
+not a monetary budget. Public callers can submit any body the approved endpoint
+accepts, so approve only endpoints and credentials suitable for public use.
+
+The administrator API is
+`PUT /api/admin/connections/:id/canvases/:canvasId/public` with
+`{"policy":{"paths":["/v1/analyze"],"methods":["POST"],"requestsPerDay":2000}}`.
+Use `{"policy":null}` to disable it. Owners can read the policy through the
+existing manager API and `list_canvas_connections` MCP tool, but cannot enable it.
+
+Check availability without requesting the visitor's identity:
+
+```js
+const access = await canvasdrop.connections.status("analyzer");
+// { invoke: true, methods: ["POST"], publicAccess: true }
+if (access.invoke && access.methods.includes("POST")) {
+  // Show the analysis action. Calls can still fail if limits or policy change.
+}
+```
+
+`status` uses `GET /v1/c/:slug/connection-status/:profile`, returns only those three
+fields, and is never cached. `publicAccess` means this caller uses the public
+grant; signed-in owners and invited participants retain their existing rights.
+When adding `status` to an existing canvas, version the SDK script URL (for
+example `/sdk/v1.js?release=public-connections-1`) so returning visitors get it.
 
 ## Audience permission
 
@@ -137,7 +181,7 @@ methods. In `runtimePolicy.connections`, set `{audience: "viewers", methods: ["G
 for the intended profile key. Administrator grants and approved methods remain an
 upper bound. `none` denies invocation, including owners/editors; omit methods to
 use the administrator's allowed set, or use `[]` to deny every method. Read effective
-rights from `me().resources.connections[key]`. External item ownership must be
+rights from `connections.status(key)`, or `me().resources.connections[key]` for signed-in users. External item ownership must be
 enforced by the upstream service. See [Permissions and defaults](/docs/sdk/permissions).
 
 This feature defaults to owners and editors (`connectionsAudience: "editors"`). To allow

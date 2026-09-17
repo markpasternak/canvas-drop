@@ -5,10 +5,12 @@ instance is, which five guarantees hold inside it, and which config choices keep
 them intact. Read it before you put an instance in front of colleagues.
 
 canvas-drop hosts arbitrary, often AI-generated, web artifacts for a trusted
-organization. Everyone who reaches a canvas has already passed your sign-in and the
-email allowlist. It is not built to defend against the hostile internet. Inside that
-boundary it holds five hard invariants; beyond them it stays open and permissive,
-because the product is meant to be frictionless among colleagues.
+organization. Most access requires sign-in and admission. Public-link canvases
+also admit anonymous visitors to static content. Administrators can separately
+open a named Connection for a canvas, with exact paths, methods, and a shared
+daily request cap. That public endpoint must be treated as internet-facing.
+See [Public connections](/docs/sdk/connections#public-connections-opt-in) for the
+limits and credential trust boundary. Other backend primitives remain restricted.
 
 ## The two settings that matter most
 
@@ -234,7 +236,7 @@ decides who else is admitted:
 | A member of a team on the list | always. A personal team admits by membership alone; an org team also requires the viewer to be a current member of that team's org, re-joined live on every request, so a stale team row cannot widen access | both apply |
 | Anyone else at Restricted (`private`, or its legacy aliases `specific_people` / `team`) | never | — |
 | Whole org | any signed-in member. When an org is named (below), members of the canvas's home org only | both apply |
-| Public link | anyone, static files only, while the instance-wide switch is on and the owner still holds the publish-public capability | both apply; an anonymous visitor reaches the password prompt |
+| Public link | anyone, static files plus explicitly admin-approved public Connections, while the instance-wide switch is on and the owner still holds the publish-public capability | both apply; an anonymous visitor reaches the password prompt |
 
 The owner and editors are admitted at every choice, never see the password prompt, and
 are unaffected by expiry. Anyone with no route in gets `404`. A password is checked with argon2id; a successful attempt sets an HttpOnly grant
@@ -351,8 +353,11 @@ Lambda runtime. It names one exact HTTPS DNS origin, a set of allowed HTTP metho
 optional protected headers such as `Authorization` or a controlled `User-Agent`. An admin
 grants that profile to individual canvases. The canvas supplies only a root-relative path,
 query, body, and non-protected request headers; the server adds protected headers last.
-Anonymous Public-link viewers cannot call it because the whole runtime API stays
-static-only for them.
+Anonymous public-link visitors can call only grants an administrator explicitly
+opens for public use, with exact paths, methods and a daily request cap. Public
+calls reject queries and redirects; timed body reads and admitted-attempt accounting
+bound unfinished uploads as well as upstream calls. The other runtime primitives
+remain closed. See [Public connections](/docs/sdk/connections#public-connections-opt-in).
 
 Protected header values are encrypted with AES-256-GCM under
 `CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY`, authenticated to the profile id, and are
