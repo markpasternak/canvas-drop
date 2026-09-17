@@ -215,7 +215,7 @@ Parameters and return shapes for every tool: [MCP server](/docs/agents/mcp).
 ```html
 <script src="/sdk/v1.js"></script>
 <script type="module">
-  const me = await canvasdrop.me();                     // { id, email, name, avatarUrl, kind, canvasRole, permissions }
+  const me = await canvasdrop.me();                     // { id, email, name, avatarUrl, kind, canvasRole, teams, permissions }
   await canvasdrop.kv.user.set("last-visit", Date.now());
   const views = await canvasdrop.kv.user.increment("visits"); // 1 on the first call, then 2, 3, ...
 </script>
@@ -229,7 +229,7 @@ page. The root-relative `src` resolves on the canvas's own origin in both modes.
 The canvas must have Backend switched on (see Capabilities below); `/sdk/v1.js`
 sits behind the same sign-in as the canvas.
 
-- `me()` returns `{ id, email, name, avatarUrl, kind, canvasRole, permissions }`. `kind` is `"member"`;
+- `me()` returns `{ id, email, name, avatarUrl, kind, canvasRole, teams, permissions }`; `teams` are this canvas's team grants the caller belongs to, each `{ id, name, role }`. `kind` is `"member"`;
   `"guest"` appears only for retained legacy guest sessions, since new Add person
   grants materialize as signed-in users.
 - `kv` (shared) and `kv.user` (per viewer, keyed server-side) have the same five

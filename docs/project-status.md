@@ -68,3 +68,8 @@ The **authoring audience** (17 September 2026) adds `authoringAudience` (`viewer
 `editors` to limit page-driven authoring to a canvas's owners and editors) to the Backend
 tab, the management API, MCP `set_capabilities` and `me().permissions.canCreateCanvas`,
 enforced on every `/authoring` operation as `PERMISSION_DENIED`.
+
+**Teams in the runtime identity** (17 September 2026): `me().teams` lists the teams on the
+canvas's people-and-teams list that the caller belongs to, each with the grant's role, so
+canvas code can tailor its interface per team. Scoped to the caller and to this canvas; a
+UI hint only, like `permissions`.

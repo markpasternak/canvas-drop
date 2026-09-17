@@ -103,6 +103,7 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
       "name",
       "permissions",
       "resources",
+      "teams",
     ]);
     expect(body.kind).toBe("member");
     expect(body.isAdmin).toBeUndefined();

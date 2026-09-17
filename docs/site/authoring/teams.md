@@ -90,6 +90,13 @@ for an org team the live org membership is re-checked as well. A team added as
 **viewers** opens the canvas for its members at every General-access choice. See
 [Roles: viewers and editors](/docs/authoring/sharing#roles-viewers-and-editors).
 
+## Teams in canvas code
+
+With the backend on, a canvas can read the teams on its own list that the viewer
+belongs to, with each grant's role, through [`me().teams`](/docs/sdk/identity#teams-on-this-canvas).
+Use it to tailor the interface per team; keep anything that must stay private in a
+resource whose policy withholds it.
+
 ## Over MCP (agents)
 
 Everything here is available to an agent over [MCP](/docs/agents/mcp), wrapping the
