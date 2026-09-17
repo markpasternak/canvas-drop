@@ -335,6 +335,11 @@ for the behavior changes to inventory before an approved deployment.
 5. Directory sync [later]
 
 ### 6.8a Admin-granted outbound Connections primitive
+**Public-link exception (17 September 2026):** references to public/static-only
+access in this brief exclude a named Connection grant explicitly opened by an
+administrator under this section. All other primitives, including identity,
+remain closed to anonymous visitors. This opt-in changes no existing grant.
+
 1. `canvasdrop.connections.fetch(profile, relativePath, init?)` forwards a request to one exact admin-approved HTTPS DNS origin [post-v1]
 2. Profiles are reusable; a global admin chooses the immutable key, origin, standard HTTP methods, protected headers, enabled state, and the individual canvas grants [post-v1]
 3. Protected header values are write-only, AES-256-GCM encrypted with an external root key, applied after canvas-supplied headers, and never returned to the browser, manager API, MCP, audit log, or usage log [post-v1]
@@ -343,6 +348,8 @@ for the behavior changes to inventory before an approved deployment.
 6. Live canvas access, password, lifecycle, Public-link static-only, Backend master, profile, and grant state are checked on every request. Detach/disable/revoke blocks the next request [post-v1]
 7. Default bounds: 8 KiB URL, 32 caller headers / 16 KiB header bytes, 256 KiB request body, 2 MiB response, 10 second total deadline, three same-origin redirects, 60 requests/minute per actor+canvas+profile, 600/minute per profile, five concurrent per canvas, 50 concurrent per process [post-v1]
 8. The approved upstream remains trusted and can reflect a protected value in its own response; operators must use least-privilege upstream credentials and defense-in-depth network egress policy [post-v1]
+9. An admin may enable public invocation per canvas/profile grant with exact canonical paths, selected profile methods, and a positive daily request cap. Public calls reject query strings and redirects. Viewer audience, Backend, sharing/password/lifecycle and profile gates remain authoritative. The durable daily counter is atomic; policy revocation invalidates pending admission. The cap bounds requests, not spend [post-v1]
+10. `connections.status(profile)` returns `{invoke, methods, publicAccess}` without exposing identity or credentials, including for anonymous public visitors. Public status and invocation are the only exceptions to the static-only runtime gate [post-v1]
 
 ### 6.9 Dashboard (management app)
 1. My canvases first: title, slug, URL, status, last deploy, visit sparkline, with a dominant create action [v1]

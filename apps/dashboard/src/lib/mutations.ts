@@ -571,6 +571,26 @@ export function useDetachConnection() {
   });
 }
 
+export function usePublicConnectionPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      canvasId,
+      policy,
+    }: {
+      id: string;
+      canvasId: string;
+      policy: import("./api.js").PublicConnectionPolicy | null;
+    }) => api.admin.setPublicConnectionPolicy(id, canvasId, policy),
+    onSuccess: (_result, { id, canvasId }) => {
+      qc.invalidateQueries({ queryKey: keys.adminConnectionCanvases(id) });
+      qc.invalidateQueries({ queryKey: keys.adminCanvasConnections(canvasId) });
+      qc.invalidateQueries({ queryKey: keys.canvasConnections(canvasId) });
+    },
+  });
+}
+
 export function useAdminDisableCanvas() {
   const qc = useQueryClient();
   return useMutation({

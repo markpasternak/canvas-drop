@@ -12,6 +12,7 @@ import {
 export type ConnectionTransportErrorCode =
   | "INVALID_BODY"
   | "REQUEST_TOO_LARGE"
+  | "REQUEST_TIMEOUT"
   | "METHOD_NOT_ALLOWED"
   | "DESTINATION_BLOCKED"
   | "UPSTREAM_TIMEOUT"

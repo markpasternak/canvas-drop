@@ -39,7 +39,12 @@ import type { RealtimeHub } from "../realtime/hub.js";
 import { type AiSettings, canvasAiRoutes } from "./canvas-ai.js";
 import { type AuthoringSettings, canvasAuthoringRoutes } from "./canvas-authoring.js";
 import { canvasCollectionRoutes } from "./canvas-collections.js";
-import { type CanvasConnectionsDeps, canvasConnectionsRoutes } from "./canvas-connections.js";
+import {
+  type CanvasConnectionsDeps,
+  canvasConnectionStatusRoutes,
+  canvasConnectionsRoutes,
+  isConnectionRuntimeRoute,
+} from "./canvas-connections.js";
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
 import { canvasRealtimeRoutes } from "./canvas-realtime.js";
@@ -151,10 +156,9 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
             : "viewer",
       );
       c.set("staticOnly", decision.staticOnly);
-      // Static-only (public_link non-owner / anonymous, R17): the runtime API is
-      // entirely closed — every primitive refused. Static files still serve via the
-      // content chain, not here.
-      if (decision.staticOnly) {
+      // Public Connections are the only opt-in exception to the static-only gate.
+      // Their handlers require an explicit admin grant; identity/storage stay closed.
+      if (decision.staticOnly && !(deps.connections && isConnectionRuntimeRoute(c))) {
         return c.json(
           { code: "STATIC_ONLY", message: "This canvas is public and static-only." },
           403,
@@ -281,6 +285,10 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
   app.route("/files", canvasFilesRoutes(deps));
 
   if (deps.connections) {
+    app.route(
+      "/connection-status",
+      canvasConnectionStatusRoutes({ config: deps.config, usage: deps.usage, ...deps.connections }),
+    );
     app.route(
       "/connections",
       canvasConnectionsRoutes({ config: deps.config, usage: deps.usage, ...deps.connections }),

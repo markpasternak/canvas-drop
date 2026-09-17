@@ -245,6 +245,7 @@ describe.each(DIALECTS)("connectionService [%s]", (dialect) => {
       allowedMethods: ["GET"],
       available: false,
       unavailableReason: "encryption_key_unavailable",
+      publicPolicy: null,
     });
     const serialized = JSON.stringify(managerView) as Json;
     expect(serialized).not.toContain("user-agent");

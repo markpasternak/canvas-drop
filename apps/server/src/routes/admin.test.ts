@@ -1618,6 +1618,43 @@ describe("admin routes", () => {
     expect(authorityText).not.toContain("user-agent");
     expect(authorityText).not.toContain("controlled-secret-agent");
 
+    const publicPath = `/api/admin/connections/${id}/canvases/${canvas.id}/public`;
+    const publicPolicy = { paths: ["/quote"], methods: ["GET"], requestsPerDay: 50 };
+    expect(
+      (await app.request(publicPath, { ...post({ policy: publicPolicy }), method: "PUT" })).status,
+    ).toBe(200);
+    expect(await (await app.request(`/api/admin/connections/${id}/canvases`)).json()).toMatchObject(
+      { canvases: [{ id: canvas.id, publicPolicy }] },
+    );
+    expect(
+      (
+        await app.request(publicPath, {
+          ...post({ policy: { ...publicPolicy, paths: ["/quote?key=x"] } }),
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await app.request(publicPath, {
+          ...post({ policy: null }),
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+            origin: "https://evil.example",
+            "sec-fetch-site": "cross-site",
+          },
+        })
+      ).status,
+    ).toBe(403);
+    const ordinary = buildAdminApp(client, { id: admin.id, isAdmin: false });
+    expect(
+      (await ordinary.app.request(publicPath, { ...post({ policy: null }), method: "PUT" })).status,
+    ).toBe(404);
+    expect(
+      (await app.request(publicPath, { ...post({ policy: null }), method: "PUT" })).status,
+    ).toBe(200);
+
     await usageEventsRepository(client).record({
       canvasId: canvas.id,
       userId: admin.id,

@@ -1220,6 +1220,21 @@ export interface AdminAiUsage {
 
 export type ConnectionMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+export interface PublicConnectionPolicy {
+  paths: string[];
+  methods: ConnectionMethod[];
+  requestsPerDay: number;
+}
+
+export interface AdminConnectionCanvas {
+  id: string;
+  slug: string;
+  title: string;
+  publicPolicy: PublicConnectionPolicy | null;
+  publicDay: number;
+  publicRequests: number;
+}
+
 /** Sanitized authority visible to a canvas owner/editor. Protected header names and
  * values are intentionally absent from this wire type. */
 export interface CanvasConnection {
@@ -1228,6 +1243,7 @@ export interface CanvasConnection {
   origin: string;
   allowedMethods: ConnectionMethod[];
   available: boolean;
+  publicPolicy?: PublicConnectionPolicy | null;
   unavailableReason: "backend_off" | "disabled" | "encryption_key_unavailable" | null;
 }
 
@@ -1776,9 +1792,9 @@ export const api = {
         method: "DELETE",
       }),
     listConnectionCanvases: (id: string) =>
-      request<{ canvases: Array<{ id: string; slug: string; title: string }> }>(
-        `/api/admin/connections/${id}/canvases`,
-      ).then((r) => r.canvases),
+      request<{ canvases: AdminConnectionCanvas[] }>(`/api/admin/connections/${id}/canvases`).then(
+        (r) => r.canvases,
+      ),
     listConnectionEvents: (id: string, offset = 0) =>
       request<{ events: AdminConnectionEvent[]; limit: number; offset: number }>(
         `/api/admin/connections/${id}/events?limit=25&offset=${offset}`,
@@ -1787,6 +1803,18 @@ export const api = {
       request<{ attached: boolean; connection: CanvasConnection }>(
         `/api/admin/connections/${id}/canvases/${canvasId}`,
         { method: "PUT" },
+      ),
+    setPublicConnectionPolicy: (
+      id: string,
+      canvasId: string,
+      policy: PublicConnectionPolicy | null,
+    ) =>
+      request<{ publicPolicy: PublicConnectionPolicy | null }>(
+        `/api/admin/connections/${id}/canvases/${canvasId}/public`,
+        {
+          ...jsonBody({ policy }),
+          method: "PUT",
+        },
       ),
     detachConnection: (id: string, canvasId: string) =>
       request<{ detached: boolean }>(`/api/admin/connections/${id}/canvases/${canvasId}`, {
