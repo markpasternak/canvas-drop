@@ -16,6 +16,7 @@ import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { canvasApiRoutes } from "./canvas-api.js";
+import type { AuthoringSettings } from "./canvas-authoring.js";
 
 const silent = pino({ level: "silent" });
 
@@ -126,6 +127,7 @@ function buildApi(
     publicLinksEnabled?: boolean;
     canvases?: CanvasesRepository;
     teams?: TeamsRepository;
+    authoringSettings?: AuthoringSettings;
   } = {},
 ) {
   const { audit, events } = fakeAudit();
@@ -160,6 +162,7 @@ function buildApi(
       engine,
       authoringUsage: authoringUsageRepository(client),
       teams: opts.teams,
+      authoringSettings: opts.authoringSettings,
     }),
   );
   return { app, events, canvases };
@@ -1331,6 +1334,37 @@ describe("canvasAuthoringRoutes — authoring audience", () => {
       permissions: { canCreateCanvas: boolean };
     };
     expect(me.canvasRole).toBe("owner");
+    expect(me.permissions.canCreateCanvas).toBe(true);
+  });
+});
+
+describe("canvasAuthoringRoutes — admin-enabled instance switch", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("reports canCreateCanvas from the same per-request switch the authoring route honours", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    // Env says off; the operator enabled authoring at runtime in Admin → Settings.
+    const authoringSettings = {
+      authoringEnabled: async () => true,
+      effectiveAuthoringPolicy: async () => ({
+        userDailyMax: 20,
+        userTotalMax: 200,
+        allowedRungs: ["private", "specific_people", "whole_org", "public_link"],
+        maxExpiryDays: 0,
+        requireExpiry: false,
+      }),
+    } as AuthoringSettings;
+    const { app } = buildApi(client, asMember(owner.id), cfg({ CANVAS_DROP_AUTHORING: "off" }), {
+      authoringSettings,
+    });
+    expect((await app.request("/v1/c/app/authoring")).status).toBe(200);
+    const me = (await (await app.request("/v1/c/app/me")).json()) as {
+      permissions: { canCreateCanvas: boolean };
+    };
     expect(me.permissions.canCreateCanvas).toBe(true);
   });
 });

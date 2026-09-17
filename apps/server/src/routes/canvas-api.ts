@@ -204,6 +204,11 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
     const canvasRole = c.get("runtimeRole") ?? "viewer";
     const globals = capabilityGlobals(deps.config);
     if (deps.settings) globals.aiEnabled = await deps.settings.aiEnabled();
+    // The authoring instance switch is read per request from the admin settings, exactly as
+    // the authoring route reads it — otherwise `permissions.canCreateCanvas` reports false on
+    // an instance whose operator enabled authoring in Admin → Settings rather than by env.
+    if (deps.authoringSettings)
+      globals.authoringEnabled = await deps.authoringSettings.authoringEnabled();
     const connections = (await deps.connections?.service.listForCanvas(canvas.id)) ?? [];
     const policy = parseRuntimePolicy(canvas.runtimePolicy);
     const permissions = runtimePermissions(
