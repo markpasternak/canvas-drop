@@ -1255,3 +1255,82 @@ describe.each(DIALECTS)(
     });
   },
 );
+
+describe("canvasAuthoringRoutes — authoring audience", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** A whole-org source canvas with a second, non-managing member admitted to it. */
+  async function sourceWithViewer(audience?: "editors" | "viewers") {
+    const { owner, cv } = await makeSource(client);
+    const repo = canvasesRepository(client);
+    await repo.setAccess(cv.id, "whole_org");
+    if (audience) await repo.updateCapabilities(cv.id, { authoringAudience: audience });
+    const viewer = await seedUser(client, "viewer");
+    return { owner, viewer, cv };
+  }
+
+  it("admits every member by default (the historical behaviour)", async () => {
+    client = await makeTestDb("sqlite");
+    const { viewer } = await sourceWithViewer();
+    const { app } = buildApi(client, asMember(viewer.id));
+    expect((await app.request("/v1/c/app/authoring")).status).toBe(200);
+    const me = (await (await app.request("/v1/c/app/me")).json()) as {
+      canvasRole: string;
+      permissions: { canCreateCanvas: boolean };
+    };
+    expect(me.canvasRole).toBe("viewer");
+    expect(me.permissions.canCreateCanvas).toBe(true);
+  });
+
+  it("403 PERMISSION_DENIED for a viewer on every authoring operation when limited to editors", async () => {
+    client = await makeTestDb("sqlite");
+    const { viewer } = await sourceWithViewer("editors");
+    const { app, canvases } = buildApi(client, asMember(viewer.id));
+    const before = (
+      await canvases.listManagedCanvasIds(viewer.id, {
+        tenancyActive: false,
+        viewerOrgIds: new Set(),
+      })
+    ).length;
+    const denied = await publish(app, publishBody({ title: "B" }));
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { code: string }).code).toBe("PERMISSION_DENIED");
+    expect((await app.request("/v1/c/app/authoring")).status).toBe(403);
+    expect(
+      (await app.request("/v1/c/app/authoring/some-id", { method: "PUT", body: new FormData() }))
+        .status,
+    ).toBe(403);
+    expect((await app.request("/v1/c/app/authoring/some-id", { method: "DELETE" })).status).toBe(
+      403,
+    );
+    // Nothing was created for the refused viewer.
+    expect(
+      (
+        await canvases.listManagedCanvasIds(viewer.id, {
+          tenancyActive: false,
+          viewerOrgIds: new Set(),
+        })
+      ).length,
+    ).toBe(before);
+    const me = (await (await app.request("/v1/c/app/me")).json()) as {
+      permissions: { canCreateCanvas: boolean };
+    };
+    expect(me.permissions.canCreateCanvas).toBe(false);
+  });
+
+  it("keeps the owner's authoring open when limited to editors", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await sourceWithViewer("editors");
+    const { app } = buildApi(client, asMember(owner.id));
+    expect((await app.request("/v1/c/app/authoring")).status).toBe(200);
+    const me = (await (await app.request("/v1/c/app/me")).json()) as {
+      canvasRole: string;
+      permissions: { canCreateCanvas: boolean };
+    };
+    expect(me.canvasRole).toBe("owner");
+    expect(me.permissions.canCreateCanvas).toBe(true);
+  });
+});

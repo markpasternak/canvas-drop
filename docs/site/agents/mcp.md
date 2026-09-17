@@ -405,7 +405,9 @@ The estimate excludes references retained by current/history/draft/active upload
 it does not promise recovered bytes. See [version cleanup](/docs/authoring/editor).
 
 `set_capabilities` additionally accepts `aiAudience` and `connectionsAudience`,
-each `"editors"` (default) or `"viewers"`. Canvas views expose both. Runtime canvas
+each `"editors"` (default) or `"viewers"`, and `authoringAudience` (`"viewers"` by
+default, `"editors"` to limit page-driven authoring to owners and editors). Canvas
+views expose all three. Runtime canvas
 code reads its own role and permissions from [`me()`](/docs/sdk/identity).
 `set_capabilities` also accepts a full `runtimePolicy` document and
 `expectedRuntimePolicy`, copied exactly from `get_canvas.runtimePolicyRevision`

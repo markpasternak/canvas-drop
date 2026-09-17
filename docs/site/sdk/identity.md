@@ -142,8 +142,9 @@ Private `kv.user` preferences remain unreadable by other users, including editor
 operation rights `{read, create, update, delete, increment}`, each `{own, any}`.
 Channels expose `{subscribe, publish, seePresence, participatePresence}` booleans;
 granted Connections expose `{invoke, methods}` after audience/admin restrictions.
-`permissions.canCreateCanvas` describes enabled page-driven authoring for members,
-separate from editing existing canvases. For per-record controls, compare `me().id`
+`permissions.canCreateCanvas` describes enabled page-driven authoring for members
+whose role the canvas's `authoringAudience` admits, separate from editing existing
+canvases. For per-record controls, compare `me().id`
 with the server-derived `record.authorId`. See [Permissions and defaults](/docs/sdk/permissions).
 
 `canvasRole` is the effective role on this canvas. Ownership wins, followed by a

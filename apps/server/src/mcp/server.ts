@@ -1128,6 +1128,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           .enum(["editors", "viewers"])
           .optional()
           .describe("Who can use admin-granted connections; defaults to editors."),
+        authoringAudience: z
+          .enum(["editors", "viewers"])
+          .optional()
+          .describe(
+            "Who may create and manage canvases from this page while authoring is on; defaults to viewers (every admitted member).",
+          ),
         kv: z.boolean().optional(),
         files: z.boolean().optional(),
         ai: z.boolean().optional(),

@@ -498,9 +498,10 @@ includes shared files and their own submissions. Another person's private file
 returns `404 NOT_FOUND`, including its content URL. Stored files from before the
 upgrade remain shared; content responses are `private, no-store`.
 
-AI and Connections additionally require their canvas audience to allow the
-caller: `aiAudience` and `connectionsAudience` default to `"editors"`; `"viewers"`
-opts in admitted signed-in viewers. Existing feature, provider, admin grant,
+AI, Connections and authoring additionally require their canvas audience to allow
+the caller: `aiAudience` and `connectionsAudience` default to `"editors"`; `"viewers"`
+opts in admitted signed-in viewers. `authoringAudience` defaults to `"viewers"`;
+`"editors"` limits `/authoring` to the canvas's owners and editors. Existing feature, provider, admin grant,
 legacy guest and static-only gates still apply. A role denial is
 `403 PERMISSION_DENIED`, represented by SDK `PermissionDeniedError`.
 

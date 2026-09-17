@@ -1,0 +1,1 @@
+ALTER TABLE `canvases` ADD `authoring_audience` text DEFAULT 'viewers' NOT NULL;

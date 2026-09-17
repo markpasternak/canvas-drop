@@ -204,3 +204,28 @@ it("lets an editor explicitly enable AI for viewers and preserves the connection
   );
   expect(screen.getByRole("combobox", { name: "Connection access" })).toHaveValue("editors");
 });
+
+it("lets an editor limit page-driven authoring to owners and editors", async () => {
+  const calls = mockFetch({
+    "GET /api/canvases/c1": () =>
+      json({ ...ON, role: "editor", aiAudience: "editors", connectionsAudience: "editors" }),
+    "PATCH /api/canvases/c1/capabilities": () =>
+      json({
+        ...ON,
+        aiAudience: "editors",
+        connectionsAudience: "editors",
+        authoringAudience: "editors",
+      }),
+  });
+  renderCapabilities();
+  const select = await screen.findByRole("combobox", { name: "Authoring access" });
+  // Absent on a legacy payload reads as every admitted viewer, the historical behaviour.
+  expect(select).toHaveValue("viewers");
+  await userEvent.selectOptions(select, "editors");
+  await vi.waitFor(() =>
+    expect(calls.find((call) => call.method === "PATCH")?.body).toBe(
+      JSON.stringify({ authoringAudience: "editors" }),
+    ),
+  );
+  expect(screen.getByRole("combobox", { name: "AI access" })).toHaveValue("editors");
+});

@@ -175,6 +175,7 @@ const capabilitiesSchema = z.object({
   expectedRuntimePolicy: z.string().max(65536).nullable().optional(),
   aiAudience: z.enum(["editors", "viewers"]).optional(),
   connectionsAudience: z.enum(["editors", "viewers"]).optional(),
+  authoringAudience: z.enum(["editors", "viewers"]).optional(),
   backendEnabled: z.boolean().optional(),
   kv: z.boolean().optional(),
   files: z.boolean().optional(),
@@ -282,6 +283,7 @@ function ownerCanvasView(
     runtimePolicy: parseRuntimePolicy(cv.runtimePolicy),
     runtimePolicyRevision: cv.runtimePolicy,
     connectionsAudience: cv.connectionsAudience,
+    authoringAudience: cv.authoringAudience,
     capabilities: storedCapabilities(cv),
     // Effective state ANDs in the operator globals — resolved per request so an
     // admin's DB override of the AI key / realtime switch is reflected here too.

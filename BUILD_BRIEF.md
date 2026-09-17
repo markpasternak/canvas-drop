@@ -273,8 +273,9 @@ submissions: 10,000/canvas and 1,000/author by default. Responses are private to
 their author and canvas managers; editors deliberately publish validated aggregates
 to shared KV. Clearing responses does not delete separately stored attachments.
 
-`aiAudience` and `connectionsAudience` are `editors` (default) or `viewers`, set by
-owners/editors through Backend settings, management API or MCP `set_capabilities`.
+`aiAudience` and `connectionsAudience` are `editors` (default) or `viewers`, and
+`authoringAudience` is `viewers` (default) or `editors`, set by owners/editors
+through Backend settings, management API or MCP `set_capabilities`.
 Feature flags, provider availability, admin grants, quotas, legacy guest gates,
 password/lifecycle and public static-only rules still apply. Denied operations
 return `PERMISSION_DENIED` (403). No canvas-supplied server code is introduced.

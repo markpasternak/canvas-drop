@@ -63,6 +63,7 @@ export function canvasView(
     aiAudience?: string;
     runtimePolicy?: string | null;
     connectionsAudience?: string;
+    authoringAudience?: string;
     disabledReason?: string | null;
     galleryListed?: boolean;
     galleryTemplatable?: boolean;
@@ -114,6 +115,7 @@ export function canvasView(
     runtimePolicy: parseRuntimePolicy(cv.runtimePolicy),
     runtimePolicyRevision: cv.runtimePolicy ?? null,
     connectionsAudience: cv.connectionsAudience ?? "editors",
+    authoringAudience: cv.authoringAudience ?? "viewers",
     disabledReason: cv.disabledReason ?? null,
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,

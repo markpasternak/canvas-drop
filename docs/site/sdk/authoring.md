@@ -1,7 +1,9 @@
 # Authoring
 
 `me().permissions.canCreateCanvas` reports whether page-driven creation is enabled
-for this member. It does not grant permission to edit or publish an existing canvas;
+for this member: the capability is on and the canvas's **Authoring access** admits
+their role (`authoringAudience`: every admitted viewer by default, or owners and
+editors only). It does not grant permission to edit or publish an existing canvas;
 target-canvas management roles still apply. Resource participation defaults do not
 enable authoring. See [Permissions and defaults](/docs/sdk/permissions).
 

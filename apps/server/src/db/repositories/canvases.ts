@@ -132,6 +132,7 @@ export interface CanvasCapabilitiesPatch {
   expectedRuntimePolicy?: string | null;
   aiAudience?: "editors" | "viewers";
   connectionsAudience?: "editors" | "viewers";
+  authoringAudience?: "editors" | "viewers";
   backendEnabled?: boolean;
   kv?: boolean;
   files?: boolean;
@@ -1513,6 +1514,7 @@ export function canvasesRepository(client: DbClient) {
       if (patch.aiAudience !== undefined) set.aiAudience = patch.aiAudience;
       if (patch.connectionsAudience !== undefined)
         set.connectionsAudience = patch.connectionsAudience;
+      if (patch.authoringAudience !== undefined) set.authoringAudience = patch.authoringAudience;
       // Map each present feature flag to its column via the shared taxonomy, so the
       // cap→column mapping has one source of truth (FEATURE_COLUMN).
       for (const cap of FEATURE_CAPABILITIES) {

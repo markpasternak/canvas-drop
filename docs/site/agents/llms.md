@@ -352,7 +352,8 @@ for the caller's own vote/form; `submissions.list/remove/clear` require owner/ed
 Do not use client-supplied author IDs or shared counters for viewer votes.
 Private attachments use `files.upload(file, { scope: "submission" })`.
 AI and Connections default to owner/editor audiences; opt viewers in using
-`set_capabilities` fields `aiAudience` / `connectionsAudience: "viewers"`.
+`set_capabilities` fields `aiAudience` / `connectionsAudience: "viewers"`. Authoring
+admits every member by default; set `authoringAudience: "editors"` to limit it.
 Unconfigured realtime shared publishing requires owner/editor; `participants:` channels allow
 attributed viewer messages, visible to all subscribers. Role denials are
 `PERMISSION_DENIED` and never disappear by hiding UI controls.

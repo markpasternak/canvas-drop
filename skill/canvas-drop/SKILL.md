@@ -393,6 +393,8 @@ use the existing 10,000/canvas and 1,000/author admin defaults separately from K
 
 AI and Connections each default to the `editors` audience. To support viewer
 interaction, explicitly set `aiAudience` or `connectionsAudience` to `viewers`.
+Authoring defaults to `viewers`; set `authoringAudience: "editors"` when only the
+canvas's owners and editors may publish shares from its page.
 These fields do not bypass feature switches, admin grants, quotas, guest policy
 or public static-only restrictions. Runtime admin status grants no owner bypass.
 Unconfigured ordinary realtime channels permit owner/editor publishing; `participants:` permits

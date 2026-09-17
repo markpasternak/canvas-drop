@@ -99,6 +99,7 @@ export function adminInvestigation(deps: InvestigationDeps) {
           runtimePolicy: parseRuntimePolicy(canvas.runtimePolicy),
           aiAudience: canvas.aiAudience,
           connectionsAudience: canvas.connectionsAudience,
+          authoringAudience: canvas.authoringAudience,
           publicLinkEffective:
             canvas.access === "public_link" &&
             publicEnabled &&

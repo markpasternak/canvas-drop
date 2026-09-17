@@ -134,7 +134,7 @@ export default function Capabilities() {
       <Section
         id="runtime-permissions"
         title="Who can use the backend"
-        description="Choose who can use AI and external services. Resource permissions below control participation in data, files and realtime."
+        description="Choose who can use AI, external services and page-driven authoring. Resource permissions below control participation in data, files and realtime."
       >
         {(
           [
@@ -149,12 +149,20 @@ export default function Capabilities() {
               description:
                 "Connections can send requests and trigger actions in external services. Admin grants and allowed methods still apply.",
             },
+            {
+              key: "authoringAudience",
+              title: "Authoring access",
+              description:
+                "Who may create and manage new canvases from this page, as themselves, while Authoring is on. Every admitted signed-in viewer by default.",
+            },
           ] as const
         ).map((setting) => (
           <Row key={setting.key} title={setting.title} description={setting.description}>
             <select
               aria-label={setting.title}
-              value={canvas[setting.key] ?? "editors"}
+              value={
+                canvas[setting.key] ?? (setting.key === "authoringAudience" ? "viewers" : "editors")
+              }
               disabled={!backendOn || update.isPending || canvas.status === "disabled"}
               className="max-w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg"
               onChange={(event) =>

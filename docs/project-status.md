@@ -63,3 +63,8 @@ The [publishing and brand refresh](plans/2026-09-04-001-feat-publishing-experien
 > **Maturity, honestly:** canvas-drop boots, passes the dual-dialect suite, and self-hosts via Docker, but it has not been load-tested or run through a multi-user pilot yet; those are the open M10 items. Self-host reports, issues, and PRs are welcome.
 
 Not started, and not claimed anywhere above: a CLI, DB-backed custom domains, multi-org tenancy, KV change subscriptions, and a structured-output AI helper. Plans and their status live in [`docs/plans/`](plans/).
+
+The **authoring audience** (17 September 2026) adds `authoringAudience` (`viewers` by default,
+`editors` to limit page-driven authoring to a canvas's owners and editors) to the Backend
+tab, the management API, MCP `set_capabilities` and `me().permissions.canCreateCanvas`,
+enforced on every `/authoring` operation as `PERMISSION_DENIED`.

@@ -14,6 +14,7 @@ import { requireCapability } from "../canvas/capability-guard.js";
 import { disabledError } from "../canvas/owner-guard.js";
 import { hashPasswordMutation } from "../canvas/password.js";
 import { type RoleGrant, resolveManagementGrant } from "../canvas/role.js";
+import { permissionDenied, runtimeAudienceAllows } from "../canvas/runtime-permissions.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -136,6 +137,14 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     const user = c.get("user");
     if (!user || c.get("principal")?.kind === "guest") return null;
     return { id: user.id, isAdmin: !!user.isAdmin, canPublishPublic: !!user.canPublishPublic };
+  }
+
+  /** The source canvas's authoring audience: `viewers` (default) admits every member the
+   *  runtime already admitted; `editors` limits page-driven authoring to the canvas's owners
+   *  and editors. Checked on every authoring operation, after the capability gate. */
+  function audienceAllowsHere(c: import("hono").Context<AppEnv>): boolean {
+    const source = c.get("canvas") as Canvas | undefined;
+    return runtimeAudienceAllows(c, source?.authoringAudience ?? "viewers");
   }
 
   /** The role resolver's deps (editor-roles plan, KTD1). */
@@ -364,6 +373,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   app.post("/", bundleLimit, async (c) => {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
+    if (!audienceAllowsHere(c)) return permissionDenied(c, "publish a canvas from this page");
     const source = requireCanvas(c); // canvas A (the page the viewer is on)
 
     const form = await parseForm(c, true);
@@ -529,6 +539,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   app.put("/:id", bundleLimit, async (c) => {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
+    if (!audienceAllowsHere(c)) return permissionDenied(c, "update a share from this page");
     const id = c.req.param("id");
     // Owner or editor (admin allowance kept, KTD12); a non-managed / missing id reads as
     // not-found (no existence leak).
@@ -733,6 +744,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   app.get("/", async (c) => {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
+    if (!audienceAllowsHere(c)) return permissionDenied(c, "list shares from this page");
     const orgIds = c.get("orgIds") ?? new Set<string>();
     const ids = await deps.authoringUsage.authoredIdsAmong(
       await deps.canvases.listManagedCanvasIds(viewer.id, {
@@ -787,6 +799,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   app.delete("/:id", async (c) => {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
+    if (!audienceAllowsHere(c)) return permissionDenied(c, "unpublish a share from this page");
     const id = c.req.param("id");
     // Owner or editor (admin allowance kept, KTD12); a non-managed / missing id reads as
     // not-found (no existence leak).

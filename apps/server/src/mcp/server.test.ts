@@ -611,12 +611,14 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
           authoring: true,
           aiAudience: "viewers",
           connectionsAudience: "viewers",
+          authoringAudience: "editors",
         },
       }),
     );
     expect(updated.id).toBe(cv.id);
     expect(updated.aiAudience).toBe("viewers");
     expect(updated.connectionsAudience).toBe("viewers");
+    expect(updated.authoringAudience).toBe("editors");
     // Parity: an agent can flip `authoring` (default-off) over MCP just like the Backend tab.
     expect((await canvasesRepository(client).findById(cv.id))?.capAuthoring).toBe(true);
     // No-op call (no fields) returns the canvas without error.

@@ -148,7 +148,9 @@ broadcast data; never publish private records to a shared channel.
 ## AI, Connections, identity and authoring
 
 AI chat and streaming share `aiAudience` (`editors` or `viewers`), with existing
-model and budget restrictions. Per-Connection `audience` and optional `methods`
+model and budget restrictions. Page-driven authoring shares `authoringAudience`
+(`viewers` by default, or `editors` to limit `canvasdrop.canvases` to the canvas's
+owners and editors); a refused call is `403 PERMISSION_DENIED`. Per-Connection `audience` and optional `methods`
 override the canvas audience and intersect with the live administrator grant.
 Omit `methods` to retain all administrator-approved methods; `[]` allows none.
 An operation's HTTP method is not proof of upstream ownership: the external
