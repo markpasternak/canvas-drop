@@ -290,6 +290,73 @@ describe("serveCanvas (integration)", () => {
     expect(res.status).toBe(304);
   });
 
+  describe("byte ranges (Safari and iOS media playback)", () => {
+    // index.html is "<h1>home</h1>", 13 bytes.
+    it("advertises ranges on a full response", async () => {
+      const { app } = await setup();
+      const res = await app.request("/c/s/index.html");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Accept-Ranges")).toBe("bytes");
+    });
+
+    it("answers a single range with 206 and Content-Range", async () => {
+      const { app } = await setup();
+      const res = await app.request("/c/s/index.html", { headers: { Range: "bytes=0-1" } });
+      expect(res.status).toBe(206);
+      expect(res.headers.get("Content-Range")).toBe("bytes 0-1/13");
+      expect(res.headers.get("Content-Type")).toMatch(/text\/html/);
+      expect(res.headers.get("ETag")).toBe('"hash-index.html"');
+      expect(await res.text()).toBe("<h");
+    });
+
+    it("serves open-ended, suffix and over-long ranges", async () => {
+      const { app } = await setup();
+      const open = await app.request("/c/s/index.html", { headers: { Range: "bytes=4-" } });
+      expect(open.headers.get("Content-Range")).toBe("bytes 4-12/13");
+      expect(await open.text()).toBe("home</h1>");
+      const suffix = await app.request("/c/s/index.html", { headers: { Range: "bytes=-5" } });
+      expect(suffix.headers.get("Content-Range")).toBe("bytes 8-12/13");
+      expect(await suffix.text()).toBe("</h1>");
+      const long = await app.request("/c/s/index.html", { headers: { Range: "bytes=10-999" } });
+      expect(long.status).toBe(206);
+      expect(long.headers.get("Content-Range")).toBe("bytes 10-12/13");
+    });
+
+    it("416s a range that starts past the end", async () => {
+      const { app } = await setup();
+      const res = await app.request("/c/s/index.html", { headers: { Range: "bytes=13-" } });
+      expect(res.status).toBe(416);
+      expect(res.headers.get("Content-Range")).toBe("bytes */13");
+    });
+
+    it("serves the whole file for several ranges, malformed ranges or a stale If-Range", async () => {
+      const { app } = await setup();
+      for (const headers of [
+        { Range: "bytes=0-1,4-5" },
+        { Range: "bytes=5-2" },
+        { Range: "items=0-1" },
+        { Range: "bytes=0-1", "If-Range": '"another-etag"' },
+      ]) {
+        const res = await app.request("/c/s/index.html", { headers });
+        expect(res.status).toBe(200);
+        expect(await res.text()).toBe("<h1>home</h1>");
+      }
+    });
+
+    it("honours an If-Range that matches the ETag, and If-None-Match still wins", async () => {
+      const { app } = await setup();
+      const etag = '"hash-index.html"';
+      const partial = await app.request("/c/s/index.html", {
+        headers: { Range: "bytes=0-1", "If-Range": etag },
+      });
+      expect(partial.status).toBe(206);
+      const cached = await app.request("/c/s/index.html", {
+        headers: { Range: "bytes=0-1", "If-None-Match": etag },
+      });
+      expect(cached.status).toBe(304);
+    });
+  });
+
   it("sets the §12.4 security headers (incl. COOP, added M7) — path mode", async () => {
     const { app } = await setup();
     const res = await app.request("/c/s/index.html");
