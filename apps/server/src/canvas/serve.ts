@@ -119,8 +119,60 @@ export function serveCanvas(deps: ServeDeps) {
     }
     securityHeaders(headers, deps.config);
     // Copy into a fresh Uint8Array so the body is a plain ArrayBuffer view.
-    return new Response(new Uint8Array(bytes), { status: 200, headers });
+    const body = new Uint8Array(bytes);
+    // Byte ranges (RFC 9110 §14): Safari and iOS fetch video and audio in pieces and
+    // refuse to play media from a server that answers a Range request with the whole
+    // file, so every file advertises ranges and a single range gets a 206.
+    headers.set("Accept-Ranges", "bytes");
+    const range = byteRange(c.req.header("range"), c.req.header("if-range"), etag, body.length);
+    if (range === "unsatisfiable") {
+      headers.delete("Content-Type");
+      headers.set("Content-Range", `bytes */${body.length}`);
+      return new Response(null, { status: 416, headers });
+    }
+    if (range) {
+      headers.set("Content-Range", `bytes ${range.start}-${range.end}/${body.length}`);
+      return new Response(body.slice(range.start, range.end + 1), { status: 206, headers });
+    }
+    return new Response(body, { status: 200, headers });
   });
+}
+
+export interface ByteRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * The single byte range a request asks for (inclusive `start`–`end`), `"unsatisfiable"`
+ * for a range that starts past the end of the file, or `null` to serve the whole file.
+ * Whole file too when the header is absent, malformed, asks for several ranges (a
+ * server may ignore Range, RFC 9110 §14.2), or carries an `If-Range` that does not
+ * match our strong ETag (the client's cached part is stale).
+ */
+export function byteRange(
+  header: string | undefined,
+  ifRange: string | undefined,
+  etag: string,
+  size: number,
+): ByteRange | "unsatisfiable" | null {
+  if (!header) return null;
+  if (ifRange !== undefined && ifRange.trim() !== etag) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m) return null;
+  const [, first = "", last = ""] = m;
+  if (first === "" && last === "") return null;
+  if (first === "") {
+    // Suffix range: the last N bytes.
+    const n = Number(last);
+    if (n === 0 || size === 0) return "unsatisfiable";
+    return { start: Math.max(0, size - n), end: size - 1 };
+  }
+  const start = Number(first);
+  if (start >= size) return "unsatisfiable";
+  const end = last === "" ? size - 1 : Math.min(Number(last), size - 1);
+  if (end < start) return null;
+  return { start, end };
 }
 
 /**
