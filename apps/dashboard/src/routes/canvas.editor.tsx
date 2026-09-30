@@ -2,6 +2,7 @@ import {
   ArrowSquareOut,
   DownloadSimple,
   Eye,
+  LinkSimple,
   PencilSimple,
   Plus,
   Trash,
@@ -12,6 +13,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
+import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
 import { CodeEditor } from "../components/CodeEditor.js";
@@ -866,6 +868,38 @@ export default function Editor() {
     </WorkspacePane>
   );
 
+  const fileLinkMenu = fileUrl ? (
+    <ActionMenu label="File link" icon={<LinkSimple size={15} weight="bold" aria-hidden />}>
+      <div className="w-72 max-w-[calc(100vw-2rem)] space-y-1 border-b border-border px-2 py-2">
+        <p className="break-all font-mono text-xs text-fg">{fileUrl}</p>
+        <p className="text-xs text-muted">
+          {!fileIsLive
+            ? "Canvas is offline"
+            : publishedFiles.isError
+              ? "Published status unavailable"
+              : publishedFiles.isPending
+                ? "Checking published file…"
+                : !publishedFile
+                  ? "Not published yet"
+                  : publishedFile.hash !== selectedFile?.hash || localDirty !== "clean"
+                    ? "Draft differs from published file"
+                    : "Published file"}
+        </p>
+      </div>
+      <ActionMenuItem onSelect={() => copy(fileUrl, "File URL copied")}>Copy URL</ActionMenuItem>
+      {fileIsLive && publishedFile && !publishedFiles.isError && (
+        <ActionMenuItem
+          href={publishedFile.url}
+          target="_blank"
+          rel="noreferrer"
+          icon={<ArrowSquareOut size={15} aria-hidden />}
+        >
+          Open published file
+        </ActionMenuItem>
+      )}
+    </ActionMenu>
+  ) : null;
+
   const selectedActions =
     selected && selectedFile ? (
       <div className="flex items-center gap-1">
@@ -902,6 +936,7 @@ export default function Editor() {
         >
           <Trash size={15} weight="bold" aria-hidden />
         </IconButton>
+        {fileLinkMenu}
       </div>
     ) : null;
 
@@ -929,45 +964,6 @@ export default function Editor() {
             </>
           }
         />
-        {fileUrl && (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-raised px-4 py-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <p className="break-all font-mono text-xs text-fg">{fileUrl}</p>
-              <p className="text-xs text-muted">
-                {!fileIsLive
-                  ? "Canvas is offline"
-                  : publishedFiles.isError
-                    ? "Published status unavailable"
-                    : publishedFiles.isPending
-                      ? "Checking published file…"
-                      : !publishedFile
-                        ? "Not published yet"
-                        : publishedFile.hash !== selectedFile?.hash || localDirty !== "clean"
-                          ? "Draft differs from published file"
-                          : "Published file"}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => copy(fileUrl, "File URL copied")}
-              >
-                Copy URL
-              </Button>
-              {fileIsLive && publishedFile && !publishedFiles.isError && (
-                <IconLink
-                  href={publishedFile.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  label="Open published file"
-                >
-                  <ArrowSquareOut size={15} aria-hidden />
-                </IconLink>
-              )}
-            </div>
-          </div>
-        )}
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{body}</div>
       </WorkspacePane>
     ) : null;

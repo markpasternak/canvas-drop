@@ -136,11 +136,17 @@ describe("Editor route", () => {
         }),
     });
     renderEditor();
-    const link = await screen.findByRole("link", { name: "Open published file" });
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole("button", { name: "File link" });
+    expect(screen.queryByText(url)).not.toBeInTheDocument();
+    await user.click(trigger);
+    const link = await screen.findByRole("menuitem", { name: "Open published file" });
     expect(link).toHaveAttribute("href", url);
     expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByText(url)).toBeInTheDocument();
     expect(screen.getByText("Draft differs from published file")).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Copy URL" }));
+    expect(await navigator.clipboard.readText()).toBe(url);
   });
 
   it("labels a new draft file without offering to open a nonexistent published file", async () => {
@@ -151,8 +157,9 @@ describe("Editor route", () => {
       "GET /api/canvases/c1/published-files": () => json({ version: 1, files: [] }),
     });
     renderEditor();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "File link" }));
     expect(await screen.findByText("Not published yet")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Open published file" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Open published file" })).not.toBeInTheDocument();
   });
   it("lists draft files and loads the selected file's content", async () => {
     mockFetch({

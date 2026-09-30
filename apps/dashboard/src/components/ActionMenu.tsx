@@ -54,11 +54,13 @@ export function ActionMenu({
   align = "end",
   children,
   className,
+  icon,
 }: {
   label: string;
   align?: Align;
   children: ReactNode;
   className?: string;
+  icon?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<Position | null>(null);
@@ -168,6 +170,7 @@ export function ActionMenu({
         type="button"
         className="grid size-8 cursor-pointer place-items-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
         aria-label={label}
+        title={label}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
@@ -179,7 +182,7 @@ export function ActionMenu({
           }
         }}
       >
-        <DotsThreeVertical size={18} weight="bold" aria-hidden />
+        {icon ?? <DotsThreeVertical size={18} weight="bold" aria-hidden />}
       </button>
       {mounted &&
         createPortal(
