@@ -17,3 +17,6 @@ Show the URL for the file selected in the canvas editor and open its published c
 
 ## Verification and delivery
 Run lint, typecheck and the complete dual-dialect/dashboard suite, then build. Review the complete diff sequentially in the main thread as requested. Verify desktop/mobile rendering. Push a feature branch, require green CI, squash merge, back up production, deploy main, verify live behavior and health, then remove the merged worktree/branch.
+
+## Compact toolbar follow-up
+Replace the always-visible file URL strip with one link icon in the existing toolbar. Its menu reveals the URL and publication status with Copy URL and Open published file actions. Reuse the accessible action menu and retain the existing live-file checks.
