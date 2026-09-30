@@ -155,7 +155,9 @@ export function ActionRow({
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
       <div className="min-w-0 space-y-0.5">
         <p className="text-sm font-medium text-fg">{title}</p>
-        {description && <div className="text-xs leading-relaxed text-muted">{description}</div>}
+        {description && (
+          <div className="max-w-2xl text-sm leading-relaxed text-muted">{description}</div>
+        )}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-1.5">{children}</div>
     </div>

@@ -1,6 +1,6 @@
 import type { Manifest } from "@canvas-drop/shared/db";
 import { describe, expect, it } from "vitest";
-import { rootEntry, soleHtmlEntry } from "./manifest.js";
+import { manifestFiles, rootEntry, soleHtmlEntry } from "./manifest.js";
 
 const html = (): { size: number; hash: string; mime: string } => ({
   size: 1,
@@ -8,6 +8,21 @@ const html = (): { size: number; hash: string; mime: string } => ({
   mime: "text/html; charset=utf-8",
 });
 const asset = (mime: string) => ({ size: 1, hash: "h", mime });
+
+describe("manifestFiles", () => {
+  it("encodes each segment while preserving nested paths and base routing", () => {
+    const path = "pages/Q3 #1%?.html";
+    for (const base of ["https://sample.canvas-drop.com/", "https://example.com/c/sample"]) {
+      expect(manifestFiles({ [path]: html() }, base)).toEqual([
+        {
+          path,
+          url: `${base.replace(/\/$/, "")}/pages/Q3%20%231%25%3F.html`,
+          ...html(),
+        },
+      ]);
+    }
+  });
+});
 
 describe("soleHtmlEntry", () => {
   it("returns the path when exactly one HTML file exists, ignoring non-HTML", () => {

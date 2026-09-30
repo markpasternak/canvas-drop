@@ -1,4 +1,5 @@
 import {
+  ArrowSquareOut,
   DownloadSimple,
   Eye,
   PencilSimple,
@@ -50,7 +51,7 @@ import {
   useUploadDraftFile,
   useUploadDraftFiles,
 } from "../lib/mutations.js";
-import { keys, useCanvas, useDraft } from "../lib/queries.js";
+import { keys, useCanvas, useDraft, usePublishedFiles } from "../lib/queries.js";
 
 const AUTOSAVE_MS = 700;
 const ROOT_HTML = "index.html";
@@ -167,6 +168,13 @@ export default function Editor() {
   const copy = useClipboardCopy();
 
   const selectedFile: DraftFile | undefined = draft?.files.find((f) => f.path === selected);
+  const publishedFiles = usePublishedFiles(id, canvas?.currentVersionId, canvas?.url);
+  const publishedFile = publishedFiles.data?.files.find((f) => f.path === selected);
+  const fileUrl =
+    selected && canvas
+      ? `${canvas.url.replace(/\/$/, "")}/${selected.split("/").map(encodeURIComponent).join("/")}`
+      : null;
+  const fileIsLive = canvas?.publicationState === "published" && canvas.status === "active";
   const editable = selectedFile ? isEditableFile(selectedFile) : false;
 
   // On-page editing is only offered for a single static HTML page (see singleHtmlFile).
@@ -921,6 +929,45 @@ export default function Editor() {
             </>
           }
         />
+        {fileUrl && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-raised px-4 py-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="break-all font-mono text-xs text-fg">{fileUrl}</p>
+              <p className="text-xs text-muted">
+                {!fileIsLive
+                  ? "Canvas is offline"
+                  : publishedFiles.isError
+                    ? "Published status unavailable"
+                    : publishedFiles.isPending
+                      ? "Checking published file…"
+                      : !publishedFile
+                        ? "Not published yet"
+                        : publishedFile.hash !== selectedFile?.hash || localDirty !== "clean"
+                          ? "Draft differs from published file"
+                          : "Published file"}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => copy(fileUrl, "File URL copied")}
+              >
+                Copy URL
+              </Button>
+              {fileIsLive && publishedFile && !publishedFiles.isError && (
+                <IconLink
+                  href={publishedFile.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  label="Open published file"
+                >
+                  <ArrowSquareOut size={15} aria-hidden />
+                </IconLink>
+              )}
+            </div>
+          </div>
+        )}
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{body}</div>
       </WorkspacePane>
     ) : null;

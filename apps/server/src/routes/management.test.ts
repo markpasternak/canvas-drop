@@ -4414,3 +4414,55 @@ describe("managementRoutes — owned-or-edited list", () => {
     expect(one).toMatchObject({ role: "editor", ownerId: owner.id });
   });
 });
+
+describe.each(DIALECTS)("management published file URLs (%s)", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => client?.close());
+
+  it("reads only the live manifest for owner/editor and conceals it from viewers and other users", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const viewer = await seedUser(client, "viewer");
+    const other = await seedUser(client, "other");
+    const repo = canvasesRepository(client);
+    const storage = memStorage();
+    const cv = await repo.create({ ownerId: owner.id, slug: "file-links", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer.id });
+    const as = (u: { id: string }) => buildApp(client, { id: u.id, isAdmin: false }, storage);
+    const endpoint = `/api/canvases/${cv.id}/published-files`;
+    expect(await (await as(owner).request(endpoint)).json()).toEqual({ version: null, files: [] });
+    const engine = deployEngine({
+      config,
+      canvases: repo,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage,
+      log: silent,
+    });
+    await engine.deploy(
+      cv,
+      "folder",
+      folder({ "pages/report #1.html": "<h1>published</h1>" }),
+      owner.id,
+    );
+    const expected = await (await as(owner).request(endpoint)).json();
+    expect(expected).toMatchObject({
+      version: 1,
+      files: [
+        { path: "pages/report #1.html", url: expect.stringContaining("/pages/report%20%231.html") },
+      ],
+    });
+    expect(await (await as(editor).request(endpoint)).json()).toEqual(expected);
+    expect((await as(viewer).request(endpoint)).status).toBe(404);
+    expect((await as(other).request(endpoint)).status).toBe(404);
+    await repo.unpublish(cv.id);
+    expect(await (await as(owner).request(endpoint)).json()).toEqual({ version: null, files: [] });
+  });
+});

@@ -25,6 +25,7 @@ export const keys = {
   // when a settings edit adds/removes a tag.
   canvasTags: ["canvases", "tags"] as const,
   canvas: (id: string) => ["canvas", id] as const,
+  publishedFiles: (id: string) => ["canvas", id, "published-files"] as const,
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
   // Per-file draft content cache (the editor's CodeMirror source of truth on file
@@ -96,6 +97,19 @@ export function useVersions(id: string) {
 
 export function useDraft(id: string) {
   return useQuery({ queryKey: keys.draft(id), queryFn: () => api.getDraft(id) });
+}
+
+export function usePublishedFiles(
+  id: string,
+  versionId: string | null | undefined,
+  url: string | undefined,
+) {
+  return useQuery({
+    // A changed publication or address must never reuse the previous file links.
+    queryKey: [...keys.publishedFiles(id), versionId, url],
+    queryFn: () => api.getPublishedFiles(id),
+    enabled: url !== undefined,
+  });
 }
 
 // `enabled` lets callers skip the request for canvases with no backend — there's

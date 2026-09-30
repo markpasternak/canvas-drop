@@ -223,24 +223,22 @@ describe("settings route", () => {
     );
   });
 
-  it("tiers settings rows: visibility/credential badges and destructive danger buttons", async () => {
-    // Published so both visibility rows + both destructive rows render.
+  it("separates reversible management from destructive actions and keeps credential consequences visible", async () => {
     const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
     mockFetch({ "GET /api/canvases/c1": () => json(published) });
     renderSettings();
 
-    // Visibility-changing rows (slug + preview) carry a neutral/info-toned affordance badge.
-    expect(await screen.findByText("Changes the link")).toBeInTheDocument();
-    expect(screen.getByText("Changes what others see")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Cover image" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Manage canvas" })).toBeInTheDocument();
 
     // Credential row (regenerate key) carries a warning badge + consequence helper text.
     const credBadge = screen.getByText("Credential");
     expect(credBadge).toHaveClass("text-warning");
     expect(screen.getByText(/will stop deploying until you update them/i)).toBeInTheDocument();
 
-    // Destructive rows (archive + delete) use the danger Button variant + a warning icon.
+    // Archive is reversible; deletion carries the danger treatment.
     const archiveBtn = screen.getByRole("button", { name: "Archive canvas" });
-    expect(archiveBtn).toHaveClass("bg-danger");
+    expect(archiveBtn).not.toHaveClass("bg-danger");
     expect(archiveBtn.querySelector("svg")).not.toBeNull();
     const deleteBtn = screen.getByRole("button", { name: "Delete canvas" });
     expect(deleteBtn).toHaveClass("bg-danger");

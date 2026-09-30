@@ -1,8 +1,6 @@
 import { cn } from "../lib/cn.js";
 
-/** Floating in-page table of contents for the (long) settings page. Sticks
- *  beside the content on wide screens; hidden on narrow ones where the page is
- *  short enough to scroll. Mirrors the detail-tab idiom (accent active border). */
+/** In-page navigation: a compact scrollable row on mobile, sticky list on desktop. */
 export function SettingsNav({
   sections,
   active,
@@ -15,8 +13,11 @@ export function SettingsNav({
   ariaLabel?: string;
 }) {
   return (
-    <nav aria-label={ariaLabel} className="hidden lg:block lg:sticky lg:top-20 lg:self-start">
-      <ul className="border-l border-border">
+    <nav
+      aria-label={ariaLabel}
+      className="mb-6 overflow-x-auto lg:sticky lg:top-20 lg:mb-0 lg:self-start"
+    >
+      <ul className="flex gap-1 lg:flex-col">
         {sections.map((s) => (
           <li key={s.id}>
             <a
@@ -35,10 +36,10 @@ export function SettingsNav({
               }}
               aria-current={active === s.id ? "true" : undefined}
               className={cn(
-                "-ml-px block border-l-2 py-1.5 pl-3 text-sm transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
+                "block whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
                 active === s.id
-                  ? "border-accent font-medium text-fg"
-                  : "border-transparent text-muted hover:border-border-strong hover:text-fg",
+                  ? "bg-surface-sunken font-medium text-fg"
+                  : "text-muted hover:bg-surface-raised hover:text-fg",
               )}
             >
               {s.label}

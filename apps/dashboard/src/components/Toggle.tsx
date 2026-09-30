@@ -29,7 +29,7 @@ export function Toggle({
           {label}
         </span>
         {description && (
-          <p id={descId} className="text-xs text-muted">
+          <p id={descId} className="max-w-2xl text-sm leading-relaxed text-muted">
             {description}
           </p>
         )}
