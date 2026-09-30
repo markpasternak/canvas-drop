@@ -121,6 +121,39 @@ const draftView = (over: Partial<Record<string, unknown>> = {}) => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Editor route", () => {
+  it("shows and opens the selected file's published URL, including nested encoded paths", async () => {
+    const path = "pages/quarterly report.html";
+    const url = "http://x/c/quiet-otter/pages/quarterly%20report.html";
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(draftView({ files: [{ path, size: 10, mime: "text/html", hash: "draft-hash" }] })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "GET /api/canvases/c1/published-files": () =>
+        json({
+          version: 1,
+          files: [{ path, url, hash: "live-hash", size: 10, mime: "text/html" }],
+        }),
+    });
+    renderEditor();
+    const link = await screen.findByRole("link", { name: "Open published file" });
+    expect(link).toHaveAttribute("href", url);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(screen.getByText(url)).toBeInTheDocument();
+    expect(screen.getByText("Draft differs from published file")).toBeInTheDocument();
+  });
+
+  it("labels a new draft file without offering to open a nonexistent published file", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("x"),
+      "GET /api/canvases/c1/published-files": () => json({ version: 1, files: [] }),
+    });
+    renderEditor();
+    expect(await screen.findByText("Not published yet")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open published file" })).not.toBeInTheDocument();
+  });
   it("lists draft files and loads the selected file's content", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),

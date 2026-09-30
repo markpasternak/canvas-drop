@@ -35,9 +35,9 @@ import { useSectionNav } from "../lib/use-section-nav.js";
 
 const SECTIONS = [
   { id: "url-routing", label: "URL & routing" },
-  { id: "preview", label: "Preview" },
+  { id: "preview", label: "Cover image" },
   { id: "deploy-api", label: "Deploy API" },
-  { id: "lifecycle", label: "Lifecycle" },
+  { id: "lifecycle", label: "Manage canvas" },
   { id: "danger", label: "Danger zone" },
 ] as const;
 
@@ -111,20 +111,15 @@ export default function Settings() {
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <SettingsNav sections={SECTIONS} active={activeSection} onSelect={selectSection} />
-      <div className="space-y-6">
+      <div className="min-w-0 max-w-4xl space-y-8">
         <Section
           id="url-routing"
           title="URL & routing"
           description="Control the stable URL and how unknown paths resolve."
         >
           <Row
-            title={
-              <span className="flex flex-wrap items-center gap-2">
-                Canvas URL
-                <Badge tone="accent">Changes the link</Badge>
-              </span>
-            }
-            description={<span className="block truncate font-mono">{canvas.url}</span>}
+            title="Canvas URL"
+            description={<span className="block break-all font-mono text-sm">{canvas.url}</span>}
           >
             <CopyButton
               ref={urlCopyRef}
@@ -142,7 +137,7 @@ export default function Settings() {
           <RowDivider />
           <Toggle
             label="Single-page app mode"
-            description="Serve your home page for any unknown URL, so a JavaScript app's own routing works on reload and deep links. Leave off for multi-page sites, otherwise mistyped links show the home page instead of not found."
+            description="Serve the home page for unknown paths. Enable for apps with client-side routing; leave off for multi-page sites."
             checked={canvas.spaFallback}
             onChange={(spaFallback) => save({ spaFallback })}
           />
@@ -150,7 +145,7 @@ export default function Settings() {
 
         <Section
           id="preview"
-          title="Preview"
+          title="Cover image"
           description="The cover image shown for this canvas in your dashboard and the gallery."
         >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -211,7 +206,6 @@ export default function Settings() {
                 </>
               ) : (
                 <>
-                  <Badge tone="accent">Changes what others see</Badge>
                   <Toggle
                     label="Generate a preview automatically"
                     description="Capture a screenshot of your canvas each time you publish, and use it as the cover. Turn off to show a generated placeholder instead."
@@ -286,7 +280,7 @@ export default function Settings() {
 
         <Section
           id="lifecycle"
-          title="Lifecycle"
+          title="Manage canvas"
           description="Duplicate, take offline, or retire this canvas without deleting it."
         >
           <Row
@@ -335,9 +329,9 @@ export default function Settings() {
           ) : (
             <Row
               title="Archive canvas"
-              description="Takes it offline and moves it to your Archived view — anyone with the link loses access until you unarchive. Reversible."
+              description="Takes it offline and moves it to Archived. Unarchive to restore access at the same URL."
             >
-              <Button size="sm" variant="danger" onClick={() => setConfirm("archive")}>
+              <Button size="sm" variant="secondary" onClick={() => setConfirm("archive")}>
                 <Warning size={15} weight="bold" aria-hidden />
                 Archive canvas
               </Button>

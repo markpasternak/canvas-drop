@@ -25,7 +25,7 @@ import { memberPrincipal, resolvePublicLinkEnabled } from "../canvas/authorizati
 import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
-import { rootEntry } from "../canvas/manifest.js";
+import { liveManifest, manifestFiles, rootEntry } from "../canvas/manifest.js";
 import {
   classifyMutability,
   disabledError,
@@ -1318,8 +1318,19 @@ export function managementRoutes(deps: ManagementDeps) {
     );
   });
 
+  // Published metadata uses the editor's existing owner/editor gate.
+  app.get("/:id/published-files", async (c) => {
+    const cv = await managedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const live = await liveManifest(deps.versions, cv.currentVersionId);
+    return c.json({
+      version: live?.number ?? null,
+      files: live ? manifestFiles(live.manifest, canvasUrl(deps.config, cv.slug)) : [],
+    });
+  });
+
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
-  // endpoint — owner-only, no existence leak. GET, so no same-origin guard.
+  // endpoint — owner/editor, no existence leak. GET, so no same-origin guard.
   app.get("/:id/versions", async (c) => {
     const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);

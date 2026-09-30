@@ -1581,6 +1581,11 @@ export const api = {
   unpublishCanvas: (id: string) =>
     request<Canvas>(`/api/canvases/${id}/unpublish`, { method: "POST" }),
 
+  getPublishedFiles: (id: string) =>
+    request<{ version: number | null; files: (DraftFile & { url: string })[] }>(
+      `/api/canvases/${id}/published-files`,
+    ),
+
   listVersions: (id: string) =>
     request<{ versions: VersionInfo[] }>(`/api/canvases/${id}/versions`).then((r) => r.versions),
 

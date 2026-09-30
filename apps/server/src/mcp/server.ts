@@ -6,7 +6,7 @@ import {
   PolicyConflictError,
   runtimePolicySchema,
 } from "@canvas-drop/shared";
-import type { Canvas, Manifest } from "@canvas-drop/shared/db";
+import type { Canvas } from "@canvas-drop/shared/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
@@ -17,7 +17,7 @@ import { memberPrincipal, resolvePublicLinkEnabled } from "../canvas/authorizati
 import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
-import { liveManifest } from "../canvas/manifest.js";
+import { liveManifest, manifestFiles } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
 import {
   classifyMutability,
@@ -964,7 +964,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "Read back what is LIVE on a canvas you own or edit — the way to verify a deploy. The live URL " +
         "is access-controlled (an unauthenticated GET returns a login page, not your files), so " +
         "confirm a deploy through here, never by fetching the URL. Omit `path` to list the live " +
-        "version's files (path, size, mime, hash); pass `path` (e.g. 'index.html') to get that " +
+        "version's files (path, url, size, mime, hash); pass `path` (e.g. 'index.html') to get that " +
         "file's content — text as UTF-8, binary as base64. Files over 256 KiB return metadata " +
         "(size + hash) only; verify those by comparing the hash to what you deployed.",
       inputSchema: {
@@ -982,29 +982,28 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const live = await liveManifest(deps.versions, cv.currentVersionId);
       if (!live) return fail("this canvas has no live version yet");
       const { number: version, manifest } = live;
-      const paths = Object.keys(manifest).sort();
+      const files = manifestFiles(manifest, canvasUrl(deps.config, cv.slug));
 
       // No path → the live file listing: a cheap "what's actually live" check that
       // never pulls blob bytes into context.
       if (path == null) {
         return ok({
           version,
-          fileCount: paths.length,
-          files: paths.map((p) => {
-            const e = manifest[p] as Manifest[string];
-            return { path: p, size: e.size, mime: e.mime, hash: e.hash };
-          }),
+          fileCount: files.length,
+          files,
         });
       }
 
       const entry = manifest[path];
       if (!entry) return fail(`no file at "${path}" in the live version`);
+      const url = files.find((file) => file.path === path)?.url;
       // Don't inline a large blob — return metadata so the agent can verify by hash
       // (or fetch the raw bytes over HTTP via the readback endpoint, which has no cap).
       if (entry.size > READBACK_MAX_BYTES) {
         return ok({
           version,
           path,
+          url,
           size: entry.size,
           mime: entry.mime,
           hash: entry.hash,
@@ -1018,6 +1017,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       return ok({
         version,
         path,
+        url,
         size: entry.size,
         mime: entry.mime,
         hash: entry.hash,

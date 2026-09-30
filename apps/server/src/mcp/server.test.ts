@@ -485,6 +485,8 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(file.encoding).toBe("utf8");
     expect(file.content).toBe("<h1>hello</h1>");
     expect(file.hash).toBe(sha("<h1>hello</h1>"));
+    expect(file.url).toBe(`${created.url.replace(/\/$/, "")}/index.html`);
+    expect(listing.files.find((f: { path: string }) => f.path === "index.html").url).toBe(file.url);
 
     // A path not in the live version fails cleanly.
     const missing = await mcp.callTool({

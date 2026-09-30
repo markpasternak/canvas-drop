@@ -1,6 +1,17 @@
 import type { Manifest } from "@canvas-drop/shared/db";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 
+/** Metadata and browser URLs for the exact files in a published version. */
+export function manifestFiles(manifest: Manifest, baseUrl: string) {
+  return Object.keys(manifest)
+    .sort()
+    .map((path) => ({
+      path,
+      url: `${baseUrl.replace(/\/$/, "")}/${path.split("/").map(encodeURIComponent).join("/")}`,
+      ...manifest[path],
+    }));
+}
+
 /**
  * The live (current + ready) version's number and manifest for a canvas, or null
  * when nothing is live (never deployed, or the pointer is at a non-ready version).
