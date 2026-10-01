@@ -84,7 +84,7 @@ type CaptureImg = {
 };
 type CaptureWindow = {
   innerHeight?: number;
-  scrollTo?: (x: number, y: number) => void;
+  scrollTo?: (opts: { top: number; left: number; behavior: "instant" }) => void;
   document?: {
     body?: { scrollHeight?: number };
     fonts?: { ready?: Promise<unknown> };
@@ -97,6 +97,10 @@ type CaptureWindow = {
  * steps to trigger lazy media + scroll-revealed content, return to the top for the shot,
  * then wait (within a ~3s budget) for web fonts and above-the-fold images to load. Pure
  * and dependency-free so it serializes cleanly; reads globals via a typed `globalThis`.
+ *
+ * Every scroll is `behavior: "instant"`. A page that sets `scroll-behavior: smooth` would
+ * otherwise animate each jump, so the return to the top was still in flight when the
+ * screenshot fired and the cover showed a stretch of empty page further down.
  */
 async function settleForCapture(): Promise<void> {
   const w = globalThis as unknown as CaptureWindow;
@@ -107,10 +111,10 @@ async function settleForCapture(): Promise<void> {
   const max = w.document?.body?.scrollHeight ?? vh;
   if (typeof w.scrollTo === "function") {
     for (let y = vh; y < max && Date.now() - start < budget; y += vh) {
-      w.scrollTo(0, y);
+      w.scrollTo({ top: y, left: 0, behavior: "instant" });
       await sleep(100);
     }
-    w.scrollTo(0, 0);
+    w.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }
   const fonts = w.document?.fonts?.ready ?? Promise.resolve();
   const images = w.document?.images;

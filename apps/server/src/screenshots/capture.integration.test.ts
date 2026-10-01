@@ -27,6 +27,14 @@ describe.skipIf(!RUN)("captureCanvas — real Chromium (opt-in)", () => {
     server = createServer((req, res) => {
       if (req.headers.host) seenHosts.push(req.headers.host);
       res.writeHead(200, { "content-type": "text/html" });
+      if (req.url === "/smooth") {
+        // A long page that animates scrolls: a red hero over a tall white body.
+        res.end(
+          "<!doctype html><html style='scroll-behavior:smooth'><body style='margin:0;background:#fff'>" +
+            "<div style='height:960px;background:#f00'></div><div style='height:12000px'></div></body></html>",
+        );
+        return;
+      }
       res.end("<!doctype html><html><body style='background:#123'><h1>hi</h1></body></html>");
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -51,6 +59,22 @@ describe.skipIf(!RUN)("captureCanvas — real Chromium (opt-in)", () => {
     const og = await sharp(out.og).metadata();
     expect(og.format).toBe("webp");
     expect(og.width).toBe(RENDITION_SIZES.og.width);
+    // biome-ignore lint/suspicious/noExplicitAny: real Playwright context close
+    await (context as any).close();
+  });
+
+  it("shoots the top of a page that sets scroll-behavior: smooth, not mid-scroll", async () => {
+    const context = (await browser.newContext()) as unknown as CaptureContext;
+    const out = await captureCanvas({
+      context,
+      url: `${origin}/smooth`,
+      token: "tok",
+      timeoutMs: 15_000,
+    });
+    // The whole frame is the red hero. Caught mid-scroll it would be white page body.
+    const { data } = await sharp(out.card).resize(1, 1).raw().toBuffer({ resolveWithObject: true });
+    expect(data[0]).toBeGreaterThan(200);
+    expect(data[1]).toBeLessThan(60);
     // biome-ignore lint/suspicious/noExplicitAny: real Playwright context close
     await (context as any).close();
   });

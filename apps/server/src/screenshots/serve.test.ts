@@ -10,7 +10,7 @@ import { usersRepository } from "../db/repositories/users.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
-import { PREVIEW_ASSET_PATH, servePreview } from "./serve.js";
+import { PREVIEW_ASSET_PATH, previewOgImageUrl, servePreview } from "./serve.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 const PREVIEW_URL = `/c/s/${PREVIEW_ASSET_PATH}`;
@@ -187,5 +187,33 @@ describe("servePreview — access gating via the real canvas chain (U7 / R5)", (
   it("denies a private canvas's preview to a non-owner (canvasAccess 404s before serving) — R5", async () => {
     const { otherApp } = await chain();
     expect((await otherApp.request(PREVIEW_URL)).status).toBe(404);
+  });
+});
+
+describe("previewOgImageUrl (plan 004 / U9)", () => {
+  const sub: Config = loadConfig({
+    CANVAS_DROP_URL_MODE: "subdomain",
+    CANVAS_DROP_BASE_URL: "https://canvas-drop.com",
+  });
+  const deps = (job: { status: string; versionId: string } | null, enabled = true) => ({
+    config: sub,
+    enabled: async () => enabled,
+    findJob: async () => job,
+  });
+  const canvas = { id: "c1", slug: "planner", previewMode: "auto" } as const;
+  const done = { status: "done", versionId: "v 1" };
+
+  it("advertises the captured og rendition, cache-busted by the captured version", async () => {
+    expect(await previewOgImageUrl(canvas, deps(done))).toBe(
+      `https://planner.canvas-drop.com/${PREVIEW_ASSET_PATH}?rendition=og&v=v%201`,
+    );
+  });
+
+  it("never advertises an image the preview route would 404", async () => {
+    // Owner turned the preview off: the serve route 404s even with a finished capture.
+    expect(await previewOgImageUrl({ ...canvas, previewMode: "off" }, deps(done))).toBeNull();
+    expect(await previewOgImageUrl(canvas, deps(done, false))).toBeNull();
+    expect(await previewOgImageUrl(canvas, deps(null))).toBeNull();
+    expect(await previewOgImageUrl(canvas, deps({ status: "pending", versionId: "v" }))).toBeNull();
   });
 });

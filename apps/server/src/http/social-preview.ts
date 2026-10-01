@@ -7,6 +7,7 @@ import { SESSION_COOKIE } from "../auth/session.js";
 import { isAnonymouslyPublic } from "../canvas/authorization.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { resolveRequest } from "../routing/resolve-request.js";
+import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
@@ -60,6 +61,14 @@ export function htmlDeclaresSocialTags(html: string): boolean {
   return OWN_SOCIAL_META.test(html);
 }
 
+// An image the crawler is fetching (the og:image it just scraped, or a direct link
+// to a picture): it must get the bytes, never another HTML card. The reserved preview
+// path carries no extension, so it is matched by name.
+const IMAGE_PATH = new RegExp(
+  `(?:\\.(?:png|jpe?g|gif|webp|avif|svg|ico)|/${PREVIEW_ASSET_PATH})$`,
+  "i",
+);
+
 /** Does this request look like a top-level document fetch (vs an asset/API call)? */
 function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua: string): boolean {
   if (accept.includes("text/html")) return true;
@@ -92,7 +101,7 @@ export function socialPreview(
     //     per-canvas card with the canvas's already-public title. A real visitor
     //     (non-crawler UA) falls through and gets the canvas itself.
     if (principal?.kind === "anonymous") {
-      if (canvases && isGetDoc && CRAWLER_UA.test(ua)) {
+      if (canvases && isGetDoc && CRAWLER_UA.test(ua) && !IMAGE_PATH.test(c.req.path)) {
         const { canvasSlug } = resolveRequest(
           { host: c.req.header("host") ?? "", pathname: c.req.path },
           config,

@@ -22,7 +22,6 @@ import { filesService } from "./canvas/files-service.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { blobKey } from "./canvas/storage-keys.js";
-import { canvasUrl } from "./canvas/url.js";
 import { connectionLimits } from "./connections/limits.js";
 import { createSecretCipher } from "./connections/secret-cipher.js";
 import { connectionService } from "./connections/service.js";
@@ -91,7 +90,7 @@ import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { teamsRoutes } from "./routes/teams.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import { captureResolver } from "./screenshots/capture-resolver.js";
-import { PREVIEW_ASSET_PATH, servePreview } from "./screenshots/serve.js";
+import { previewOgImageUrl, servePreview } from "./screenshots/serve.js";
 import type { StorageDriver } from "./storage/driver.js";
 import { teamsService } from "./teams/service.js";
 import { composeServices } from "./wiring.js";
@@ -544,15 +543,14 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     socialPreview(
       deps.config,
       deps.canvases,
-      async (canvas) => {
-        // Per-canvas OG image (plan 004 / U9), public_link only (this resolver is only
-        // consulted on the anonymous card). Only when enabled AND a preview is captured;
-        // cache-bust by the captured version. Else null → branded /og.png.
-        if (!(await settingsSvc.effectiveScreenshotsEnabled())) return null;
-        const job = await screenshots.findByCanvas(canvas.id);
-        if (job?.status !== "done") return null;
-        return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${encodeURIComponent(job.versionId)}`;
-      },
+      // Per-canvas OG image (plan 004 / U9), public_link only: this resolver is only
+      // consulted on the anonymous card.
+      (canvas) =>
+        previewOgImageUrl(canvas, {
+          config: deps.config,
+          enabled: () => settingsSvc.effectiveScreenshotsEnabled(),
+          findJob: (id) => screenshots.findByCanvas(id),
+        }),
       // Reads the published home document so socialPreview can defer to a canvas that
       // ships its own OG/Twitter tags. Bounded to the <head>-bearing prefix (64 KiB)
       // so a large HTML doc can't turn a crawler unfurl into a big read/decode.
