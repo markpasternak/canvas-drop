@@ -91,6 +91,11 @@ export function socialPreview(
    *  their own OG/Twitter metadata is never overridden. */
   homeHtml?: (canvas: Canvas) => Promise<string | null>,
 ) {
+  // The branded card image lives on the instance origin only. On a canvas subdomain
+  // `/og.png` is the canvas's own (gated) path, so an unfurler fetching it there got
+  // this HTML card back instead of an image and showed an empty preview.
+  const brandImage = `${config.baseUrl.replace(/\/$/, "")}/og.png`;
+
   return createMiddleware<AppEnv>(async (c, next) => {
     const principal = c.get("principal");
     const method = c.req.method;
@@ -158,7 +163,7 @@ export function socialPreview(
               title,
               description,
               redirect: false,
-              image,
+              image: image ?? brandImage,
             }),
           );
         }
@@ -188,7 +193,7 @@ export function socialPreview(
     // Forward where the visitor was headed so they return to the shared canvas after
     // sign-in, not the apex welcome page.
     const loginHref = loginUrl(config, requestReturnTo(config, host, c.req.url));
-    return htmlResponse(renderPreviewShell(origin, c.req.path, { loginHref }));
+    return htmlResponse(renderPreviewShell(origin, c.req.path, { loginHref, image: brandImage }));
   });
 }
 
