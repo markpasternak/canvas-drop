@@ -36,8 +36,10 @@ describe("socialPreview", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const body = await res.text();
-    // Absolute og:image on THIS host (subdomain), not the apex.
-    expect(body).toContain('property="og:image" content="https://showcase.canvas-drop.com/og.png"');
+    // The branded image is served on the instance origin only; on the canvas subdomain
+    // `/og.png` is the canvas's own gated path and would come back as this card.
+    expect(body).toContain('property="og:image" content="https://canvas-drop.com/og.png"');
+    expect(body).toContain('property="og:url" content="https://showcase.canvas-drop.com/"');
     expect(body).toContain('name="twitter:card" content="summary_large_image"');
     // Humans are redirected on to login (parity with the gateway), carrying a
     // returnTo so they land back on this shared canvas, not the apex welcome page.
@@ -122,7 +124,7 @@ describe("socialPreview — public_link per-canvas card", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('property="og:title" content="Quarterly Planner"');
-    expect(body).toContain('property="og:image" content="https://planner.canvas-drop.com/og.png"');
+    expect(body).toContain('property="og:image" content="https://canvas-drop.com/og.png"');
     // Crawler-only card → no human redirect injected.
     expect(body).not.toContain("location.replace");
   });
@@ -231,7 +233,7 @@ describe("socialPreview — per-canvas preview OG image (plan 004 / U9)", () => 
 
   it("falls back to /og.png when the resolver returns null (disabled or not yet captured)", async () => {
     const body = await (await appWithPreview(null).request("/", { headers: crawler })).text();
-    expect(body).toContain('property="og:image" content="https://planner.canvas-drop.com/og.png"');
+    expect(body).toContain('property="og:image" content="https://canvas-drop.com/og.png"');
   });
 
   it("serves the og:image bytes, not another card, when the crawler fetches the preview", async () => {
@@ -266,7 +268,7 @@ describe("socialPreview — per-canvas preview OG image (plan 004 / U9)", () => 
     const res = await a.request("/", { headers: crawler });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain(
-      'property="og:image" content="https://planner.canvas-drop.com/og.png"',
+      'property="og:image" content="https://canvas-drop.com/og.png"',
     );
   });
 });
