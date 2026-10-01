@@ -171,7 +171,7 @@ Minimum role: editor.
 
 | Tool | Input | Result |
 |---|---|---|
-| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `whole_org` \| `public_link`; the legacy `specific_people` / `team` are accepted as aliases of `private`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change`. |
+| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `whole_org` \| `public_link`; the legacy `specific_people` / `team` are accepted as aliases of `private`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `linkPreview` (show title, description and custom cover in link unfurls of a non-public canvas), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change` (including a `linkPreview` change). |
 | `set_capabilities` | `id`, `backendEnabled?`, `kv?`, `files?`, `ai?`, `realtime?`, `authoring?` (all booleans) | View + `owner`, `role`. `backendEnabled` is the master switch; the others take effect only when it is on. `authoring` also needs the instance switch on. Omitted fields are unchanged; switching a capability off drops sockets that lost access. |
 | `set_canvas_slug` | `id`, `slug?` (≤63; omit for a fresh random slug) | View + `deploy` (`$CANVAS_KEY` placeholder). The old URL stops resolving immediately. `INVALID_SLUG`, `SLUG_TAKEN`. |
 | `set_canvas_preview` | `id`, `image?` (base64 PNG, JPEG, or WebP; the string ≤40 MiB, decoded ≤25 MiB) | View + `owner`, `role`. With `image`, `previewMode` becomes `custom` and a publish never overwrites the cover; without it, a custom cover is cleared back to `auto` (an auto-captured screenshot is left alone). `INVALID_IMAGE`, `IMAGE_TOO_LARGE`. For the auto/off toggle use `update_canvas` `previewMode`. |
@@ -268,7 +268,7 @@ Single-canvas management responses (`get_canvas`, `update_canvas`, and the dashb
 { id, slug, url, ownerId, title, description, status, publicationState,
   currentVersionId, access, accessMode, discoverability, hasPassword, sharedExpiresAt,
   spaFallback, backendEnabled, disabledReason, galleryListed, galleryTemplatable,
-  tags, guestAiEnabled, guestAiCap, previewMode, viewCount, lastViewedAt,
+  tags, guestAiEnabled, guestAiCap, previewMode, linkPreview, viewCount, lastViewedAt,
   hasPreview, previewUrl? }
 ```
 

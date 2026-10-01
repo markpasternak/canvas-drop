@@ -5,6 +5,7 @@ import { createMiddleware } from "hono/factory";
 import { loginUrl, publicOrigin, requestReturnTo } from "../auth/return-to.js";
 import { SESSION_COOKIE } from "../auth/session.js";
 import { isAnonymouslyPublic } from "../canvas/authorization.js";
+import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { resolveRequest } from "../routing/resolve-request.js";
 import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
@@ -69,6 +70,26 @@ const IMAGE_PATH = new RegExp(
   "i",
 );
 
+const isPreviewPath = (path: string): boolean => path.endsWith(`/${PREVIEW_ASSET_PATH}`);
+
+/**
+ * A canvas that is not an ungated public link but whose owner (or an editor) opted in
+ * to link previews (`linkPreview`). Only a live canvas qualifies: active, published,
+ * and not past its share expiry. The opt-in reveals the title, description and the
+ * CUSTOM cover only — an auto screenshot can show real content, so it never leaves.
+ */
+export function linkPreviewEligible(
+  canvas: Pick<Canvas, "linkPreview" | "status" | "currentVersionId" | "sharedExpiresAt">,
+  now: number,
+): boolean {
+  return (
+    canvas.linkPreview &&
+    canvas.status === "active" &&
+    canvas.currentVersionId !== null &&
+    (canvas.sharedExpiresAt === null || canvas.sharedExpiresAt > now)
+  );
+}
+
 /** Does this request look like a top-level document fetch (vs an asset/API call)? */
 function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua: string): boolean {
   if (accept.includes("text/html")) return true;
@@ -90,83 +111,131 @@ export function socialPreview(
    *  tags we serve it verbatim instead of a generated card, so an author who ships
    *  their own OG/Twitter metadata is never overridden. */
   homeHtml?: (canvas: Canvas) => Promise<string | null>,
+  /** Reads the canvas's stored `og` cover rendition. Served to a signed-out unfurler
+   *  only for a link-preview opted-in canvas with a CUSTOM cover, which the regular
+   *  (access-gated) preview route would refuse. */
+  coverBytes?: (canvas: Canvas) => Promise<Uint8Array | null>,
 ) {
   // The branded card image lives on the instance origin only. On a canvas subdomain
   // `/og.png` is the canvas's own (gated) path, so an unfurler fetching it there got
   // this HTML card back instead of an image and showed an empty preview.
   const brandImage = `${config.baseUrl.replace(/\/$/, "")}/og.png`;
 
+  /** The canvas this request targets, or null (apex, unknown slug, lookup failure). */
+  async function targetCanvas(host: string, path: string): Promise<Canvas | null> {
+    if (!canvases) return null;
+    const { canvasSlug } = resolveRequest({ host, pathname: path }, config);
+    if (!canvasSlug) return null;
+    try {
+      return await canvases.findBySlug(canvasSlug);
+    } catch {
+      return null;
+    }
+  }
+
+  /** The unfurl card: the canvas's own title and description, or generic wording. */
+  function canvasCard(origin: string, path: string, canvas: Canvas, image: string): Response {
+    const title = canvas.title?.trim() || PREVIEW_TITLE;
+    // The owner's own description wins when set (escaped downstream); otherwise fall
+    // back to the generic line so an undescribed canvas still unfurls with something.
+    const ownDescription = canvas.description?.replace(/\s+/g, " ").trim();
+    const description =
+      ownDescription ||
+      `${canvas.title?.trim() ? `“${title}” — ` : ""}a canvas shared on canvas-drop.`;
+    return htmlResponse(
+      renderPreviewShell(origin, path, { title, description, redirect: false, image }),
+    );
+  }
+
+  /**
+   * The opted-in link preview for a gated canvas, or null to fall through. The cover
+   * request gets the custom `og` bytes; a crawler's page fetch gets the canvas card.
+   * Everything else (other images, human visitors) is left to the normal chain.
+   */
+  async function optedInPreview(
+    path: string,
+    host: string,
+    ua: string,
+    canvas: Canvas,
+  ): Promise<Response | null> {
+    const custom = canvas.previewMode === "custom";
+    if (isPreviewPath(path)) {
+      if (!custom || !coverBytes) return null;
+      let bytes: Uint8Array | null = null;
+      try {
+        bytes = await coverBytes(canvas);
+      } catch {
+        bytes = null;
+      }
+      return bytes ? imageResponse(bytes) : null;
+    }
+    if (IMAGE_PATH.test(path) || !CRAWLER_UA.test(ua)) return null;
+    const image = custom
+      ? `${canvasUrl(config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${canvas.updatedAt}`
+      : brandImage;
+    return canvasCard(publicOrigin(config, host), path, canvas, image);
+  }
+
   return createMiddleware<AppEnv>(async (c, next) => {
     const principal = c.get("principal");
     const method = c.req.method;
     const isGetDoc = method === "GET" || method === "HEAD";
     const ua = c.req.header("user-agent") ?? "";
+    const host = c.req.header("host") ?? "";
+    const path = c.req.path;
 
     // (1) A public_link canvas (anonymous principal) shared to a CRAWLER → a
     //     per-canvas card with the canvas's already-public title. A real visitor
     //     (non-crawler UA) falls through and gets the canvas itself.
     if (principal?.kind === "anonymous") {
-      if (canvases && isGetDoc && CRAWLER_UA.test(ua) && !IMAGE_PATH.test(c.req.path)) {
-        const { canvasSlug } = resolveRequest(
-          { host: c.req.header("host") ?? "", pathname: c.req.path },
-          config,
-        );
-        const canvas = canvasSlug ? await canvases.findBySlug(canvasSlug) : null;
-        // Only an UNGATED public link surfaces its title/image. A password-protected
-        // link is reachable-anonymous (so it reaches its gate) but must NOT emit a
-        // per-canvas card — that would leak the title/preview to a crawler (R5).
-        if (
-          canvas &&
-          isAnonymouslyPublic(
-            canvas.access,
-            canvas.passwordHash !== null,
-            canvas.sharedExpiresAt,
-            Date.now(),
-          )
-        ) {
-          // Never shadow a canvas that ships its own social metadata: if its home
-          // document already declares OG/Twitter tags, fall through so the crawler
-          // scrapes the real file (the author's title/description/image win). The
-          // file is already what every real visitor of this ungated public link
-          // gets, so serving it to a crawler leaks nothing new (R5). Best-effort:
-          // a read failure falls back to the generated card, never 500s the unfurl.
-          if (homeHtml) {
-            let html: string | null = null;
-            try {
-              html = await homeHtml(canvas);
-            } catch {
-              html = null;
-            }
-            if (html && htmlDeclaresSocialTags(html)) return next();
-          }
-
-          const origin = publicOrigin(config, c.req.header("host"));
-          const title = canvas.title?.trim() || PREVIEW_TITLE;
-          // The owner's own description wins when set (already-public metadata for an
-          // ungated public link, escaped downstream); otherwise fall back to the
-          // generic line so an undescribed canvas still unfurls with something.
-          const ownDescription = canvas.description?.replace(/\s+/g, " ").trim();
-          const description =
-            ownDescription ||
-            `${canvas.title?.trim() ? `“${title}” — ` : ""}a canvas shared on canvas-drop.`;
-          // Per-canvas preview image when the pipeline is on + captured; else /og.png.
-          // Best-effort: a resolver error (e.g. a DB blip on the settings/job lookup)
-          // must fall back to the branded card, never 500 the unfurl (review #6).
-          let image: string | undefined;
+      if (!canvases || !isGetDoc) return next();
+      const preview = isPreviewPath(path);
+      const crawlerPage = CRAWLER_UA.test(ua) && !IMAGE_PATH.test(path);
+      if (!preview && !crawlerPage) return next();
+      const canvas = await targetCanvas(host, path);
+      if (!canvas) return next();
+      // Only an UNGATED public link surfaces its title/image by default. A
+      // password-protected link is reachable-anonymous (so it reaches its gate) but must
+      // NOT emit a per-canvas card unless its owner opted in to link previews (R5).
+      if (
+        isAnonymouslyPublic(
+          canvas.access,
+          canvas.passwordHash !== null,
+          canvas.sharedExpiresAt,
+          Date.now(),
+        )
+      ) {
+        // The preview route serves an ungated public link's cover itself.
+        if (preview) return next();
+        // Never shadow a canvas that ships its own social metadata: if its home
+        // document already declares OG/Twitter tags, fall through so the crawler
+        // scrapes the real file (the author's title/description/image win). The
+        // file is already what every real visitor of this ungated public link
+        // gets, so serving it to a crawler leaks nothing new (R5). Best-effort:
+        // a read failure falls back to the generated card, never 500s the unfurl.
+        if (homeHtml) {
+          let html: string | null = null;
           try {
-            image = (await previewImage?.(canvas)) ?? undefined;
+            html = await homeHtml(canvas);
           } catch {
-            image = undefined;
+            html = null;
           }
-          return htmlResponse(
-            renderPreviewShell(origin, c.req.path, {
-              title,
-              description,
-              redirect: false,
-              image: image ?? brandImage,
-            }),
-          );
+          if (html && htmlDeclaresSocialTags(html)) return next();
         }
+        // Per-canvas preview image when the pipeline is on + captured; else /og.png.
+        // Best-effort: a resolver error (e.g. a DB blip on the settings/job lookup)
+        // must fall back to the branded card, never 500 the unfurl (review #6).
+        let image: string | undefined;
+        try {
+          image = (await previewImage?.(canvas)) ?? undefined;
+        } catch {
+          image = undefined;
+        }
+        return canvasCard(publicOrigin(config, host), path, canvas, image ?? brandImage);
+      }
+      if (linkPreviewEligible(canvas, Date.now())) {
+        const res = await optedInPreview(path, host, ua, canvas);
+        if (res) return res;
       }
       return next();
     }
@@ -179,6 +248,15 @@ export function socialPreview(
     if (!isGetDoc) return next();
     // A session cookie means a (possibly signed-in) human — let the gateway decide.
     if (getCookie(c, SESSION_COOKIE)) return next();
+    // A gated canvas whose owner opted in to link previews unfurls with its own card
+    // and custom cover. Looked up only for a crawler or the cover request itself.
+    if (isPreviewPath(path) || CRAWLER_UA.test(ua)) {
+      const canvas = await targetCanvas(host, path);
+      if (canvas && linkPreviewEligible(canvas, Date.now())) {
+        const res = await optedInPreview(path, host, ua, canvas);
+        if (res) return res;
+      }
+    }
     if (
       !looksLikeDocument(
         c.req.header("accept") ?? "",
@@ -188,13 +266,22 @@ export function socialPreview(
     ) {
       return next();
     }
-    const host = c.req.header("host") ?? "";
     const origin = publicOrigin(config, host);
     // Forward where the visitor was headed so they return to the shared canvas after
     // sign-in, not the apex welcome page.
     const loginHref = loginUrl(config, requestReturnTo(config, host, c.req.url));
-    return htmlResponse(renderPreviewShell(origin, c.req.path, { loginHref, image: brandImage }));
+    return htmlResponse(renderPreviewShell(origin, path, { loginHref, image: brandImage }));
   });
+}
+
+/** The opted-in custom cover. Shared-cacheable: the URL is cache-busted by the canvas's
+ *  `updatedAt`, and the owner chose to make this image public. */
+function imageResponse(bytes: Uint8Array): Response {
+  const headers = new Headers();
+  baseSecurityHeaders(headers);
+  headers.set("Content-Type", "image/webp");
+  headers.set("Cache-Control", "public, max-age=300");
+  return new Response(new Uint8Array(bytes), { status: 200, headers });
 }
 
 function htmlResponse(html: string): Response {

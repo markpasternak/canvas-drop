@@ -59,6 +59,7 @@ export function canvasView(
     passwordHash?: string | null;
     sharedExpiresAt?: number | null;
     spaFallback?: boolean;
+    linkPreview?: boolean;
     backendEnabled?: boolean;
     aiAudience?: string;
     runtimePolicy?: string | null;
@@ -125,6 +126,8 @@ export function canvasView(
     // Preview policy (plan 004): auto/off/custom — so an agent can read the current
     // setting before changing it (parity with the dashboard Preview control).
     previewMode: cv.previewMode,
+    // Link preview opt-in (parity with the dashboard Preview control).
+    linkPreview: cv.linkPreview ?? false,
     // Denormalized view rollups (plan 004): lifetime deduped views + last-viewed stamp,
     // so an agent reads the same popularity signal the dashboard shows. Trending
     // (recent-window) counts ride `list_canvases` as `recentViews`.

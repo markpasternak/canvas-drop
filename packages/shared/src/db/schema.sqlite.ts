@@ -251,6 +251,10 @@ export const canvases = sqliteTable(
     // `off` = no capture, show the generative cover; `custom` = owner-uploaded image,
     // never overwritten by a publish capture.
     previewMode: c.text("preview_mode").notNull().default("auto"),
+    // Link preview opt-in: a non-public canvas unfurls with its title, description and
+    // custom cover (never an auto screenshot) for a signed-out link unfurler. Off by
+    // default, so a gated canvas reveals nothing until its owner or an editor opts in.
+    linkPreview: c.bool("link_preview").notNull().default(false),
     // Capability foundation (plan 006). `backendEnabled` is the Backend-group master
     // switch (off by default — static-first); the cap_* flags default ON so flipping
     // backend on yields all-features-live with no extra writes. Per-feature flags

@@ -22,6 +22,7 @@ const CANVAS = {
   hasPassword: false,
   spaFallback: false,
   previewMode: "auto",
+  linkPreview: false,
   galleryListed: false,
   galleryTemplatable: false,
   tags: null,
@@ -153,6 +154,31 @@ describe("settings route", () => {
       expect(patch?.body).toContain("spaFallback");
       expect(patch?.body).toContain("true");
     });
+  });
+
+  it("turns on link previews via PATCH", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "PATCH /api/canvases/c1/settings": () => json({ ...CANVAS, linkPreview: true }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole("switch", { name: /show in link previews/i }));
+
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(JSON.parse(patch?.body ?? "{}")).toEqual({ linkPreview: true });
+    });
+  });
+
+  it("hides the link-preview toggle on an open public link (it already unfurls)", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, access: "public_link" }) });
+    renderSettings();
+    await screen.findByRole("switch", { name: /single-page app mode/i });
+    expect(screen.queryByRole("switch", { name: /show in link previews/i })).toBeNull();
   });
 
   it("hides Unpublish for a Draft canvas", async () => {

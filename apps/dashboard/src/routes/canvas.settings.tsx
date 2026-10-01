@@ -232,6 +232,22 @@ export default function Settings() {
             className="hidden"
             onChange={onPreviewFile}
           />
+          {/* An ungated public link already unfurls with its own title and cover. */}
+          {!(canvas.access === "public_link" && !canvas.hasPassword) && (
+            <>
+              <RowDivider />
+              <Toggle
+                label="Show in link previews"
+                description={
+                  canvas.previewMode === "custom"
+                    ? "When someone shares this link in Slack, iMessage or similar apps, show the title, description and your custom cover instead of a generic sign-in card. The canvas itself stays behind sign-in."
+                    : "When someone shares this link in Slack, iMessage or similar apps, show the title and description instead of a generic sign-in card. Upload a custom cover to show it too; automatic screenshots are never shared. The canvas itself stays behind sign-in."
+                }
+                checked={canvas.linkPreview}
+                onChange={(linkPreview) => save({ linkPreview })}
+              />
+            </>
+          )}
         </Section>
 
         <Section

@@ -365,6 +365,39 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(restricted.warning).toMatch(/CDN/);
   });
 
+  it("update_canvas sets the link preview opt-in (parity with the dashboard toggle)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    expect(created.linkPreview).toBe(false);
+
+    const updated = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, linkPreview: true },
+      }),
+    );
+    expect(updated.linkPreview).toBe(true);
+    const read = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: created.id } }));
+    expect(read.linkPreview).toBe(true);
+
+    await vi.waitFor(async () => {
+      const rows = await auditRepository(client).recent(20);
+      const audit = rows.find((row) => {
+        const meta = row.meta;
+        return (
+          row.action === "share_change" &&
+          meta !== null &&
+          typeof meta === "object" &&
+          !Array.isArray(meta) &&
+          meta.linkPreview === true
+        );
+      });
+      expect(audit?.targetId).toBe(created.id);
+    });
+  });
+
   it("update_canvas sets the unified tags under the owner check and refreshes searchText (U4)", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");

@@ -1,0 +1,1 @@
+ALTER TABLE "canvases" ADD COLUMN "link_preview" boolean DEFAULT false NOT NULL;

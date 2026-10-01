@@ -51,6 +51,7 @@ export function useUpdateSettings(id: string) {
         if (patch.sharedExpiresAt !== undefined) optimistic.sharedExpiresAt = patch.sharedExpiresAt;
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
         if (patch.previewMode !== undefined) optimistic.previewMode = patch.previewMode;
+        if (patch.linkPreview !== undefined) optimistic.linkPreview = patch.linkPreview;
         if (patch.galleryListed !== undefined) optimistic.galleryListed = patch.galleryListed;
         if (patch.galleryTemplatable !== undefined)
           optimistic.galleryTemplatable = patch.galleryTemplatable;
