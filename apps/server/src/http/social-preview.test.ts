@@ -234,6 +234,22 @@ describe("socialPreview — per-canvas preview OG image (plan 004 / U9)", () => 
     expect(body).toContain('property="og:image" content="https://planner.canvas-drop.com/og.png"');
   });
 
+  it("serves the og:image bytes, not another card, when the crawler fetches the preview", async () => {
+    const app = appWithPreview("https://planner.canvas-drop.com/__canvasdrop_preview");
+    for (const path of [
+      "/__canvasdrop_preview",
+      "/c/planner/__canvasdrop_preview",
+      "/brand/og-card.png",
+      "/photos/team.JPG",
+    ]) {
+      const res = await app.request(`${path}?rendition=og&v=1`, { headers: crawler });
+      expect(res.status, path).toBe(418);
+    }
+    // A non-image asset (a shared video) still unfurls as the per-canvas card.
+    const video = await app.request("/clip.mp4", { headers: crawler });
+    expect(await video.text()).toContain('property="og:title" content="Planner"');
+  });
+
   it("falls back to /og.png (never 500s) when the preview resolver throws (review #6)", async () => {
     const a = new Hono<AppEnv>();
     a.use("*", async (c, next) => {

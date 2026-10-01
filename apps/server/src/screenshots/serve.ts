@@ -7,6 +7,7 @@ import {
   type ScreenshotRendition,
   screenshotKey,
 } from "../canvas/storage-keys.js";
+import { canvasUrl } from "../canvas/url.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
 
@@ -81,4 +82,26 @@ export function servePreview(deps: ServePreviewDeps) {
       headers: { "Content-Type": "image/webp", "Cache-Control": cacheControl(rendition, canvas) },
     });
   });
+}
+
+/**
+ * The per-canvas og:image URL for a public_link unfurl (plan 004 / U9), or null for
+ * the branded `/og.png`. Only advertises a URL that {@link servePreview} will answer
+ * with bytes: never when the owner turned the preview off (that path 404s, and a
+ * link unfurler shows a broken image), and only once a capture has finished. The
+ * captured version cache-busts the URL.
+ */
+export async function previewOgImageUrl(
+  canvas: Pick<Canvas, "id" | "slug" | "previewMode">,
+  deps: {
+    config: Config;
+    enabled: () => Promise<boolean>;
+    findJob: (canvasId: string) => Promise<{ status: string; versionId: string } | null>;
+  },
+): Promise<string | null> {
+  if (canvas.previewMode === "off") return null;
+  if (!(await deps.enabled())) return null;
+  const job = await deps.findJob(canvas.id);
+  if (job?.status !== "done") return null;
+  return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${encodeURIComponent(job.versionId)}`;
 }
