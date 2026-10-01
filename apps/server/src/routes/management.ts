@@ -205,6 +205,9 @@ const settingsSchema = z.object({
   // Preview policy: auto (screenshot on publish) or off (generative cover). `custom`
   // is set only by uploading an image via PUT /:id/preview, never through settings.
   previewMode: z.enum(["auto", "off"]).optional(),
+  // Link preview opt-in: a non-public canvas's unfurl shows its title, description
+  // and custom cover to signed-out link unfurlers.
+  linkPreview: z.boolean().optional(),
   galleryListed: z.boolean().optional(),
   galleryTemplatable: z.boolean().optional(),
   tags: z.array(z.string().max(CANVAS_MAX_TAG_LENGTH)).max(CANVAS_MAX_TAGS).optional(),
@@ -269,6 +272,7 @@ function ownerCanvasView(
     // Preview policy (plan 004): auto = screenshot on publish, off = generative cover,
     // custom = owner-uploaded image (survives publishes). Drives the settings control.
     previewMode: cv.previewMode,
+    linkPreview: cv.linkPreview,
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,
     // tags is stored as JSON (Json | null); the API contract is string[] | null.
@@ -881,9 +885,12 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const discoverabilityChanged =
       patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
+    // The link-preview opt-in decides what a gated canvas reveals to link unfurlers.
+    const linkPreviewChanged =
+      patch.linkPreview !== undefined && patch.linkPreview !== cv.linkPreview;
     // Audit a rung change, discoverability change, OR a grant-only change to the team set
     // (no rung change) — all change who can find/open the share surface.
-    if (targetAccess !== undefined || discoverabilityChanged || teamGranted) {
+    if (targetAccess !== undefined || discoverabilityChanged || teamGranted || linkPreviewChanged) {
       deps.audit.recordAudit({
         action: "share_change",
         actorId: c.get("user").id,
@@ -892,6 +899,7 @@ export function managementRoutes(deps: ManagementDeps) {
           access: targetAccess ?? cv.access,
           ...(discoverabilityChanged ? { discoverability: patch.discoverability } : {}),
           ...(teamGranted ? { teamsChanged: true } : {}),
+          ...(linkPreviewChanged ? { linkPreview: patch.linkPreview } : {}),
         },
       });
     }

@@ -152,6 +152,7 @@ export interface CanvasSettingsPatch {
   sharedExpiresAt?: number | null;
   spaFallback?: boolean;
   previewMode?: PreviewMode;
+  linkPreview?: boolean;
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   tags?: Json;
@@ -824,6 +825,7 @@ export function canvasesRepository(client: DbClient) {
     if (patch.description !== undefined) set.description = patch.description;
     if (patch.spaFallback !== undefined) set.spaFallback = patch.spaFallback;
     if (patch.previewMode !== undefined) set.previewMode = patch.previewMode;
+    if (patch.linkPreview !== undefined) set.linkPreview = patch.linkPreview;
     if (patch.sharedExpiresAt !== undefined) set.sharedExpiresAt = patch.sharedExpiresAt;
     if (patch.galleryListed !== undefined) {
       set.galleryListed = patch.galleryListed;

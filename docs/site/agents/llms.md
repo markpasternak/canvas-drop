@@ -181,7 +181,8 @@ Working notes:
   Whole-org canvas in Shared and makes a Whole-org canvas gallery-eligible),
   `teamIds`, `password` (or `null` to clear), `sharedExpiresAt` (unix ms, or `null`),
   `spaFallback`, `previewMode` (`auto` or `off`; `set_canvas_preview` with an image
-  sets `custom`), `galleryListed`, `galleryTemplatable`, and the owner-only
+  sets `custom`), `linkPreview` (a non-public canvas unfurls with its title,
+  description and custom cover instead of the sign-in card), `galleryListed`, `galleryTemplatable`, and the owner-only
   `guestAiEnabled` / `guestAiCap`. Refusals you will meet: `SHARE_REQUIRES_PUBLISH`
   (sharing needs a published canvas), `ORG_REQUIRED`, `PUBLIC_LINKS_DISABLED`
   (instance switch off), `PUBLIC_NOT_ALLOWED` (the owner may not publish publicly),

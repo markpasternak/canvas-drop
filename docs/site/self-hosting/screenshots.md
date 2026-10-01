@@ -58,6 +58,21 @@ Each canvas owner controls its cover from **Settings → Preview** (and over MCP
   `og`/`card`/`thumb` renditions, **pinned so a publish never overwrites it**, and served
   even when the org-wide auto-capture pipeline is off. Removing it reverts to `auto`.
 
+## Link previews for non-public canvases
+
+A link to a canvas that isn't an open public link unfurls (Slack, iMessage, …) with a
+generic canvas-drop sign-in card: the unfurler fetches the link signed out, so by default
+nothing about the canvas leaves the instance. Its image is the instance's own `/og.png`
+on the base URL.
+
+The owner or an editor can opt a canvas in with **Settings → Cover image → Show in link
+previews** (MCP: `update_canvas` `linkPreview: true`). A live, published, unexpired canvas
+that has opted in unfurls with its **title, description and custom cover**. An automatic
+screenshot is never shown, because it can capture real content: without a custom cover
+the card uses the branded image. The canvas itself stays behind sign-in, and turning the
+setting on or off is audited as a `share_change`. This applies in `oidc` auth mode, where
+signed-out unfurls are answered at all.
+
 ## Turning it on
 
 ### 1. Build an image that includes Chromium

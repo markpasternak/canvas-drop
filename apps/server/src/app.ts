@@ -21,7 +21,7 @@ import { canvasAccess } from "./canvas/authorization.js";
 import { filesService } from "./canvas/files-service.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
-import { blobKey } from "./canvas/storage-keys.js";
+import { blobKey, screenshotKey } from "./canvas/storage-keys.js";
 import { connectionLimits } from "./connections/limits.js";
 import { createSecretCipher } from "./connections/secret-cipher.js";
 import { connectionService } from "./connections/service.js";
@@ -567,6 +567,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         if (!bytes) return null;
         return new TextDecoder().decode(bytes.subarray(0, 64 * 1024));
       },
+      // The custom cover a link-preview opted-in canvas unfurls with.
+      (canvas) => deps.storage.get(screenshotKey(canvas.id, "og")),
     ),
   );
 

@@ -1,0 +1,1 @@
+ALTER TABLE `canvases` ADD `link_preview` integer DEFAULT false NOT NULL;

@@ -1397,6 +1397,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
               "(the preview URL returns 404 and the dashboard falls back to a procedurally generated " +
               "cover). Upload a custom image with set_canvas_preview.",
           ),
+        linkPreview: z
+          .boolean()
+          .optional()
+          .describe(
+            "Link preview opt-in for a canvas that is not a public link: when true, a shared link " +
+              "unfurls (Slack, iMessage, …) with the canvas title, description and custom cover " +
+              "instead of the generic sign-in card. Never exposes an auto screenshot. Default false.",
+          ),
         guestAiEnabled: z.boolean().optional(),
         guestAiCap: z.number().min(0).optional(),
         galleryListed: z.boolean().optional(),
@@ -1475,9 +1483,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       }
       const discoverabilityChanged =
         patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
+      // The link-preview opt-in decides what a gated canvas reveals to link unfurlers.
+      const linkPreviewChanged =
+        patch.linkPreview !== undefined && patch.linkPreview !== cv.linkPreview;
       // Audit a rung/discoverability change OR a grant-only change to the team set
       // (parity with the route).
-      if (targetAccess !== undefined || discoverabilityChanged || teamGranted) {
+      if (
+        targetAccess !== undefined ||
+        discoverabilityChanged ||
+        teamGranted ||
+        linkPreviewChanged
+      ) {
         deps.audit.recordAudit({
           action: "share_change",
           actorId: caller.userId,
@@ -1486,6 +1502,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
             access: targetAccess ?? cv.access,
             ...(discoverabilityChanged ? { discoverability: patch.discoverability } : {}),
             ...(teamGranted ? { teamsChanged: true } : {}),
+            ...(linkPreviewChanged ? { linkPreview: patch.linkPreview } : {}),
           },
         });
       }

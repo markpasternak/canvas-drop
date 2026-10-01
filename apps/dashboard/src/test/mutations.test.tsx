@@ -31,6 +31,7 @@ const CANVAS: Canvas = {
   hasPassword: false,
   spaFallback: false,
   previewMode: "auto",
+  linkPreview: false,
   galleryListed: false,
   galleryTemplatable: false,
   tags: null,

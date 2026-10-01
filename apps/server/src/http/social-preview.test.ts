@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "../auth/session.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
-import { htmlDeclaresSocialTags, socialPreview } from "./social-preview.js";
+import { htmlDeclaresSocialTags, linkPreviewEligible, socialPreview } from "./social-preview.js";
 import type { AppEnv, Principal } from "./types.js";
 
 const oidc: Config = loadConfig({
@@ -380,5 +380,142 @@ describe("socialPreview — per-canvas card description", () => {
   it("falls back to the generic line when the canvas has no description", async () => {
     const res = await appAs(oidc, ANON, canvasRepo("Planner")).request("/", { headers: crawler });
     expect(await res.text()).toContain("a canvas shared on canvas-drop.");
+  });
+});
+
+describe("socialPreview — link preview opt-in for a gated canvas", () => {
+  const OPTED_IN = {
+    id: "c1",
+    slug: "planner",
+    access: "whole_org",
+    status: "active",
+    currentVersionId: "v1",
+    linkPreview: true,
+    previewMode: "custom",
+    updatedAt: 1700,
+    description: "Plans for the quarter",
+  };
+  const COVER = new Uint8Array([0x52, 0x49, 0x46, 0x46]);
+  const SLACK = { host: "planner.canvas-drop.com", accept: "*/*", "user-agent": "Slackbot 1.0" };
+
+  /** No principal (signed-out unfurler) in oidc mode, or a pre-set one. */
+  function gated(overrides: Record<string, unknown>, principal?: Principal) {
+    const a = new Hono<AppEnv>();
+    if (principal) {
+      a.use("*", async (c, next) => {
+        c.set("principal", principal);
+        await next();
+      });
+    }
+    a.use(
+      "*",
+      socialPreview(
+        oidc,
+        canvasRepo("Quarterly Planner", { ...OPTED_IN, ...overrides }),
+        undefined,
+        undefined,
+        async () => COVER,
+      ),
+    );
+    a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+    return a;
+  }
+
+  it("unfurls with the canvas title, description and custom cover", async () => {
+    const res = await gated({}).request("/", { headers: SLACK });
+    const body = await res.text();
+    expect(body).toContain('property="og:title" content="Quarterly Planner"');
+    expect(body).toContain('property="og:description" content="Plans for the quarter"');
+    expect(body).toContain(
+      'property="og:image" content="https://planner.canvas-drop.com/__canvasdrop_preview?rendition=og&amp;v=1700"',
+    );
+    // Crawler-only card: no login redirect, nothing cached.
+    expect(body).not.toContain("location.replace");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("serves the custom cover bytes to the signed-out unfurler", async () => {
+    const res = await gated({}).request("/__canvasdrop_preview?rendition=og&v=1700", {
+      headers: SLACK,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/webp");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(COVER);
+  });
+
+  it("never exposes an automatic screenshot: no custom cover → branded image, no bytes", async () => {
+    const app = gated({ previewMode: "auto" });
+    const body = await (await app.request("/", { headers: SLACK })).text();
+    expect(body).toContain('property="og:title" content="Quarterly Planner"');
+    expect(body).toContain('property="og:image" content="https://canvas-drop.com/og.png"');
+    const cover = await app.request("/__canvasdrop_preview?rendition=og", { headers: SLACK });
+    expect(cover.headers.get("content-type")).not.toBe("image/webp");
+  });
+
+  it("keeps the generic card when the canvas is not opted in", async () => {
+    const app = gated({ linkPreview: false });
+    const body = await (await app.request("/", { headers: SLACK })).text();
+    expect(body).toContain('property="og:title" content="canvas-drop"');
+    expect(body).not.toContain("Quarterly Planner");
+    const cover = await app.request("/__canvasdrop_preview?rendition=og", { headers: SLACK });
+    expect(cover.headers.get("content-type")).not.toBe("image/webp");
+  });
+
+  it("keeps the generic card for a canvas that is not live", async () => {
+    for (const overrides of [
+      { currentVersionId: null },
+      { status: "disabled" },
+      { status: "archived" },
+      { sharedExpiresAt: 1 },
+    ]) {
+      const body = await (await gated(overrides).request("/", { headers: SLACK })).text();
+      expect(body, JSON.stringify(overrides)).not.toContain("Quarterly Planner");
+    }
+  });
+
+  it("still sends a human visitor to sign-in", async () => {
+    const res = await gated({}).request("/", {
+      headers: { host: "planner.canvas-drop.com", ...HTML, "user-agent": "Mozilla/5.0" },
+    });
+    const body = await res.text();
+    expect(body).toContain("location.replace");
+    expect(body).not.toContain("Quarterly Planner");
+  });
+
+  it("does not turn the canvas's other images into a card", async () => {
+    const res = await gated({}).request("/brand/logo.png", { headers: SLACK });
+    expect(await res.text()).not.toContain("Quarterly Planner");
+  });
+
+  it("lets a password-protected public link opt in too", async () => {
+    const protectedLink = { access: "public_link", passwordHash: "h" };
+    const body = await (await gated(protectedLink, ANON).request("/", { headers: SLACK })).text();
+    expect(body).toContain('property="og:title" content="Quarterly Planner"');
+    const cover = await gated(protectedLink, ANON).request("/__canvasdrop_preview", {
+      headers: SLACK,
+    });
+    expect(cover.headers.get("content-type")).toBe("image/webp");
+    // Without the opt-in the gate keeps everything (falls through to the password gate).
+    const closed = await gated({ ...protectedLink, linkPreview: false }, ANON).request("/", {
+      headers: SLACK,
+    });
+    expect(closed.status).toBe(418);
+  });
+});
+
+describe("linkPreviewEligible", () => {
+  const live = {
+    linkPreview: true,
+    status: "active",
+    currentVersionId: "v",
+    sharedExpiresAt: null,
+  };
+  it("requires the opt-in on a live, published, unexpired canvas", () => {
+    expect(linkPreviewEligible(live, 10)).toBe(true);
+    expect(linkPreviewEligible({ ...live, linkPreview: false }, 10)).toBe(false);
+    expect(linkPreviewEligible({ ...live, status: "disabled" }, 10)).toBe(false);
+    expect(linkPreviewEligible({ ...live, currentVersionId: null }, 10)).toBe(false);
+    expect(linkPreviewEligible({ ...live, sharedExpiresAt: 10 }, 10)).toBe(false);
+    expect(linkPreviewEligible({ ...live, sharedExpiresAt: 11 }, 10)).toBe(true);
   });
 });

@@ -26,6 +26,12 @@ The [resource-model documentation follow-up](plans/2026-09-08-004-docs-resource-
 introduces the feature/resource/policy distinction, storage choices and per-resource
 settings across the docs, agent skill, examples and Backend help text.
 
+Link previews (1 October 2026): a non-public canvas can opt in (`linkPreview`, Settings →
+Cover image, MCP `update_canvas`) to unfurl with its title, description and custom cover
+instead of the generic sign-in card; automatic screenshots never leave. The same day fixed
+blank screenshot covers on smooth-scrolling canvases and broken unfurl images. See
+[the learnings](solutions/2026-10-01-link-unfurls-and-preview-covers.md).
+
 The [deployment coordination round](plans/2026-09-12-1811-feat-deployment-coordination-plan.md)
 (12 September 2026) lets two publishers ship the same release to one canvas without a
 duplicate version or a stale overwrite: an optional opaque `releaseId` on the deploy

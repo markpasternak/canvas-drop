@@ -157,6 +157,9 @@ export interface Canvas {
   /** Preview policy (plan 004): "auto" screenshots on publish, "off" uses a generative
    *  cover, "custom" is an owner-uploaded image that survives publishes. */
   previewMode: PreviewMode;
+  /** Link preview opt-in: a non-public canvas unfurls with its title, description and
+   *  custom cover instead of the generic sign-in card. */
+  linkPreview: boolean;
   galleryListed: boolean;
   /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
   galleryTemplatable: boolean;
@@ -342,6 +345,7 @@ export interface CanvasSettings {
   /** Preview policy (plan 004). Only "auto"/"off" are settable here; "custom" is set
    *  by uploading an image via `uploadPreview`, never through settings. */
   previewMode?: "auto" | "off";
+  linkPreview?: boolean;
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   tags?: string[];

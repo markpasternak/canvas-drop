@@ -3272,6 +3272,38 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     });
   });
 
+  it("link preview opt-in: PATCH persists it, the view echoes it, and the change is audited", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await publishedCanvas(owner.id);
+
+    const before = await jsonOf<{ linkPreview: boolean }>(await app.request(`/api/canvases/${id}`));
+    expect(before.linkPreview).toBe(false);
+    const res = await app.request(`/api/canvases/${id}/settings`, {
+      method: "PATCH",
+      headers: mut,
+      body: JSON.stringify({ linkPreview: true }),
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ linkPreview: boolean }>(res)).linkPreview).toBe(true);
+
+    await vi.waitFor(async () => {
+      const rows = await auditRepository(client).recent(20);
+      const audit = rows.find((row) => {
+        const meta = row.meta;
+        return (
+          row.action === "share_change" &&
+          meta !== null &&
+          typeof meta === "object" &&
+          !Array.isArray(meta) &&
+          meta.linkPreview === true
+        );
+      });
+      expect(audit?.targetId).toBe(id);
+    });
+  });
+
   it("individual invite (plan 003 U8): an existing user is granted (allowlist member); a new external email is rejected for a self-serve owner", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
