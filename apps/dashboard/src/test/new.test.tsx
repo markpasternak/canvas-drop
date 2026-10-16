@@ -89,7 +89,7 @@ describe("Create canvas — audience shortcut", () => {
     expect(
       screen.getByText("Only you and people or teams you add can open it."),
     ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("radio", { name: "Everyone in Acme" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "Everyone in Acme" }));
     const listed = screen.getByRole("checkbox", { name: "List in Shared" });
     expect(listed).not.toBeChecked();
     await userEvent.click(listed);
@@ -116,7 +116,7 @@ describe("Create canvas — audience shortcut", () => {
     renderNew();
 
     await screen.findByRole("heading", { name: "Audience" });
-    await userEvent.click(screen.getByRole("radio", { name: "Everyone in Acme" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "Everyone in Acme" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: /workspace/i }), "");
 
     expect(screen.getByRole("radio", { name: "Restricted" })).toBeChecked();
@@ -146,7 +146,7 @@ describe("Create canvas — audience shortcut", () => {
     renderNew();
 
     await screen.findByRole("heading", { name: "Audience" });
-    await userEvent.click(screen.getByRole("radio", { name: "Everyone in Acme" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "Everyone in Acme" }));
     await userEvent.click(screen.getByRole("button", { name: /use the api/i }));
     expect(screen.queryByRole("heading", { name: "Audience" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Create key" }));
