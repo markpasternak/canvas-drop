@@ -27,7 +27,7 @@
     "@lezer/highlight": "^1.2.3",
     "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-query": "^5.101.2",
-    "@tanstack/react-router": "^1.170.18",
+    "@tanstack/react-router": "^1.170.44",
     "downshift": "^9.4.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -43,9 +43,9 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "jsdom": "^29.1.1",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.5",
     "tailwindcss": "^4.3.2",
     "vite": "^8.1.5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

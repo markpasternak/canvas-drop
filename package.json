@@ -66,10 +66,10 @@
     "highlight.js": "11.11.1",
     "marked": "18.0.6",
     "playwright": "^1.61.1",
-    "sanitize-html": "2.17.6",
-    "sharp": "^0.35.3",
+    "sanitize-html": "2.17.7",
+    "sharp": "^0.35.5",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "mermaid": "11.16.1"
