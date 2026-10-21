@@ -4,7 +4,19 @@ const CSP =
 
 /** Parse in an inert template: external resources never enter a live document.
  * Strip navigation/active content before serializing into a separate, opaque
- * sandbox. CSP is installed before any supplied markup as a second boundary. */
+ * sandbox. CSP is installed before any supplied markup as a second boundary.
+ *
+ * Code scanning reports `js/xss-through-dom` against the `innerHTML` below because
+ * the textarea value flows into it. Parsing that text as HTML is the whole point,
+ * and it never reaches a live document: `<template>` content has no browsing
+ * context (no scripts run, no resources load, no event handlers fire), and the
+ * serialized result only renders in a `sandbox=""` iframe (opaque origin, no
+ * script) under a `default-src 'none'` CSP. The input is also the viewer's own
+ * paste, so there is no cross-user path. `create-preview.test.tsx` pins the
+ * stripping.
+ *
+ * The alert is dismissed in the Security tab ("false positive"); CodeQL honours no
+ * in-source suppression comment, so this note is the only durable record of why. */
 export function createDocumentPreview(html: string): { document: string; title: string } | null {
   if (!html.trim() || html.length > PREVIEW_LIMIT) return null;
   const template = document.createElement("template");
