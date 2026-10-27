@@ -172,6 +172,16 @@ The **description** is one field (max 2000 characters) used everywhere the canva
 
 An admin can take a canvas down for moderation. A disabled canvas becomes **read-only to its owner and editors**: every mutation (settings, sharing, tags, capabilities, slug, preview, deploy / publish / rollback, archive / unpublish, draft edits) is refused with `DISABLED` (HTTP 409 over the management API, a `DISABLED: …` failure over MCP). Reads still work, so you can open the canvas, see its versions and usage, and read the takedown reason. You cannot delete a disabled canvas; an admin must re-enable or restore it first.
 
+## Opened a canvas with the wrong account?
+
+If your instance uses OIDC sign-in, you can stay signed in with several accounts and
+switch between them from the account menu (**Add another account**). If you open a canvas
+your current account can't see, you get a "Page not found" page with **Use another
+account**. If another account you're signed in with can open it, the page offers
+**Continue as …** instead and brings you back to the canvas after the switch. Nobody else
+can tell the canvas exists, because the page looks the same as a missing canvas unless
+one of your own accounts has access.
+
 ## Revoking
 
 Access is always revocable and never cached. Lowering the rung, removing a person, pending email, or team, hitting an expiry, regenerating the slug, or unpublishing takes effect on the **next request** and drops live realtime sockets. Legacy guest rows kept from older deployments (`guest:<id>` entries) are revocation-only migration data; re-publishing a canvas does not restore old grants.

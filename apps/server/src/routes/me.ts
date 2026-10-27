@@ -1,5 +1,6 @@
 import type { AuthMode, SkinName } from "@canvas-drop/shared";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import type { AccountSummary } from "../auth/accounts.js";
 import type { OrgsRepository } from "../db/repositories/orgs.js";
 import type { AppEnv } from "../http/types.js";
 
@@ -27,6 +28,9 @@ export interface MeRoutesDeps {
   /** Whether tenancy is active (an org is configured). Drives `isGuest`: only meaningful
    *  when active — inert instances have no member/guest boundary. */
   tenancyActive: boolean;
+  /** Multi-account switching (oidc only): the OTHER accounts signed in on this browser.
+   *  Omitted outside oidc mode, where `/api/me/accounts` answers an empty list. */
+  otherAccounts?: (c: Context<AppEnv>) => Promise<AccountSummary[]>;
 }
 
 /**
@@ -78,6 +82,13 @@ export function meRoutes(deps: MeRoutesDeps) {
       // over env/default), resolved per-request. The SPA applies it to <html data-skin>.
       designSkin: await deps.designSkin(),
     });
+  });
+
+  // The account switcher's list (multi-account, oidc). Only accounts this browser holds a
+  // live session for, each an explicit {id,email,name,avatarUrl} projection.
+  app.get("/accounts", async (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ accounts: deps.otherAccounts ? await deps.otherAccounts(c) : [] });
   });
 
   return app;

@@ -82,7 +82,7 @@ function buildApp(client: DbClient, audit?: AuthEventSink) {
 describe("oidc login — authorization request", () => {
   // A real openid-client Configuration built from static metadata — login()
   // does no network of its own, so buildAuthorizationUrl runs offline here.
-  function loginApp(): Hono<AppEnv> {
+  function loginApp(signedInAs: string | null = null): Hono<AppEnv> {
     const cfg = new client.Configuration(
       {
         issuer: "https://idp.example.com",
@@ -98,8 +98,8 @@ describe("oidc login — authorization request", () => {
       // biome-ignore lint/suspicious/noExplicitAny: repos unused by login()
       users: {} as any,
       allowedEmails: { isAllowed: async () => false },
-      // biome-ignore lint/suspicious/noExplicitAny: session svc unused by login()
-      sessionSvc: {} as any,
+      // biome-ignore lint/suspicious/noExplicitAny: login() only asks who is signed in
+      sessionSvc: { resolveUserId: async () => signedInAs } as any,
       getConfig: () => Promise.resolve(cfg),
     });
     const app = new Hono<AppEnv>();
@@ -116,6 +116,18 @@ describe("oidc login — authorization request", () => {
     expect(loc.searchParams.get("code_challenge_method")).toBe("S256");
     expect(loc.searchParams.get("scope")).toBe("openid email profile");
     expect(loc.searchParams.get("state")).toBeTruthy();
+  });
+
+  it("'Add another account' asks the IdP for its account picker when signed in", async () => {
+    const res = await loginApp("u-active").request("/auth/login?add=1");
+    const loc = new URL(res.headers.get("location") as string);
+    expect(loc.searchParams.get("prompt")).toBe("select_account");
+  });
+
+  it("keeps prompt=login for add=1 from a signed-out browser (no one-click re-entry after sign-out)", async () => {
+    const res = await loginApp(null).request("/auth/login?add=1");
+    const loc = new URL(res.headers.get("location") as string);
+    expect(loc.searchParams.get("prompt")).toBe("login");
   });
 
   it("scopes the transaction cookie to the parent domain in subdomain mode so the apex callback can read it", async () => {

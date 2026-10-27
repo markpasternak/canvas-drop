@@ -108,3 +108,25 @@ export function requestReturnTo(
   const reqUrl = new URL(url);
   return `${publicOrigin(config, host)}${reqUrl.pathname}${reqUrl.search}`;
 }
+
+/** Absolute URL of the account chooser, carrying a validated destination. */
+export function accountChooserUrl(
+  config: Config,
+  returnTo?: string | null,
+  accountId?: string,
+): string {
+  const params = new URLSearchParams();
+  const safe = safeReturnTo(config, returnTo ?? undefined);
+  if (safe) params.set("returnTo", safe);
+  if (accountId) params.set("account", accountId);
+  const query = params.toString();
+  return `${config.baseUrl.replace(/\/$/, "")}/auth/accounts${query ? `?${query}` : ""}`;
+}
+
+/** `/auth/login` for adding another account (the IdP is asked to show its account picker). */
+export function addAccountUrl(config: Config, returnTo?: string | null): string {
+  const params = new URLSearchParams({ add: "1" });
+  const safe = safeReturnTo(config, returnTo ?? undefined);
+  if (safe) params.set("returnTo", safe);
+  return `/auth/login?${params.toString()}`;
+}

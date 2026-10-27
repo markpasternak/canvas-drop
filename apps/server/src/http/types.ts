@@ -77,6 +77,12 @@ export interface AppVariables {
   runtimeRole?: "owner" | "editor" | "viewer";
   /** Whether the password gate must run before serving — set by canvasAccess (U15). */
   needsPasswordGate?: boolean;
+  /** Set by canvasAccess on a signed-in member's canvas 404 (multi-account, oidc). The
+   *  error page then offers the account chooser, and `accessibleAs` names another
+   *  account this browser is signed in with that may open the canvas. A missing and
+   *  a denied canvas set the same value, so the page never tells them apart unless
+   *  one of the visitor's OWN accounts has access. */
+  canvasNotFound?: { accessibleAs?: { id: string; email: string } };
   /** The verified MCP OAuth caller — set by the `/mcp` bearer-auth middleware from a
    *  validated access token. Identity (`userId`) comes only from the server-side token
    *  store, never the client. Tools read this to scope every action to the caller. */

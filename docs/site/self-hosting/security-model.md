@@ -189,7 +189,8 @@ identity fires only in `proxy` mode.
 
 ### `oidc` mode: the app owns the session
 
-Login uses PKCE (S256), a random `state`, and `prompt=login`. The callback rejects a
+Login uses PKCE (S256), a random `state`, and `prompt=login` (`prompt=select_account` when
+adding another account). The callback rejects a
 missing or mismatched state, a failed code exchange, a missing `email` claim, and
 `email_verified=false`, and only then runs the same allowlist and blocked checks as every
 other request. Every rejection writes an `auth_denied` audit row with its reason
@@ -198,9 +199,53 @@ other request. Every rejection writes an `auth_denied` audit row with its reason
 
 The session token is 256 bits of randomness; only its SHA-256 hash is stored, so the raw
 token never lands in the database. The cookie is HttpOnly always, Secure in production,
-`SameSite=Lax`, and scoped to `.{baseHost}` in subdomain mode. `/auth/logout` revokes the
-session (audit `session_revoke`). `CANVAS_DROP_SESSION_SECRET` must be at least 32
-characters outside `dev` mode; it also signs the password-gate grants below.
+`SameSite=Lax`, and scoped to `.{baseHost}` in subdomain mode. `/auth/logout` revokes
+every session the browser holds (audit `session_revoke`) and ignores a cross-site
+navigation. `CANVAS_DROP_SESSION_SECRET`
+must be at least 32 characters outside `dev` mode; it also signs the password-gate grants
+below.
+
+#### Several accounts on one browser
+
+In `oidc` mode a person can stay signed in with up to five accounts and switch between
+them, like the account switcher in Google Drive. There is one active account per browser,
+so all open tabs follow it on their next load. Each extra account is an ordinary session
+with its own row, expiry and revocation. The browser keeps its tokens in a second cookie,
+`__canvasdrop_accounts`, which is HttpOnly and scoped exactly like the session cookie. That
+cookie carries an HMAC (keyed by `CANVAS_DROP_SESSION_SECRET`) over the account list and the
+active session token. In subdomain mode a canvas's script can create a cookie on the
+parent domain, but it can't forge one bound to the visitor's own session, so it can't
+slip its author's account into the visitor's switcher. The extra accounts never sign a
+browser in without its active session cookie, and an account the gateway would refuse
+(blocked, or off the allowlist) is never listed, switched to or promoted.
+An account that is not active does not have its expiry extended, so it signs itself out
+after 14 days without use. Signing in to a sixth account revokes the least recently used
+one.
+
+- **Adding an account** goes through `/auth/login?add=1`, the normal login flow with
+  `prompt=select_account`. That means the same allowlist and blocked checks, and the
+  account that was active stays signed in. A browser with no live session keeps
+  `prompt=login`, so after **Sign out** nobody can get back in through the identity
+  provider's still-open session in one click.
+- **Switching** (`POST /auth/switch`) and **signing out of one account**
+  (`POST /auth/logout/current`) are same-origin POSTs only. A canvas can link to the
+  account chooser at `/auth/accounts`, but it cannot switch the account itself. A switch
+  only works for an account that would pass the gateway right now, and it is audited as
+  `session_switch`. In path mode every canvas shares the dashboard's origin, so this
+  check can't tell a canvas from the dashboard. That is the same reduced isolation the
+  management API has there (see invariant 4).
+- **A canvas the active account can't open** still answers with the same `404`. For a
+  browser navigation, the page now offers **Use another account**. If another account
+  signed in on that browser may open the canvas, it offers **Continue as …** instead. That
+  answer is the same access decision the account would get if it were active, and it is
+  only shown to a browser that already holds that account's session. The JSON body is
+  unchanged, and a missing canvas and a denied one look identical unless one of the
+  visitor's own accounts has access.
+- MCP authorization connects whichever account is active at the time, so switch first
+  if you want to connect an agent as a different account.
+
+`proxy` and `dev` modes have no switcher: there, the identity-aware proxy or the config
+decides who you are.
 
 ### Agents
 
@@ -431,7 +476,7 @@ other canvas can frame it. The dashboard itself runs under a strict CSP (`script
 ## What gets audited
 
 The audit log records `auth_ok` and `auth_denied` (with the reason) on every gateway
-decision, `session_create` and `session_revoke` in `oidc` mode, and every OIDC callback
+decision, `session_create`, `session_switch` and `session_revoke` in `oidc` mode, and every OIDC callback
 rejection. Canvas actions are attributed to the acting user or agent: `deploy`,
 `rollback`, `publish`, `canvas_unpublish`, `share_change`, `password_change`,
 `password_attempt`, `slug_regen`, `key_regen`, `canvas_transfer`, among others. Admin

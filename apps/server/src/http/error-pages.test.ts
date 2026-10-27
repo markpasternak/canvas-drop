@@ -42,6 +42,15 @@ function recoveryApp(config: Config, user?: Pick<User, "email">) {
   // JSON 404 (canvasAccess collapses them, §12.0 no-leak) → rewritten to HTML here.
   app.get("/denied", (c) => c.json({ error: "not_found" }, 404));
   app.get("/missing", (c) => c.json({ error: "not_found" }, 404));
+  // canvasAccess's multi-account markers on a signed-in member's canvas 404.
+  app.get("/canvas-none", (c) => {
+    c.set("canvasNotFound", {});
+    return c.json({ error: "not_found" }, 404);
+  });
+  app.get("/canvas-other", (c) => {
+    c.set("canvasNotFound", { accessibleAs: { id: "u-bob", email: "bob@other.example" } });
+    return c.json({ error: "not_found" }, 404);
+  });
   app.get("/disabled", (c) =>
     errorResponse(
       c,
@@ -227,7 +236,56 @@ describe("error-page recovery actions", () => {
     // identity footer, actions, code, title, message — to be byte-identical.
     const app = recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" });
     const [denied, missing] = await Promise.all([htmlOf(app, "/denied"), htmlOf(app, "/missing")]);
-    expect(denied.replaceAll("/denied", "PATH")).toBe(missing.replaceAll("/missing", "PATH"));
+    // The path is echoed raw and (in the Switch account link's returnTo) URL-encoded.
+    const norm = (html: string, path: string) =>
+      html.replaceAll(encodeURIComponent(path), "PATH").replaceAll(path, "PATH");
+    expect(norm(denied, "/denied")).toBe(norm(missing, "/missing"));
+  });
+
+  it("links the account chooser from a signed-in oidc page, carrying the destination", async () => {
+    const html = await htmlOf(
+      recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" }),
+      "/missing",
+    );
+    expect(html).toContain(">Switch account</a>");
+    expect(html).toContain(
+      `https://canvases.example.com/auth/accounts?returnTo=${encodeURIComponent("https://art.canvases.example.com/missing")}`,
+    );
+  });
+
+  it("offers no account switching in dev or proxy mode", async () => {
+    for (const mode of ["dev", "proxy"] as const) {
+      const html = await htmlOf(
+        recoveryApp(subdomainConfig(mode), { email: "a@example.com" }),
+        "/canvas-none",
+      );
+      expect(html).not.toContain("/auth/accounts");
+      expect(html).not.toContain("Use another account");
+    }
+  });
+
+  it("offers 'Use another account' on a canvas 404 when no other account has access", async () => {
+    const html = await htmlOf(
+      recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" }),
+      "/canvas-none",
+    );
+    expect(html).toContain(">Use another account</a>");
+    expect(html).not.toContain("Continue as");
+    expect(html).not.toContain("account=");
+  });
+
+  it("makes 'Continue as …' the primary action when another signed-in account can open the canvas", async () => {
+    const html = await htmlOf(
+      recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" }),
+      "/canvas-other",
+    );
+    expect(html).toContain("Continue as bob@other.example");
+    expect(html).toContain("account=u-bob");
+    expect(html).toContain("which can open this canvas");
+    // The dashboard link steps down to a secondary action.
+    expect(html).toContain(
+      '<a class="ghost" href="https://canvases.example.com/">Open dashboard</a>',
+    );
   });
 
   it("suppresses the identity footer on the public disabled page (hideIdentity)", async () => {

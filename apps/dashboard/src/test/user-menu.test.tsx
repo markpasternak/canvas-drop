@@ -301,3 +301,58 @@ describe("UserMenu", () => {
     expect(screen.queryByRole("menuitem", { name: /keyboard shortcuts/i })).not.toBeInTheDocument();
   });
 });
+
+describe("UserMenu multi-account switcher", () => {
+  const bob = { id: "u-bob", email: "bob@other.example", name: "Bob", avatarUrl: null };
+
+  it("lists the other signed-in accounts as same-origin switch forms (oidc)", async () => {
+    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => [bob]} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const switchTo = await screen.findByRole("menuitem", { name: "Switch to bob@other.example" });
+    const form = switchTo.closest("form") as HTMLFormElement;
+    expect(form).toHaveAttribute("method", "post");
+    expect(form).toHaveAttribute("action", "/auth/switch");
+    expect(within(form).getByDisplayValue("u-bob")).toHaveAttribute("name", "account");
+  });
+
+  it("offers 'Add another account' through the IdP's account picker", async () => {
+    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => []} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    expect(screen.getByRole("menuitem", { name: /add another account/i })).toHaveAttribute(
+      "href",
+      "/auth/login?add=1",
+    );
+  });
+
+  it("splits sign-out into this account / all accounts once there are two", async () => {
+    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => [bob]} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const current = await screen.findByRole("menuitem", { name: /sign out of this account/i });
+    expect(current.closest("form")).toHaveAttribute("action", "/auth/logout/current");
+    expect(screen.getByRole("menuitem", { name: /sign out of all accounts/i })).toHaveAttribute(
+      "href",
+      "/auth/logout",
+    );
+  });
+
+  it("keeps a single plain Sign out with only one account", async () => {
+    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => []} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    expect(await screen.findByRole("menuitem", { name: /^sign out$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /sign out of/i })).not.toBeInTheDocument();
+  });
+
+  it.each(["dev", "proxy"] as AuthMode[])("shows no switcher in %s mode", (mode) => {
+    let loaded = false;
+    const loadAccounts = async () => {
+      loaded = true;
+      return [bob];
+    };
+    renderMenu(<UserMenu me={makeMe({ authMode: mode })} loadAccounts={loadAccounts} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    expect(
+      screen.queryByRole("menuitem", { name: /add another account/i }),
+    ).not.toBeInTheDocument();
+    expect(loaded).toBe(false);
+  });
+});

@@ -8,6 +8,7 @@ import type { UpgradeWebSocket } from "hono/ws";
 import { adminSettingsService } from "./admin/settings-service.js";
 import { anthropicProvider, type ModelProvider } from "./ai/provider.js";
 import type { AuditLog } from "./audit/audit-log.js";
+import { makeOtherAccountProbe, otherAccountSummaries } from "./auth/accounts.js";
 import { authGateway } from "./auth/gateway.js";
 import type { GuestService } from "./auth/guest.js";
 import { guestRoutes } from "./auth/guest-routes.js";
@@ -202,6 +203,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     // Which env vars were set — for the admin Configuration view's source labels.
     envPresent: deps.envPresent,
   });
+
+  // Multi-account switching (oidc only — proxy/dev identity is fixed upstream). Every
+  // account is an ordinary session, so these deps only read accounts the browser holds.
+  const accountsDeps =
+    deps.config.auth.mode === "oidc" && deps.sessionSvc
+      ? { config: deps.config, sessionSvc: deps.sessionSvc, users: deps.users, allowedEmails }
+      : undefined;
   const connections = connectionService({
     repository: connectionsRepository(deps.db),
     canvases: deps.canvases,
@@ -414,7 +422,14 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   app.options("/v1/c/:slug/*", canvasApiPreflight(deps.config));
 
   // Public session-login routes.
-  app.route("/auth", authRoutes({ sessionSvc: noopSession(deps.sessionSvc), oidc: deps.oidc }));
+  app.route(
+    "/auth",
+    authRoutes({
+      sessionSvc: noopSession(deps.sessionSvc),
+      oidc: deps.oidc,
+      accounts: accountsDeps,
+    }),
+  );
 
   // Retired guest magic-link routes — pre-gateway so old emailed URLs get a stable
   // no-store 410 instead of falling through to login or consuming a token.
@@ -666,6 +681,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
       orgs,
       tenancyActive: !!deps.config.org.name,
+      otherAccounts: accountsDeps ? (c) => otherAccountSummaries(accountsDeps, c) : undefined,
     }),
   );
 
@@ -802,6 +818,16 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         teams,
         tenancyActive: !!deps.config.org.name,
         publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
+        otherAccountProbe: accountsDeps
+          ? makeOtherAccountProbe({
+              ...accountsDeps,
+              canvases: deps.canvases,
+              teams,
+              orgMembership,
+              tenancyActive: !!deps.config.org.name,
+              publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
+            })
+          : undefined,
       }),
     ),
   );
@@ -865,7 +891,16 @@ function noopSession(svc?: SessionService): SessionService {
       async resolveUserId() {
         return null;
       },
-      async revoke() {},
+      async otherAccounts() {
+        return [];
+      },
+      async switchTo() {
+        return false;
+      },
+      async revoke() {
+        return { remaining: false };
+      },
+      async revokeAll() {},
     }
   );
 }

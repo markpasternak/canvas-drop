@@ -120,6 +120,7 @@ async function main() {
     users,
     sessions: (await import("./db/repositories/sessions.js")).sessionsRepository(db),
     audit,
+    allowedEmails,
   });
 
   // 3. OIDC login routes (oidc mode only).

@@ -148,6 +148,14 @@ export function makeOidc(deps: OidcDeps) {
       // (untrusted) query param can't become an open redirect; it rides the tx
       // cookie across to the callback.
       const returnTo = safeReturnTo(deps.config, c.req.query("returnTo"));
+      // "Add another account" (multi-account switcher): ask the IdP for its account
+      // picker instead of a re-prompt for whoever its SSO session already holds. The
+      // account that is active now is kept either way (SessionService.issue).
+      // Only for a browser that is signed in now: a signed-out visitor keeps the
+      // `prompt=login` re-auth, so a shared machine can't be re-entered from the IdP's
+      // still-live SSO session in one click after "Sign out".
+      const addAccount =
+        c.req.query("add") === "1" && (await deps.sessionSvc.resolveUserId(c)) !== null;
       const url = client.buildAuthorizationUrl(cfg, {
         redirect_uri: redirectUri,
         scope: "openid email profile",
@@ -161,7 +169,7 @@ export function makeOidc(deps: OidcDeps) {
         // This keeps logout a local concern (we never end the IdP session) while
         // making re-login a deliberate act. Sessions are sliding-14-day, so the
         // extra prompt is rare.
-        prompt: "login",
+        prompt: addAccount ? "select_account" : "login",
       });
       setCookie(
         c,

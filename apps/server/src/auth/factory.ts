@@ -1,7 +1,9 @@
 import type { Config } from "@canvas-drop/shared";
 import { createRemoteJWKSet } from "jose";
+import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import { makeAccountEligibility } from "./accounts.js";
 import { devStrategy } from "./dev.js";
 import { proxyStrategy } from "./proxy.js";
 import {
@@ -17,6 +19,9 @@ export interface AuthDeps {
   sessions: SessionsRepository;
   /** Optional audit sink so session_create / session_revoke are recorded (§12.1.8). */
   audit?: SessionAuditSink;
+  /** Sign-in allowlist, so the multi-account jar never lists, switches to or promotes a
+   *  held account the gateway would refuse (oidc). Omitted: domain allowlist only. */
+  allowedEmails?: Pick<AllowedEmailsRepository, "isAllowed">;
 }
 
 export interface AuthSetup {
@@ -45,6 +50,12 @@ export function setupAuth(config: Config, deps: AuthDeps): AuthSetup {
   }
 
   // oidc: identity comes from the app session; login routes establish it (U11)
-  const sessionSvc = sessionService(config, deps.sessions, deps.audit);
+  const sessionSvc = sessionService(config, deps.sessions, deps.audit, {
+    isEligible: makeAccountEligibility(
+      config,
+      deps.users,
+      deps.allowedEmails ?? { isAllowed: async () => false },
+    ),
+  });
   return { strategy: sessionBackedStrategy(sessionSvc, deps.users), sessionSvc };
 }

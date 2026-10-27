@@ -1,7 +1,7 @@
 import { rampCssVars } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
-import { loginUrl, requestReturnTo } from "../auth/return-to.js";
+import { accountChooserUrl, loginUrl, requestReturnTo } from "../auth/return-to.js";
 import { BRAND_MARK } from "./brand.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
@@ -36,6 +36,11 @@ interface RecoveryContext {
   logoutHref?: string;
   /** Absolute sign-in URL (oidc, signed out) carrying where the visitor was headed. */
   signInHref?: string;
+  /** Absolute account-chooser URL (oidc, signed in) — multi-account switching. */
+  switchHref?: string;
+  /** Canvas 404 for a signed-in member (oidc): offer another account. `accessibleAs`
+   *  is set only when one of the visitor's own other accounts may open the canvas. */
+  otherAccount?: { href: string; accessibleAs?: string };
 }
 
 /**
@@ -59,7 +64,28 @@ function recoveryContext(c: Context<AppEnv>): RecoveryContext | undefined {
   // dashboard UserMenu's `canSignOut = authMode !== "proxy"`. In proxy mode the IAP
   // owns the session, so the app never offers sign-out.
   if (mode !== "proxy" && user?.email) {
-    return { appBase, identity: { email: user.email }, logoutHref: `${appBase}/auth/logout` };
+    const signedIn = {
+      appBase,
+      identity: { email: user.email },
+      logoutHref: `${appBase}/auth/logout`,
+    };
+    if (mode !== "oidc") return signedIn;
+    // Multi-account (oidc): every signed-in error page can reach the account chooser,
+    // carrying the visitor's destination so a switch lands them back here.
+    const returnTo = requestReturnTo(config, c.req.header("host"), c.req.url);
+    const notFound = c.get("canvasNotFound");
+    return {
+      ...signedIn,
+      switchHref: accountChooserUrl(config, returnTo),
+      ...(notFound
+        ? {
+            otherAccount: {
+              href: accountChooserUrl(config, returnTo, notFound.accessibleAs?.id),
+              accessibleAs: notFound.accessibleAs?.email,
+            },
+          }
+        : {}),
+    };
   }
 
   // Signed out + app-owned login (oidc only) → an absolute sign-in carrying the
@@ -282,8 +308,10 @@ function renderErrorPage(input: ErrorPageDetails, recovery?: RecoveryContext): s
   // legacy relative `/` when config isn't on the context (bare unit-test apps). Read
   // from `input` (not `details`) — normalizeDetails defaults the href to `/`, which
   // would otherwise mask the recovery-aware fallback below.
-  const actionHref = escapeAttribute(input.actionHref ?? (recovery ? `${recovery.appBase}/` : "/"));
-  const actionLabel = escapeHtml(details.actionLabel ?? "Open dashboard");
+  const dashboardHref = escapeAttribute(
+    input.actionHref ?? (recovery ? `${recovery.appBase}/` : "/"),
+  );
+  const dashboardLabel = escapeHtml(details.actionLabel ?? "Open dashboard");
 
   // Identity affordances — suppressed when `hideIdentity` is set (the public disabled
   // page). A signed-out oidc visitor gets a secondary "Sign in"; a signed-in member
@@ -294,10 +322,29 @@ function renderErrorPage(input: ErrorPageDetails, recovery?: RecoveryContext): s
   const signIn = signInHref
     ? `<a class="ghost" href="${escapeAttribute(signInHref)}">Sign in</a>`
     : "";
+  const switchLink =
+    identity && recovery?.switchHref
+      ? ` · <a class="textlink" href="${escapeAttribute(recovery.switchHref)}">Switch account</a>`
+      : "";
   const identityLine =
     identity && recovery?.logoutHref
-      ? `<p class="identity">Signed in as <strong>${escapeHtml(identity.email)}</strong> · <a class="textlink" href="${escapeAttribute(recovery.logoutHref)}">Sign out</a></p>`
+      ? `<p class="identity">Signed in as <strong>${escapeHtml(identity.email)}</strong>${switchLink} · <a class="textlink" href="${escapeAttribute(recovery.logoutHref)}">Sign out</a></p>`
       : "";
+
+  // Canvas 404 for a signed-in member (multi-account): when another of the visitor's
+  // accounts may open it, switching becomes the primary action; otherwise "Use another
+  // account" sits beside the dashboard link.
+  const other = identity ? recovery?.otherAccount : undefined;
+  const dashboard = `<a${other?.accessibleAs ? ' class="ghost"' : ""} href="${dashboardHref}">${dashboardLabel}</a>`;
+  let actions = `${dashboard}${signIn}`;
+  let accountHint = "";
+  if (other?.accessibleAs) {
+    const email = escapeHtml(other.accessibleAs);
+    actions = `<a href="${escapeAttribute(other.href)}">Continue as ${email}</a>${dashboard}`;
+    accountHint = `<p class="hint">You're also signed in as <strong>${email}</strong>, which can open this canvas.</p>`;
+  } else if (other) {
+    actions = `${dashboard}<a class="ghost" href="${escapeAttribute(other.href)}">Use another account</a>`;
+  }
 
   return `<!doctype html>
 <html lang="en">
@@ -421,7 +468,8 @@ ${SYSTEM_PAGE_BRAND}
         ${path ? `<dt>Path</dt><dd>${path}</dd>` : ""}
       </dl>
       ${hint ? `<p class="hint">${hint}</p>` : ""}
-      <div class="actions"><a href="${actionHref}">${actionLabel}</a>${signIn}</div>
+      ${accountHint}
+      <div class="actions">${actions}</div>
       ${identityLine}
     </section>
   </main>

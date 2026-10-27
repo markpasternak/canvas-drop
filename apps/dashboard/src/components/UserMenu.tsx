@@ -7,9 +7,10 @@ import {
   ShieldCheck,
   SignOut,
   Sun,
+  UserPlus,
 } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
-import type { Me } from "../lib/api.js";
+import { api, type Me, type SignedInAccount } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { useTheme } from "../lib/theme.js";
 import { SegmentedControl } from "./SegmentedControl.js";
@@ -22,13 +23,15 @@ const FOCUSABLE_SELECTOR =
 /** First letter of the display name, falling back to the email — a calm avatar
  * fallback when the identity provider gives no `avatarUrl`. Tolerates a null/absent
  * name or email (some providers omit one). */
-function initial(me: Me): string {
+type AccountLike = Pick<Me, "email" | "avatarUrl"> & { name: string | null };
+
+function initial(me: AccountLike): string {
   const source = me.name?.trim() || me.email?.trim() || "";
   return (source[0] ?? "?").toUpperCase();
 }
 
 /** Best display label for the account, never empty. */
-function label(me: Me): string {
+function label(me: AccountLike): string {
   return me.name?.trim() || me.email?.trim() || "Account";
 }
 
@@ -48,15 +51,24 @@ function label(me: Me): string {
  * a downward menu would fall below the fold. `expanded` swaps the compact
  * avatar-only trigger for a full-width row that also shows the display name (the
  * rail's expanded footer); the compact form stays for the collapsed rail and the
- * mobile bar. */
+ * mobile bar.
+ *
+ * Multi-account (oidc only): the menu lists the other accounts signed in on this
+ * browser (loaded when it opens) with a Switch for each, "Add another account", and —
+ * once there is more than one — separate "Sign out of this account" / "Sign out of all
+ * accounts". Switching and single sign-out are real same-origin form POSTs (the server
+ * refuses them cross-origin), followed by a full page load as the new account. */
 export function UserMenu({
   me,
   placement = "down",
   expanded = false,
+  loadAccounts = api.otherAccounts,
 }: {
   me: Me;
   placement?: "down" | "up";
   expanded?: boolean;
+  /** Loads the other signed-in accounts; injectable for tests. */
+  loadAccounts?: () => Promise<SignedInAccount[]>;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -65,7 +77,26 @@ export function UserMenu({
   const menuId = useId();
   const { choice, setChoice } = useTheme();
   const canSignOut = me.authMode !== "proxy";
+  const multiAccount = me.authMode === "oidc";
+  const [others, setOthers] = useState<SignedInAccount[]>([]);
   const openUp = placement === "up";
+
+  // Refresh the other signed-in accounts each time the menu opens (a sign-in in
+  // another tab may have added one). A failed load just shows no other accounts. The
+  // loader is read through a ref so an inline prop can't re-trigger the load.
+  const loadAccountsRef = useRef(loadAccounts);
+  loadAccountsRef.current = loadAccounts;
+  useEffect(() => {
+    if (!open || !multiAccount) return;
+    let live = true;
+    loadAccountsRef
+      .current()
+      .then((accounts) => live && setOthers(accounts))
+      .catch(() => live && setOthers([]));
+    return () => {
+      live = false;
+    };
+  }, [open, multiAccount]);
 
   // Close on outside pointerdown and on Escape; restore focus to the trigger so
   // keyboard users aren't dumped at the top of the document. While open, trap Tab
@@ -198,6 +229,38 @@ export function UserMenu({
             </div>
           </div>
 
+          {multiAccount && (
+            <div className="border-border border-b py-1">
+              {others.map((account) => (
+                <form key={account.id} method="post" action="/auth/switch">
+                  <input type="hidden" name="account" value={account.id} />
+                  <button
+                    type="submit"
+                    role="menuitem"
+                    aria-label={`Switch to ${account.email}`}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-surface-sunken"
+                  >
+                    <Avatar me={account} className="size-7" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-fg text-sm">{label(account)}</span>
+                      {account.name?.trim() && (
+                        <span className="block truncate text-subtle text-xs">{account.email}</span>
+                      )}
+                    </span>
+                  </button>
+                </form>
+              ))}
+              <a
+                href="/auth/login?add=1"
+                role="menuitem"
+                className="flex items-center gap-2.5 px-3.5 py-2 text-fg text-sm transition-colors hover:bg-surface-sunken"
+              >
+                <UserPlus size={16} aria-hidden className="text-muted" />
+                Add another account
+              </a>
+            </div>
+          )}
+
           {/* Theme switch — a labeled row near the top, under the identity header.
               The SegmentedControl renders real aria-pressed toggle buttons, so the
               active theme is conveyed to assistive tech and each option is keyboard
@@ -238,6 +301,18 @@ export function UserMenu({
             <ArrowSquareOut size={13} weight="bold" aria-hidden className="ml-auto text-subtle" />
           </a>
 
+          {canSignOut && others.length > 0 && (
+            <form method="post" action="/auth/logout/current">
+              <button
+                type="submit"
+                role="menuitem"
+                className="flex w-full items-center gap-2.5 border-border border-t px-3.5 py-2.5 text-left text-fg text-sm transition-colors hover:bg-surface-sunken"
+              >
+                <SignOut size={16} aria-hidden className="text-muted" />
+                Sign out of this account
+              </button>
+            </form>
+          )}
           {canSignOut && (
             <a
               href="/auth/logout"
@@ -245,7 +320,7 @@ export function UserMenu({
               className="flex items-center gap-2.5 border-border border-t px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
             >
               <SignOut size={16} aria-hidden className="text-muted" />
-              Sign out
+              {others.length > 0 ? "Sign out of all accounts" : "Sign out"}
             </a>
           )}
         </div>
@@ -254,7 +329,7 @@ export function UserMenu({
   );
 }
 
-function Avatar({ me, className }: { me: Me; className?: string }) {
+function Avatar({ me, className }: { me: AccountLike; className?: string }) {
   if (me.avatarUrl) {
     return (
       <img
