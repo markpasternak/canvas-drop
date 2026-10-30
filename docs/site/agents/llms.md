@@ -13,7 +13,7 @@ There are three ways in. Pick by what you hold.
 | You hold | Use | Reach |
 |---|---|---|
 | A per-canvas secret key (`cd_...`) | Deploy API at `{base}/v1/canvases/{id}/...` | that one canvas: deploy, read back, roll back, unpublish |
-| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 49 tools |
+| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 51 tools |
 | Code running inside a canvas page | Browser SDK at `{base}/sdk/v1.js`, global `canvasdrop` | the six fixed primitives for that canvas: KV, files, AI, identity, realtime, Connections |
 
 Two verbs recur below. **Publish** turns the editor draft into an immutable
@@ -136,7 +136,7 @@ deploy and publish with `NOT_ACTIVE`.
 | Read (`editor`) | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_access`, `search_people` |
 | Deploy (`editor`; publishes live immediately) | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` — optional `releaseId` / `expectedPublicationToken` on `deploy_canvas`, `begin_deploy`, `finalize_deploy` coordinate two publishers (see Deploy with a key) |
 | Lifecycle (`editor` unless marked) | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `preview_version_prune`, `prune_versions`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) |
-| Settings (`editor`) | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key`; `list_canvas_connections` reads the admin-granted profiles |
+| Settings (`editor`) | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `add_canvas_alias`, `remove_canvas_alias`, `set_canvas_preview`, `regenerate_deploy_key`; `list_canvas_connections` reads the admin-granted profiles |
 | Sharing (`editor`) | `grant_access`, `invite_to_canvas`, `revoke_access`, `set_access_role` |
 | Draft loop (`editor`) | `get_draft`, `read_draft_file`, `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft` |
 | Teams (`any`) | `list_teams`, `create_team`, `rename_team`, `delete_team`, `add_team_member`, `remove_team_member`, `cancel_team_invite`, `list_team_members` |

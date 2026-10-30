@@ -30,6 +30,12 @@ export const SLUG_UNIQUE: UniqueTarget = {
   sqliteColumn: "canvases.slug",
 };
 
+/** The slug-alias unique index (plan 2026-10-30-1815), for both dialects. */
+export const ALIAS_UNIQUE: UniqueTarget = {
+  pgConstraint: "canvas_slug_aliases_slug_uq",
+  sqliteColumn: "canvas_slug_aliases.slug",
+};
+
 /**
  * The partial unique index that keeps a release identity on at most one READY version
  * per canvas (deployment-coordination plan, KTD2). The loser of a same-release race hits

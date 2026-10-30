@@ -394,6 +394,31 @@ export const canvasConnections = sqliteTable(
 // (by email — the guest's magic-link session is keyed back to this entry). Unique
 // per (canvas, user_id) and (canvas, email). Removing a row revokes on the next
 // request (no cached grants).
+// Slug aliases (plan 2026-10-30-1815). Extra names a canvas answers to; an alias
+// request redirects to the canonical `canvases.slug` and never serves content itself.
+// `slug` shares one namespace with `canvases.slug` — `slugTaken` checks both tables.
+// Rows outlive soft-delete like the canonical slug does (reserved, never served).
+export const canvasSlugAliases = sqliteTable(
+  "canvas_slug_aliases",
+  {
+    id: c.text("id").primaryKey(),
+    slug: c.text("slug").notNull(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    createdBy: c
+      .text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("canvas_slug_aliases_slug_uq").on(t.slug),
+    index("canvas_slug_aliases_canvas_idx").on(t.canvasId),
+  ],
+);
+
 export const canvasAllowlist = sqliteTable(
   "canvas_allowlist",
   {

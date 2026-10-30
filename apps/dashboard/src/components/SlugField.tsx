@@ -32,6 +32,8 @@ export interface SlugFieldProps {
   idleHint?: string;
   autoFocus?: boolean;
   disabled?: boolean;
+  /** Show the "optional" marker (default). An alias name is required, so it hides it. */
+  optional?: boolean;
 }
 
 /**
@@ -47,6 +49,7 @@ export function SlugField({
   idleHint = "Leave empty for a random URL.",
   autoFocus,
   disabled,
+  optional = true,
 }: SlugFieldProps) {
   const id = useId();
   const statusId = useId();
@@ -68,7 +71,7 @@ export function SlugField({
         <label htmlFor={id} className="text-sm font-medium text-fg">
           {label}
         </label>
-        <span className="text-xs text-subtle">optional</span>
+        {optional && <span className="text-xs text-subtle">optional</span>}
       </div>
       <input
         id={id}

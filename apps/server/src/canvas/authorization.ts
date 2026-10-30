@@ -1,3 +1,4 @@
+import type { Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
@@ -7,6 +8,7 @@ import type { TeamsRepository } from "../db/repositories/teams.js";
 import { wantsHtmlError } from "../http/error-pages.js";
 import type { AppEnv, Principal } from "../http/types.js";
 import { disabledResponse } from "./disabled-page.js";
+import { aliasRedirectUrl } from "./url.js";
 
 /**
  * Canvas authorization (BUILD_BRIEF.md §12.0 invariant 3/5, §12.2). The single
@@ -267,6 +269,9 @@ export interface CanvasAccessDeps {
   /** Multi-account switching (oidc): finds another account signed in on this browser
    *  that may open a canvas the active account can't. Omitted outside oidc mode. */
   otherAccountProbe?: OtherAccountProbe;
+  /** Instance config, for the slug-alias redirect target (plan 2026-10-30-1815). When
+   *  omitted (focused tests) alias slugs are not resolved and simply 404. */
+  config?: Config;
 }
 
 /** Current public-sharing policy for a canvas. Shared by serving, HTTP and MCP
@@ -402,9 +407,23 @@ export function canvasAccess(deps: CanvasAccessDeps) {
     const slug = c.get("canvasSlug");
     if (!slug) return c.json({ error: "not_found" }, 404);
 
-    const canvas = await deps.canvases.findBySlug(slug);
+    let canvas = await deps.canvases.findBySlug(slug);
+    // Slug alias (plan 2026-10-30-1815, KTD1/KTD2): an alias never serves content. It
+    // runs the SAME decision as the canonical URL, and only an allowed viewer is sent on
+    // to it — a denied one gets exactly the canonical URL's refusal below, so an alias
+    // never reveals the canonical slug of a canvas the viewer can't open.
+    const viaAlias = !canvas && !!deps.config;
+    if (viaAlias) canvas = await deps.canvases.findByAlias(slug);
     const principal = requestPrincipal(c);
     const decision = await decideAccessFor(deps, canvas, principal);
+
+    if (viaAlias && canvas && decision.action !== "deny" && deps.config) {
+      const target = aliasRedirectUrl(deps.config, slug, canvas.slug, new URL(c.req.url));
+      // 302, not 301: an alias can be removed or re-pointed, and browsers cache a 301
+      // indefinitely (KTD3). no-store: the redirect depends on who is asking.
+      c.header("Cache-Control", "no-store");
+      return c.redirect(target, 302);
+    }
 
     if (decision.action === "deny") {
       if (decision.status === 403) {

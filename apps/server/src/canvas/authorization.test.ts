@@ -1,3 +1,4 @@
+import { type Config, loadConfig } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
@@ -496,6 +497,128 @@ describe("canvasAccess — disabled-canvas rendering", () => {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: "not_found" });
     }
+  });
+});
+
+describe("canvasAccess — slug alias redirect (plan 2026-10-30-1815)", () => {
+  const pathConfig = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
+
+  /** canvasAccess over a fake repo where `alias` resolves only as an alias of `cv`. */
+  function appFor(
+    cv: Canvas | null,
+    user: { id: string; isAdmin: boolean },
+    opts: { slug?: string; config?: Config } = {},
+  ) {
+    const canvases = {
+      async findBySlug(slug: string) {
+        return cv && slug === cv.slug ? cv : null;
+      },
+      async findByAlias(slug: string) {
+        return slug === "alias" ? cv : null;
+      },
+      async isPrincipalAllowed() {
+        return false;
+      },
+      async isOwnerPublishEnabled() {
+        return true;
+      },
+      async isEffectiveEditor() {
+        return false;
+      },
+    } as unknown as CanvasesRepository;
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("canvasSlug", opts.slug ?? "alias");
+      c.set("user", { id: user.id, isAdmin: user.isAdmin } as never);
+      await next();
+    });
+    app.use(
+      "*",
+      canvasAccess({ canvases, tenancyActive: false, config: opts.config ?? pathConfig }),
+    );
+    app.get("*", (c) => c.text("CANVAS CONTENT"));
+    return app;
+  }
+
+  it("a viewer who may open the canvas is sent to the canonical URL with path + query", async () => {
+    const cv = canvas({ slug: "real-name", access: "whole_org" });
+    const res = await appFor(cv, other).request("/c/alias/docs/page.html?x=1#ignored");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(
+      `${pathConfig.baseUrl.replace(/\/$/, "")}/c/real-name/docs/page.html?x=1`,
+    );
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    // The bare alias root lands on the canonical root.
+    const root = await appFor(cv, other).request("/c/alias");
+    expect(root.headers.get("location")).toMatch(/\/c\/real-name\/$/);
+  });
+
+  it("subdomain mode swaps the host label and keeps the path", async () => {
+    const config = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+    });
+    const cv = canvas({ slug: "real-name", access: "whole_org" });
+    const res = await appFor(cv, other, { config }).request("/app/?tab=2");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://real-name.canvases.example.com/app/?tab=2");
+  });
+
+  it("a viewer who can't open the canvas gets the canonical URL's opaque 404, never its slug", async () => {
+    for (const cv of [
+      canvas({ slug: "secret-name", access: "private" }),
+      canvas({ slug: "secret-name", status: "archived" }),
+    ]) {
+      const res = await appFor(cv, other).request("/c/alias/", {
+        headers: { accept: "application/json" },
+      });
+      expect(res.status).toBe(404);
+      expect(res.headers.get("location")).toBeNull();
+      expect(await res.text()).not.toContain("secret-name");
+    }
+  });
+
+  it("a disabled canvas shows the disabled page on its alias too", async () => {
+    const res = await appFor(canvas({ slug: "x", status: "disabled" }), owner).request(
+      "/c/alias/",
+      {
+        headers: { accept: "application/json" },
+      },
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("an anonymous visitor of a public-link canvas is redirected", async () => {
+    const cv = canvas({ slug: "open-name", access: "public_link" });
+    const app = new Hono<AppEnv>();
+    const canvases = {
+      async findBySlug() {
+        return null;
+      },
+      async findByAlias() {
+        return cv;
+      },
+      async isOwnerPublishEnabled() {
+        return true;
+      },
+    } as unknown as CanvasesRepository;
+    app.use("*", async (c, next) => {
+      c.set("canvasSlug", "alias");
+      c.set("principal", { kind: "anonymous" });
+      await next();
+    });
+    app.use("*", canvasAccess({ canvases, tenancyActive: false, config: pathConfig }));
+    const res = await app.request("/c/alias/");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toMatch(/\/c\/open-name\/$/);
+  });
+
+  it("the canonical slug still serves content directly (no redirect loop)", async () => {
+    const cv = canvas({ slug: "real-name", access: "whole_org" });
+    const res = await appFor(cv, other, { slug: "real-name" }).request("/c/real-name/");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("CANVAS CONTENT");
   });
 });
 

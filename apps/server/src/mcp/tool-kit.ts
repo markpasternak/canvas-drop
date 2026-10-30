@@ -21,6 +21,19 @@ export function fail(message: string): ToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+/** A refused slug change (create / rename / alias) as a stable `CODE: message` fail —
+ *  the MCP face of the HTTP 400/409 `{ error }` bodies (plan 2026-10-30-1815). */
+export function slugFailure(error: "invalid_slug" | "slug_taken" | "alias_limit"): ToolResult {
+  switch (error) {
+    case "invalid_slug":
+      return fail("INVALID_SLUG: not a valid slug");
+    case "slug_taken":
+      return fail("SLUG_TAKEN: that slug is already in use");
+    case "alias_limit":
+      return fail("ALIAS_LIMIT: a canvas can have at most 10 aliases");
+  }
+}
+
 /** Surface an upload/deploy `DeployError` as a stable `CODE: message` fail; rethrow
  *  anything else (a real bug, not a client error). Shared by every deploy/draft tool.
  *  A deployment-coordination conflict (KTD9) appends the current publication — and, for

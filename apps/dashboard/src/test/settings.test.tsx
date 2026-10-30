@@ -134,7 +134,83 @@ describe("settings route", () => {
         (c) => c.method === "POST" && c.url === "/api/canvases/c1/regenerate-slug",
       );
       expect(post?.body).toContain("team-hub");
+      // A custom rename keeps the old URL redirecting by default (plan 2026-10-30-1815).
+      expect(JSON.parse(post?.body ?? "{}").keepOldAsAlias).toBe(true);
     });
+  });
+
+  it("the keep-old-URL box can be unticked, so the old URL stops working", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/slug-available": () => json({ available: true }),
+      "POST /api/canvases/c1/regenerate-slug": () => json({ ...CANVAS, slug: "team-hub" }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole("button", { name: /change slug/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Slug"), "team-hub");
+    const keep = within(dialog).getByRole("checkbox", { name: /keep the current url/i });
+    expect(keep).toBeChecked();
+    await user.click(keep);
+    expect(within(dialog).getByText(/current url will stop working/i)).toBeInTheDocument();
+    const submit = within(dialog).getByRole("button", { name: /change slug/i });
+    await vi.waitFor(() => expect(submit).not.toBeDisabled());
+    await user.click(submit);
+
+    await vi.waitFor(() => {
+      const post = calls.find(
+        (c) => c.method === "POST" && c.url === "/api/canvases/c1/regenerate-slug",
+      );
+      expect(JSON.parse(post?.body ?? "{}")).toEqual({ slug: "team-hub" });
+    });
+  });
+
+  it("lists aliases and adds, promotes and removes them", async () => {
+    const alias = { slug: "old-name", url: "http://x/c/old-name/", createdAt: 0 };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/aliases": () => json({ aliases: [alias] }),
+      "GET /api/canvases/slug-available": () => json({ available: true }),
+      "POST /api/canvases/c1/aliases": () =>
+        json({ aliases: [alias, { ...alias, slug: "nick", url: "http://x/c/nick/" }] }, 201),
+      "POST /api/canvases/c1/regenerate-slug": () => json({ ...CANVAS, slug: "old-name" }),
+      "DELETE /api/canvases/c1/aliases/old-name": () => json({ aliases: [] }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    expect(await screen.findByText("http://x/c/old-name/")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^add alias$/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Alias"), "nick");
+    const submit = within(dialog).getByRole("button", { name: /add alias/i });
+    await vi.waitFor(() => expect(submit).not.toBeDisabled());
+    await user.click(submit);
+    expect(await screen.findByText("http://x/c/nick/")).toBeInTheDocument();
+    expect(
+      JSON.parse(
+        calls.find((c) => c.method === "POST" && c.url === "/api/canvases/c1/aliases")?.body ??
+          "{}",
+      ),
+    ).toEqual({ slug: "nick" });
+
+    await user.click(screen.getAllByRole("button", { name: /make primary/i })[0] as HTMLElement);
+    await vi.waitFor(() => {
+      const post = calls.find(
+        (c) => c.method === "POST" && c.url === "/api/canvases/c1/regenerate-slug",
+      );
+      expect(JSON.parse(post?.body ?? "{}")).toEqual({ slug: "old-name", keepOldAsAlias: true });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remove alias old-name" }));
+    await vi.waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "DELETE" && c.url === "/api/canvases/c1/aliases/old-name"),
+      ).toBe(true),
+    );
   });
 
   it("toggles single-page app mode via PATCH", async () => {

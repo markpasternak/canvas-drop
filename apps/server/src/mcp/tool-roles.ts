@@ -33,6 +33,8 @@ export const TOOL_MIN_ROLE = {
   update_canvas: "editor",
   set_capabilities: "editor",
   set_canvas_slug: "editor",
+  add_canvas_alias: "editor",
+  remove_canvas_alias: "editor",
   set_canvas_preview: "editor",
   regenerate_deploy_key: "editor",
   archive_canvas: "editor",

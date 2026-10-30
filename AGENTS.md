@@ -154,7 +154,7 @@ Institutional learnings live in `docs/solutions/` — skim the index, and especi
 
 Issue #116 and `docs/plans/2026-09-08-001-feat-runtime-permissions-version-pruning-plan.md`
 cover version cleanup and runtime roles/participation. The release adds two MCP
-pruning tools (49 total), `me().canvasRole` / permissions / resource rights, authored
+pruning tools (49 at the time; 51 with the slug-alias tools), `me().canvasRole` / permissions / resource rights, authored
 KV collections with immutable authorship, inherited attachments, five policy presets,
 default modes and advanced controls. The extension plan is
 `docs/plans/2026-09-08-002-feat-primitive-policy-defaults-plan.md`.

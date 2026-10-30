@@ -916,6 +916,140 @@ describe("managementRoutes", () => {
     expect(rekey.apiKey).not.toBe(created.apiKey);
   });
 
+  describe("slug aliases (plan 2026-10-30-1815)", () => {
+    const hdrs = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" };
+    const post = (app: ReturnType<typeof buildApp>, path: string, body: unknown) =>
+      app.request(path, { method: "POST", headers: hdrs, body: JSON.stringify(body) });
+    const del = (app: ReturnType<typeof buildApp>, path: string) =>
+      app.request(path, { method: "DELETE", headers: hdrs });
+    type AliasList = { aliases: Array<{ slug: string; url: string }> };
+
+    it.each(DIALECTS)(
+      "adds, lists and removes aliases; names share one namespace [%s]",
+      async (dialect) => {
+        client = await makeTestDb(dialect);
+        const owner = await seedUser(client, "owner");
+        const app = buildApp(client, { id: owner.id, isAdmin: false });
+        const cv = await jsonOf<{ id: string }>(
+          await post(app, "/api/canvases", { slug: "roadmap" }),
+        );
+        await post(app, "/api/canvases", { slug: "other-canvas" });
+
+        const added = await post(app, `/api/canvases/${cv.id}/aliases`, { slug: "q3-roadmap" });
+        expect(added.status).toBe(201);
+        const list = await jsonOf<AliasList>(added);
+        expect(list.aliases.map((a) => a.slug)).toEqual(["q3-roadmap"]);
+        expect(list.aliases[0]?.url).toMatch(/\/c\/q3-roadmap\/$/);
+
+        // Invalid / reserved → 400; own canonical, another canvas's slug, an existing alias → 409.
+        for (const slug of ["UPPER", "api"]) {
+          expect((await post(app, `/api/canvases/${cv.id}/aliases`, { slug })).status).toBe(400);
+        }
+        for (const slug of ["roadmap", "other-canvas", "q3-roadmap"]) {
+          const res = await post(app, `/api/canvases/${cv.id}/aliases`, { slug });
+          expect(res.status, slug).toBe(409);
+          expect((await jsonOf<{ error: string }>(res)).error).toBe("slug_taken");
+        }
+        // The alias blocks every other way of claiming the name.
+        const avail = await jsonOf<{ available: boolean }>(
+          await app.request("/api/canvases/slug-available?slug=q3-roadmap"),
+        );
+        expect(avail.available).toBe(false);
+        expect((await post(app, "/api/canvases", { slug: "q3-roadmap" })).status).toBe(409);
+
+        const repo = canvasesRepository(client);
+        expect((await repo.findByAlias("q3-roadmap"))?.id).toBe(cv.id);
+        expect(
+          (await jsonOf<AliasList>(await del(app, `/api/canvases/${cv.id}/aliases/q3-roadmap`)))
+            .aliases,
+        ).toEqual([]);
+        expect((await del(app, `/api/canvases/${cv.id}/aliases/q3-roadmap`)).status).toBe(404);
+        expect(await repo.findByAlias("q3-roadmap")).toBeNull();
+        // Freed immediately.
+        expect((await post(app, "/api/canvases", { slug: "q3-roadmap" })).status).toBe(201);
+      },
+    );
+
+    it("caps a canvas at 10 aliases", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      const cv = await jsonOf<{ id: string }>(await post(app, "/api/canvases", { slug: "capped" }));
+      for (let i = 0; i < 10; i++) {
+        expect(
+          (await post(app, `/api/canvases/${cv.id}/aliases`, { slug: `name-${i}` })).status,
+        ).toBe(201);
+      }
+      const over = await post(app, `/api/canvases/${cv.id}/aliases`, { slug: "name-10" });
+      expect(over.status).toBe(409);
+      expect((await jsonOf<{ error: string }>(over)).error).toBe("alias_limit");
+      // Keeping the old slug on rename would also overflow.
+      const rename = await post(app, `/api/canvases/${cv.id}/regenerate-slug`, {
+        slug: "capped-two",
+        keepOldAsAlias: true,
+      });
+      expect(rename.status).toBe(409);
+      // Promoting an alias while keeping the old slug is net zero, so it is allowed.
+      const promote = await post(app, `/api/canvases/${cv.id}/regenerate-slug`, {
+        slug: "name-0",
+        keepOldAsAlias: true,
+      });
+      expect(promote.status).toBe(200);
+    });
+
+    it.each(DIALECTS)(
+      "rename keeps the old slug as an alias on request, and promotes an alias [%s]",
+      async (dialect) => {
+        client = await makeTestDb(dialect);
+        const owner = await seedUser(client, "owner");
+        const app = buildApp(client, { id: owner.id, isAdmin: false });
+        const repo = canvasesRepository(client);
+        const cv = await jsonOf<{ id: string }>(
+          await post(app, "/api/canvases", { slug: "first" }),
+        );
+
+        const kept = await post(app, `/api/canvases/${cv.id}/regenerate-slug`, {
+          slug: "second",
+          keepOldAsAlias: true,
+        });
+        expect((await jsonOf<{ slug: string }>(kept)).slug).toBe("second");
+        expect((await repo.findByAlias("first"))?.id).toBe(cv.id);
+
+        // Without keepOldAsAlias the old slug is gone (today's behaviour).
+        await post(app, `/api/canvases/${cv.id}/regenerate-slug`, { slug: "third" });
+        expect(await repo.findByAlias("second")).toBeNull();
+        expect(await repo.findBySlug("second")).toBeNull();
+
+        // Promote: renaming to an own alias swaps it in; the outgoing slug becomes an alias.
+        const promoted = await post(app, `/api/canvases/${cv.id}/regenerate-slug`, {
+          slug: "first",
+          keepOldAsAlias: true,
+        });
+        expect(promoted.status).toBe(200);
+        expect((await repo.findBySlug("first"))?.id).toBe(cv.id);
+        const aliases = await jsonOf<AliasList>(
+          await app.request(`/api/canvases/${cv.id}/aliases`),
+        );
+        expect(aliases.aliases.map((a) => a.slug)).toEqual(["third"]);
+      },
+    );
+
+    it("a canvas the caller can't manage reads as not found", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const stranger = await seedUser(client, "stranger");
+      const cv = await jsonOf<{ id: string }>(
+        await post(buildApp(client, { id: owner.id, isAdmin: false }), "/api/canvases", {}),
+      );
+      const app = buildApp(client, { id: stranger.id, isAdmin: false });
+      expect((await app.request(`/api/canvases/${cv.id}/aliases`)).status).toBe(404);
+      expect((await post(app, `/api/canvases/${cv.id}/aliases`, { slug: "sneaky" })).status).toBe(
+        404,
+      );
+      expect((await del(app, `/api/canvases/${cv.id}/aliases/sneaky`)).status).toBe(404);
+    });
+  });
+
   describe("custom slugs (plan 004)", () => {
     const hdrs = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" };
 

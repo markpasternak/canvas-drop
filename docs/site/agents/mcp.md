@@ -104,7 +104,7 @@ Refusal codes you will meet across tools:
 
 ## Tools
 
-49 tools: 13 open to any signed-in account, 32 at minimum role editor, 2 owner-only.
+51 tools: 13 open to any signed-in account, 36 at minimum role editor, 2 owner-only.
 Optional inputs are marked `?`. "View" is the canvas projection described under Return
 shapes below.
 
@@ -126,7 +126,7 @@ Minimum role: editor. These keep working on a disabled canvas.
 
 | Tool | Input | Result |
 |---|---|---|
-| `get_canvas` | `id` | View + `owner`, `role`, `publicLinkEnabled`, `teamIds` (the team grants on the people-and-teams list, at any `access` value; `[]` when none), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued), plus the deployment-coordination readback: `publicationToken` (always present) and `currentVersion: {id, number, releaseId, createdAt} \| null`. |
+| `get_canvas` | `id` | View + `owner`, `role`, `publicLinkEnabled`, `teamIds` (the team grants on the people-and-teams list, at any `access` value; `[]` when none), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued), plus the deployment-coordination readback: `publicationToken` (always present) and `currentVersion: {id, number, releaseId, createdAt} \| null`, and `aliases: [{slug, url, createdAt}]` (the slug aliases that redirect to `url`). |
 | `list_versions` | `id` | `{versions: [{id, number, source, status, createdBy, createdByName, createdByEmail, createdAt, fileCount, totalBytes, releaseId, current, downloadUrl}]}`. `id` is the immutable version id, `releaseId` the release identity it was deployed under (or `null`); `downloadUrl` is `{base}/mcp/canvases/{id}/versions/{n}/download`, a ZIP of that version. |
 | `get_canvas_file` | `id`, `path?` | Without `path`: `{version, fileCount, files: [{path, size, mime, hash}]}` for the live version. With `path`: `{version, path, size, mime, hash, encoding: "utf8" \| "base64", content}`. A file over 256 KiB returns `truncated: true` and a `note` instead of `content`; compare the `hash`. Fails with `this canvas has no live version yet` or `no file at "…"`. |
 | `get_canvas_usage` | `id` | `{totalViews, uniqueViewers, lastViewedAt, viewsByDay, kvOps, fileOps, fileCount, fileBytes, aiCalls, aiTokens, aiCostUsd, realtimeConnects}`. |
@@ -173,7 +173,9 @@ Minimum role: editor.
 |---|---|---|
 | `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `whole_org` \| `public_link`; the legacy `specific_people` / `team` are accepted as aliases of `private`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `linkPreview` (show title, description and custom cover in link unfurls of a non-public canvas), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change` (including a `linkPreview` change). |
 | `set_capabilities` | `id`, `backendEnabled?`, `kv?`, `files?`, `ai?`, `realtime?`, `authoring?` (all booleans) | View + `owner`, `role`. `backendEnabled` is the master switch; the others take effect only when it is on. `authoring` also needs the instance switch on. Omitted fields are unchanged; switching a capability off drops sockets that lost access. |
-| `set_canvas_slug` | `id`, `slug?` (≤63; omit for a fresh random slug) | View + `deploy` (`$CANVAS_KEY` placeholder). The old URL stops resolving immediately. `INVALID_SLUG`, `SLUG_TAKEN`. |
+| `set_canvas_slug` | `id`, `slug?` (≤63; omit for a fresh random slug), `keepOldAsAlias?` (default false) | View + `aliases` + `deploy` (`$CANVAS_KEY` placeholder). The old URL stops resolving immediately unless `keepOldAsAlias` keeps it as a redirecting alias. Passing one of the canvas's own aliases promotes it to the main slug. `INVALID_SLUG`, `SLUG_TAKEN`, `ALIAS_LIMIT`. |
+| `add_canvas_alias` | `id`, `slug` (≤63) | `{aliases: [{slug, url, createdAt}]}`. Another slug that redirects (302) to the canvas URL; same grammar and namespace as a slug, at most 10 per canvas. `INVALID_SLUG`, `SLUG_TAKEN`, `ALIAS_LIMIT`. |
+| `remove_canvas_alias` | `id`, `slug` | `{aliases}`. The alias URL stops working and the name is free immediately. `NOT_FOUND` when it is not an alias of this canvas. |
 | `set_canvas_preview` | `id`, `image?` (base64 PNG, JPEG, or WebP; the string ≤40 MiB, decoded ≤25 MiB) | View + `owner`, `role`. With `image`, `previewMode` becomes `custom` and a publish never overwrites the cover; without it, a custom cover is cleared back to `auto` (an auto-captured screenshot is left alone). `INVALID_IMAGE`, `IMAGE_TOO_LARGE`. For the auto/off toggle use `update_canvas` `previewMode`. |
 | `regenerate_deploy_key` | `id` | `{apiKey, deploy}`. Mints a new `cd_…` key (returned once, embedded in `deploy.curl`) and invalidates the old one. An editor may rotate it; the owner is emailed naming the actor. |
 

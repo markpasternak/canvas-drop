@@ -39,6 +39,12 @@ import {
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
+import {
+  addCanvasAlias,
+  MAX_SLUG_ALIASES,
+  removeCanvasAlias,
+  renameCanvasSlug,
+} from "../canvas/slug-aliases.js";
 import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
@@ -82,7 +88,7 @@ import { resolveTeamGrant, resolveVisibleTeams } from "../teams/sharing.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
-import { canvasView, fail, failDeploy, ok, type ToolResult } from "./tool-kit.js";
+import { canvasView, fail, failDeploy, ok, slugFailure, type ToolResult } from "./tool-kit.js";
 import { type CanvasToolName, minRoleOf } from "./tool-roles.js";
 
 /** Preview hint (plan 004) — agent-native parity with the dashboard. Optional via
@@ -244,6 +250,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   /** Captured-preview hint for the owned canvases in hand — see {@link resolvePreviewIds}
    *  (shared gate + degrade with the management and gallery surfaces). */
   const previewIds = (canvasIds: string[]) => resolvePreviewIds(deps, canvasIds);
+
+  /** Slug-change + alias service deps (plan 2026-10-30-1815), shared with the HTTP routes. */
+  const slugAliasDeps = { canvases: deps.canvases, audit: deps.audit, hub: deps.hub };
+
+  /** A canvas's aliases with their (redirecting) URLs — same shape as the HTTP list. */
+  const aliasViews = async (canvasId: string) =>
+    (await deps.canvases.listAliases(canvasId)).map((a) => ({
+      slug: a.slug,
+      url: canvasUrl(deps.config, a.slug),
+      createdAt: a.createdAt,
+    }));
 
   /** The caller identity for invite/team service calls. Admin authority is passed only
    *  where the owner surface intentionally supports it (canvas add-person admission).
@@ -515,7 +532,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const home = resolveHomeOrg(orgId, caller.orgIds);
       if ("error" in home) return fail("ORG_FORBIDDEN: you are not a member of that org");
       const resolved = await resolveCreateSlug(requestedSlug, (s) => deps.canvases.slugTaken(s));
-      if ("error" in resolved) return fail("INVALID_SLUG: not a valid slug");
+      if ("error" in resolved) return slugFailure(resolved.error);
       const apiKey = generateApiKey();
       let cv: Awaited<ReturnType<typeof deps.canvases.create>>;
       try {
@@ -577,6 +594,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         deploy: deployEndpoints(deps.config, cv.id),
         publicationToken: cv.publicationToken,
         currentVersion: await currentVersionView(deps.versions, cv),
+        // Extra names that redirect to `url` (plan 2026-10-30-1815) — parity with the
+        // dashboard's "Also reachable at" list.
+        aliases: await aliasViews(cv.id),
       });
     },
   );
@@ -1173,34 +1193,76 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Change a canvas's URL slug (same as Settings → Change slug). Pass `slug` for a custom one, " +
-        "or omit it for a fresh readable-random slug. The OLD URL stops working immediately. Returns " +
+        "or omit it for a fresh readable-random slug. Passing one of the canvas's own aliases " +
+        "promotes it to the main slug. The OLD URL stops working immediately unless " +
+        "`keepOldAsAlias` is true, in which case it keeps redirecting to the new URL. Returns " +
         "the updated canvas (with its new url + deploy endpoints).",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         slug: z.string().max(63).optional().describe("New custom slug; omit for a random one."),
+        keepOldAsAlias: z
+          .boolean()
+          .optional()
+          .describe("Keep the old slug as an alias that redirects to the new URL. Default false."),
       },
     },
-    async ({ id, slug }) => {
+    async ({ id, slug, keepOldAsAlias }) => {
       const gate = await requireMutable("set_canvas_slug", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
-      const resolved = await resolveCreateSlug(slug, (s) => deps.canvases.slugTaken(s));
-      if ("error" in resolved) return fail("INVALID_SLUG: not a valid slug");
-      let updated: typeof cv;
-      try {
-        updated = await deps.canvases.regenerateSlug(cv.id, resolved.slug, resolved.custom);
-      } catch (err) {
-        if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
-          return fail("SLUG_TAKEN: that slug is already in use");
-        }
-        throw err;
-      }
-      deps.audit.recordAudit({ action: "slug_regen", actorId: caller.userId, targetId: cv.id });
-      deps.hub?.dropCanvas(cv.id);
+      const result = await renameCanvasSlug(
+        slugAliasDeps,
+        cv,
+        { slug, keepOldAsAlias },
+        caller.userId,
+      );
+      if ("error" in result) return slugFailure(result.error);
       return ok({
-        ...canvasView(deps.config, updated),
+        ...canvasView(deps.config, result.canvas),
+        aliases: await aliasViews(cv.id),
         deploy: deployEndpoints(deps.config, cv.id),
       });
+    },
+  );
+
+  server.registerTool(
+    "add_canvas_alias",
+    {
+      description:
+        "Add an alias: another slug that redirects to this canvas's main URL (same as Settings → " +
+        `Also reachable at). Same rules as a custom slug; at most ${MAX_SLUG_ALIASES} per canvas. ` +
+        "Access rules are unchanged — an alias only redirects. Returns the canvas's aliases.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        slug: z.string().max(63).describe("The alias slug to add."),
+      },
+    },
+    async ({ id, slug }) => {
+      const gate = await requireMutable("add_canvas_alias", id);
+      if ("error" in gate) return gate.error;
+      const result = await addCanvasAlias(slugAliasDeps, gate.canvas, slug, caller.userId);
+      if ("error" in result) return slugFailure(result.error);
+      return ok({ aliases: await aliasViews(gate.canvas.id) });
+    },
+  );
+
+  server.registerTool(
+    "remove_canvas_alias",
+    {
+      description:
+        "Remove one of a canvas's aliases. Its URL stops working immediately and the name is " +
+        "free for anyone. Returns the remaining aliases.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        slug: z.string().describe("The alias slug to remove."),
+      },
+    },
+    async ({ id, slug }) => {
+      const gate = await requireMutable("remove_canvas_alias", id);
+      if ("error" in gate) return gate.error;
+      const removed = await removeCanvasAlias(slugAliasDeps, gate.canvas, slug, caller.userId);
+      if (!removed) return fail("NOT_FOUND: that is not an alias of this canvas");
+      return ok({ aliases: await aliasViews(gate.canvas.id) });
     },
   );
 

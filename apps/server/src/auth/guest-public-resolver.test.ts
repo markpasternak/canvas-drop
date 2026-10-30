@@ -129,6 +129,30 @@ describe("publicCanvasResolver — public-link carve-out (sqlite)", () => {
     expect(body.gateway).toBe("skipped");
   });
 
+  it("an ALIAS of a public_link canvas is anonymous on the canvas surface only (plan 2026-10-30-1815)", async () => {
+    client = await makeTestDb("sqlite");
+    const id = await seedCanvas(client, "public_link");
+    const { app, canvases } = appFor(client);
+    const owner = await usersRepository(client).upsert({
+      providerSub: "owner",
+      email: "owner@example.com",
+      name: "Owner",
+      isAdmin: false,
+    });
+    await canvases.addAlias({ canvasId: id, slug: "demo-alias", createdBy: owner.id });
+    const content = (await (await app.request("/c/demo-alias/", { headers: JSON_HDR })).json()) as {
+      kind: string;
+    };
+    expect(content.kind).toBe("anonymous");
+    // The runtime API resolves canonical slugs alone: no carve-out through an alias.
+    const api = (await (
+      await app.request("/v1/c/demo-alias/me", { headers: JSON_HDR })
+    ).json()) as {
+      gateway: string;
+    };
+    expect(api.gateway).toBe("ran");
+  });
+
   it("a PASSWORD-PROTECTED public_link sets the anonymous principal (so it reaches its gate, not org sign-in)", async () => {
     client = await makeTestDb("sqlite");
     await seedCanvas(client, "public_link", { passwordHash: "hash" });

@@ -629,6 +629,7 @@ const HINTS: Record<string, string> = {
   slug_taken: "That slug is already taken — pick another.",
   invalid_slug:
     "That slug isn't allowed — use lowercase letters, numbers, and hyphens, and avoid reserved words.",
+  alias_limit: "A canvas can have at most 10 aliases — remove one first.",
   NOT_ARCHIVED: "This canvas isn't archived — refresh and try again.",
   NOT_SHARED: "Share this canvas before listing it in the gallery.",
   NOT_PUBLISHED: "Publish this canvas before listing it in the gallery.",
@@ -806,6 +807,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+/** A canvas slug alias: another URL that redirects to the canvas (plan 2026-10-30-1815). */
+export interface SlugAlias {
+  slug: string;
+  url: string;
+  createdAt: number;
 }
 
 function jsonBody(body: unknown): RequestInit {
@@ -1579,9 +1587,25 @@ export const api = {
   updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>
     request<Canvas>(`/api/canvases/${id}/capabilities`, { ...jsonBody(patch), method: "PATCH" }),
 
-  /** Regenerate the slug (plan 004): pass a custom slug, or omit for a new random one. */
-  regenerateSlug: (id: string, slug?: string) =>
-    request<Canvas>(`/api/canvases/${id}/regenerate-slug`, jsonBody(slug ? { slug } : {})),
+  /** Regenerate the slug (plan 004): pass a custom slug, or omit for a new random one.
+   *  An own alias promotes it; `keepOldAsAlias` keeps the old URL redirecting. */
+  regenerateSlug: (id: string, opts: { slug?: string; keepOldAsAlias?: boolean } = {}) =>
+    request<Canvas>(
+      `/api/canvases/${id}/regenerate-slug`,
+      jsonBody({
+        ...(opts.slug ? { slug: opts.slug } : {}),
+        ...(opts.keepOldAsAlias ? { keepOldAsAlias: true } : {}),
+      }),
+    ),
+
+  /** Slug aliases (plan 2026-10-30-1815): extra names that redirect to the canvas URL. */
+  listAliases: (id: string) => request<{ aliases: SlugAlias[] }>(`/api/canvases/${id}/aliases`),
+  addAlias: (id: string, slug: string) =>
+    request<{ aliases: SlugAlias[] }>(`/api/canvases/${id}/aliases`, jsonBody({ slug })),
+  removeAlias: (id: string, slug: string) =>
+    request<{ aliases: SlugAlias[] }>(`/api/canvases/${id}/aliases/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
 
   regenerateKey: (id: string) =>
     request<{ apiKey: string }>(`/api/canvases/${id}/regenerate-key`, { method: "POST" }),

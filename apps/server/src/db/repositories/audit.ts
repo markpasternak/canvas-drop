@@ -61,6 +61,8 @@ export const CANVAS_AUDIT_ACTIONS = [
   "share_change",
   "capabilities_update",
   "slug_regen",
+  "slug_alias_add",
+  "slug_alias_remove",
   "key_regen",
   "settings_update",
   "rollback",

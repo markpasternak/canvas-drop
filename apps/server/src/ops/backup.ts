@@ -60,6 +60,7 @@ export const BACKUP_TABLE_ORDER = [
   "canvases",
   "canvas_connections",
   "canvas_allowlist",
+  "canvas_slug_aliases",
   "canvas_teams",
   "guest_invites",
   "guest_sessions",
