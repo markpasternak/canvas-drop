@@ -25,6 +25,7 @@ export const keys = {
   // when a settings edit adds/removes a tag.
   canvasTags: ["canvases", "tags"] as const,
   canvas: (id: string) => ["canvas", id] as const,
+  aliases: (id: string) => ["canvas", id, "aliases"] as const,
   publishedFiles: (id: string) => ["canvas", id, "published-files"] as const,
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
@@ -89,6 +90,11 @@ export function useSharedCanvases(query: SharedCanvasesQuery = {}) {
 
 export function useCanvas(id: string) {
   return useQuery({ queryKey: keys.canvas(id), queryFn: () => api.getCanvas(id) });
+}
+
+/** Slug aliases of a canvas (plan 2026-10-30-1815). */
+export function useAliases(id: string) {
+  return useQuery({ queryKey: keys.aliases(id), queryFn: () => api.listAliases(id) });
 }
 
 export function useVersions(id: string) {

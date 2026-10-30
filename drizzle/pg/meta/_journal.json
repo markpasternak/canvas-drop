@@ -330,6 +330,13 @@
       "when": 1790840715434,
       "tag": "0046_link-preview",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793384124374,
+      "tag": "0047_canvas-slug-aliases",
+      "breakpoints": true
     }
   ]
 }

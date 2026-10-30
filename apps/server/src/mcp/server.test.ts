@@ -782,6 +782,62 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(other.slug).toBe("first");
   });
 
+  it("alias tools: add / list via get_canvas / keep-old rename / promote / remove (plan 2026-10-30-1815)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { slug: "home" } }));
+
+    const added = payload(
+      await mcp.callTool({ name: "add_canvas_alias", arguments: { id: cv.id, slug: "nickname" } }),
+    );
+    expect(added.aliases.map((a: { slug: string }) => a.slug)).toEqual(["nickname"]);
+    // Same namespace: the alias name can't be created, nor added twice.
+    const dup = await mcp.callTool({
+      name: "create_canvas",
+      arguments: { slug: "nickname" },
+    });
+    expect(text(dup)).toMatch(/^SLUG_TAKEN/);
+    expect(
+      text(
+        await mcp.callTool({
+          name: "add_canvas_alias",
+          arguments: { id: cv.id, slug: "nickname" },
+        }),
+      ),
+    ).toMatch(/^SLUG_TAKEN/);
+
+    const renamed = payload(
+      await mcp.callTool({
+        name: "set_canvas_slug",
+        arguments: { id: cv.id, slug: "new-home", keepOldAsAlias: true },
+      }),
+    );
+    expect(renamed.slug).toBe("new-home");
+    expect(renamed.aliases.map((a: { slug: string }) => a.slug).sort()).toEqual([
+      "home",
+      "nickname",
+    ]);
+
+    // Promote an alias without keeping the outgoing slug.
+    const promoted = payload(
+      await mcp.callTool({ name: "set_canvas_slug", arguments: { id: cv.id, slug: "nickname" } }),
+    );
+    expect(promoted.slug).toBe("nickname");
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }));
+    expect(got.aliases.map((a: { slug: string }) => a.slug)).toEqual(["home"]);
+
+    const removed = payload(
+      await mcp.callTool({ name: "remove_canvas_alias", arguments: { id: cv.id, slug: "home" } }),
+    );
+    expect(removed.aliases).toEqual([]);
+    expect(
+      text(
+        await mcp.callTool({ name: "remove_canvas_alias", arguments: { id: cv.id, slug: "home" } }),
+      ),
+    ).toMatch(/^NOT_FOUND/);
+  });
+
   it("regenerate_deploy_key mints a new key + refreshed deploy block", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
@@ -3343,6 +3399,8 @@ describe.each(DIALECTS)(
       update_canvas: ({ id }) => ({ id, title: "matrix" }),
       set_capabilities: ({ id }) => ({ id, kv: true }),
       set_canvas_slug: ({ id }) => ({ id }),
+      add_canvas_alias: ({ id }) => ({ id, slug: `alias-${id.slice(-8)}` }),
+      remove_canvas_alias: ({ id }) => ({ id, slug: "not-an-alias" }),
       set_canvas_preview: ({ id }) => ({ id }),
       regenerate_deploy_key: ({ id }) => ({ id }),
       archive_canvas: ({ id }) => ({ id }),

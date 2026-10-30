@@ -815,6 +815,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     onlyCanvas(
       canvasAccess({
         canvases: deps.canvases,
+        config: deps.config,
         teams,
         tenancyActive: !!deps.config.org.name,
         publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),

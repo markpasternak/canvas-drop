@@ -127,7 +127,8 @@ export function socialPreview(
     const { canvasSlug } = resolveRequest({ host, pathname: path }, config);
     if (!canvasSlug) return null;
     try {
-      return await canvases.findBySlug(canvasSlug);
+      // An alias unfurls as its canvas (plan 2026-10-30-1815); the same gating applies.
+      return (await canvases.findBySlug(canvasSlug)) ?? (await canvases.findByAlias(canvasSlug));
     } catch {
       return null;
     }

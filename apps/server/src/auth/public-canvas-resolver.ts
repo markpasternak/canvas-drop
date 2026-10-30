@@ -9,7 +9,7 @@ import { SESSION_COOKIE } from "./session.js";
 
 export interface PublicCanvasResolverDeps {
   config: Config;
-  canvases: Pick<CanvasesRepository, "findBySlug" | "isOwnerPublishEnabled">;
+  canvases: Pick<CanvasesRepository, "findBySlug" | "findByAlias" | "isOwnerPublishEnabled">;
   publicLinksEnabled?: () => Promise<boolean>;
 }
 
@@ -34,7 +34,12 @@ export function publicCanvasResolver(deps: PublicCanvasResolverDeps) {
     );
     if ((role !== "canvas" && role !== "platform-api") || !canvasSlug) return next();
 
-    const canvas = await deps.canvases.findBySlug(canvasSlug);
+    // A slug alias of a public canvas must reach canvasAccess anonymously too, so its
+    // redirect works signed out (plan 2026-10-30-1815). Canvas content only: the runtime
+    // API (`platform-api`) resolves canonical slugs alone (KTD1).
+    const canvas =
+      (await deps.canvases.findBySlug(canvasSlug)) ??
+      (role === "canvas" ? await deps.canvases.findByAlias(canvasSlug) : null);
     const publicLinksEnabled = await (deps.publicLinksEnabled?.() ?? Promise.resolve(true));
     if (
       canvas &&

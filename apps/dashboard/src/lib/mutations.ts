@@ -379,15 +379,35 @@ export function useRestoreToDraft(id: string) {
   });
 }
 
-/** Regenerate slug — await; the old URL dies. Pass a slug for a custom one, omit for random. */
+/** Regenerate slug — await. Pass a slug for a custom one (or an own alias to promote it),
+ *  omit for random; `keepOldAsAlias` keeps the old URL redirecting, otherwise it dies. */
 export function useRegenerateSlug(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (slug?: string) => api.regenerateSlug(id, slug),
+    mutationFn: (opts: { slug?: string; keepOldAsAlias?: boolean }) => api.regenerateSlug(id, opts),
     onSuccess: (canvas) => {
       qc.setQueryData(keys.canvas(id), canvas);
       qc.invalidateQueries({ queryKey: keys.canvases });
+      qc.invalidateQueries({ queryKey: keys.aliases(id) });
     },
+  });
+}
+
+/** Add a slug alias (plan 2026-10-30-1815) — await; the response is the new alias list. */
+export function useAddAlias(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => api.addAlias(id, slug),
+    onSuccess: (data) => qc.setQueryData(keys.aliases(id), data),
+  });
+}
+
+/** Remove a slug alias — await; its URL stops working immediately. */
+export function useRemoveAlias(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => api.removeAlias(id, slug),
+    onSuccess: (data) => qc.setQueryData(keys.aliases(id), data),
   });
 }
 

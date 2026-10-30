@@ -12,6 +12,7 @@ import {
   type AllowlistPrincipalKind,
   type Canvas,
   type CanvasDiscoverability,
+  type CanvasSlugAlias,
   type CanvasStatus,
   type Json,
   type PreviewMode,
@@ -21,6 +22,7 @@ import {
 } from "@canvas-drop/shared/db";
 import {
   and,
+  asc,
   count,
   desc,
   eq,
@@ -383,6 +385,8 @@ export function canvasesRepository(client: DbClient) {
     client.dialect === "sqlite" ? sqliteSchema.canvasAllowlist : pgSchema.canvasAllowlist;
   const canvasTeamsT =
     client.dialect === "sqlite" ? sqliteSchema.canvasTeams : pgSchema.canvasTeams;
+  const aliasesT =
+    client.dialect === "sqlite" ? sqliteSchema.canvasSlugAliases : pgSchema.canvasSlugAliases;
   const teamMembersT =
     client.dialect === "sqlite" ? sqliteSchema.teamMembers : pgSchema.teamMembers;
   const teamsT = client.dialect === "sqlite" ? sqliteSchema.teams : pgSchema.teams;
@@ -960,7 +964,67 @@ export function canvasesRepository(client: DbClient) {
      * (status-unaware), unlike `findBySlug` which hides deleted rows.
      */
     async slugTaken(slug: string): Promise<boolean> {
+      const canonical = await db.select({ id: t.id }).from(t).where(eq(t.slug, slug)).limit(1);
+      if (canonical.length > 0) return true;
+      // Aliases share the one slug namespace (plan 2026-10-30-1815, KTD5), so every
+      // availability check — create, clone, rename, alias add — refuses an alias too.
+      const aliases = await db
+        .select({ id: aliasesT.id })
+        .from(aliasesT)
+        .where(eq(aliasesT.slug, slug))
+        .limit(1);
+      return aliases.length > 0;
+    },
+
+    /** Is this slug some canvas's CANONICAL slug (any status)? Ignores aliases. */
+    async canonicalSlugTaken(slug: string): Promise<boolean> {
       const rows = await db.select({ id: t.id }).from(t).where(eq(t.slug, slug)).limit(1);
+      return rows.length > 0;
+    },
+
+    /**
+     * The non-deleted canvas an ALIAS slug points at (plan 2026-10-30-1815). Only the
+     * canvas-content entry points consult this, to redirect to the canonical URL; the
+     * runtime API, realtime and deploy paths resolve canonical slugs only (KTD1).
+     */
+    async findByAlias(slug: string): Promise<Canvas | null> {
+      const rows = (await db
+        .select({ canvas: t })
+        .from(aliasesT)
+        .innerJoin(t, eq(t.id, aliasesT.canvasId))
+        .where(and(eq(aliasesT.slug, slug), ne(t.status, "deleted")))
+        .limit(1)) as Array<{ canvas: Canvas }>;
+      return rows[0]?.canvas ?? null;
+    },
+
+    /** A canvas's aliases, oldest first. */
+    async listAliases(canvasId: string): Promise<CanvasSlugAlias[]> {
+      return (await db
+        .select()
+        .from(aliasesT)
+        .where(eq(aliasesT.canvasId, canvasId))
+        .orderBy(asc(aliasesT.createdAt), asc(aliasesT.slug))) as CanvasSlugAlias[];
+    },
+
+    /** Insert an alias. Throws the driver's unique violation ({@link ALIAS_UNIQUE}) when taken. */
+    async addAlias(input: {
+      canvasId: string;
+      slug: string;
+      createdBy: string;
+    }): Promise<CanvasSlugAlias> {
+      const rows = await db
+        .insert(aliasesT)
+        .values({ id: uuidv7(), ...input, createdAt: Date.now() })
+        .returning();
+      return rows[0] as CanvasSlugAlias;
+    },
+
+    /** Remove one alias of this canvas; false when it isn't one. */
+    async removeAlias(canvasId: string, slug: string): Promise<boolean> {
+      const rows = await db
+        .delete(aliasesT)
+        .where(and(eq(aliasesT.canvasId, canvasId), eq(aliasesT.slug, slug)))
+        .returning({ id: aliasesT.id });
       return rows.length > 0;
     },
 
@@ -1557,7 +1621,17 @@ export function canvasesRepository(client: DbClient) {
       return rows[0] as Canvas;
     },
 
-    async regenerateSlug(id: string, newSlug: string, custom = false): Promise<Canvas> {
+    async regenerateSlug(
+      id: string,
+      newSlug: string,
+      custom = false,
+      aliasChange: {
+        /** `newSlug` is one of this canvas's aliases: drop that alias row (promote). */
+        promote?: boolean;
+        /** Keep the outgoing canonical slug as an alias created by this user. */
+        keepOld?: { slug: string; createdBy: string };
+      } = {},
+    ): Promise<Canvas> {
       // The slug is part of the search blob — recompute it from the merged post-write
       // state (current title/description/tags + the NEW slug) and write it in the SAME
       // UPDATE, so search-by-new-slug hits and the old slug no longer does, atomically.
@@ -1568,10 +1642,27 @@ export function canvasesRepository(client: DbClient) {
       };
       // Read-merge-write atomically so the blob can't reflect a row a concurrent write
       // changed between the SELECT and the UPDATE (TOCTOU); mirrors updateSettings.
+      // Alias bookkeeping rides the same transaction (plan 2026-10-30-1815, KTD7): the
+      // promoted alias row goes before the canonical UPDATE claims its name, and the
+      // outgoing slug becomes an alias only once the canvas no longer holds it.
       return inTransaction(async (exec) => {
+        if (aliasChange.promote) {
+          await exec
+            .delete(aliasesT)
+            .where(and(eq(aliasesT.canvasId, id), eq(aliasesT.slug, newSlug)));
+        }
         const current = await searchTextInputs(id, exec);
         if (current) set.searchText = mergedSearchText(current, { slug: newSlug });
         const rows = (await exec.update(t).set(set).where(eq(t.id, id)).returning()) as Canvas[];
+        if (aliasChange.keepOld) {
+          await exec.insert(aliasesT).values({
+            id: uuidv7(),
+            slug: aliasChange.keepOld.slug,
+            canvasId: id,
+            createdBy: aliasChange.keepOld.createdBy,
+            createdAt: Date.now(),
+          });
+        }
         return rows[0] as Canvas;
       });
     },
@@ -1898,6 +1989,8 @@ export function canvasesRepository(client: DbClient) {
         schema.canvasConnections,
         schema.canvasAllowlist,
         schema.canvasTeams,
+        // Purge releases the canvas's aliases; its canonical slug stays on the tombstone.
+        schema.canvasSlugAliases,
       ]) {
         await db.delete(table).where(eq(table.canvasId, id));
       }

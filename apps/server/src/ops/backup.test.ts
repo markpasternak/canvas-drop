@@ -156,6 +156,8 @@ describe("BACKUP_TABLE_ORDER", () => {
       ["canvas_connections", "connection_profiles"],
       ["canvas_connections", "canvases"],
       ["canvas_allowlist", "canvases"],
+      ["canvas_slug_aliases", "canvases"],
+      ["canvas_slug_aliases", "users"],
       ["guest_invites", "canvases"],
       ["guest_sessions", "guest_invites"],
       ["versions", "canvases"],

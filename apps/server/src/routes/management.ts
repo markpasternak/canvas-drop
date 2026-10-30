@@ -45,6 +45,12 @@ import {
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
+import {
+  addCanvasAlias,
+  removeCanvasAlias,
+  renameCanvasSlug,
+  type SlugChangeError,
+} from "../canvas/slug-aliases.js";
 import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
@@ -420,6 +426,21 @@ export function managementRoutes(deps: ManagementDeps) {
    *  switches on whether an org is configured. */
   const roleDeps = { canvases: deps.canvases, tenancyActive: !!deps.config.org.name };
 
+  /** Slug-change + alias service deps (plan 2026-10-30-1815), shared with MCP. */
+  const slugAliasDeps = { canvases: deps.canvases, audit: deps.audit, hub: deps.hub };
+
+  /** A canvas's aliases with their (redirecting) URLs, oldest first. */
+  const aliasViews = async (canvasId: string) =>
+    (await deps.canvases.listAliases(canvasId)).map((a) => ({
+      slug: a.slug,
+      url: canvasUrl(deps.config, a.slug),
+      createdAt: a.createdAt,
+    }));
+
+  /** Map a slug-change refusal to its HTTP status: taken → 409, cap → 409, else 400. */
+  const slugErrorResponse = (c: Context<AppEnv>, error: SlugChangeError) =>
+    c.json({ error }, error === "invalid_slug" ? 400 : 409);
+
   /** Resolve the caller's management grant on `:id` (owner / editor), else null. */
   const grantFor = (c: Context<AppEnv>) => requireCanvasRole(c, roleDeps);
 
@@ -491,7 +512,9 @@ export function managementRoutes(deps: ManagementDeps) {
     const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
     if ("error" in home) return c.json({ error: home.error }, 403);
     const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
-    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+    if ("error" in resolved) {
+      return c.json({ error: resolved.error }, resolved.error === "slug_taken" ? 409 : 400);
+    }
     const apiKey = generateApiKey();
     let cv: Canvas;
     try {
@@ -1154,27 +1177,49 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/regenerate-slug", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    // Optional custom slug (plan 004): absent/empty → random (existing behavior).
+    // Optional custom slug (plan 004): absent/empty → random (existing behavior). One of
+    // the canvas's aliases → promote it; `keepOldAsAlias` keeps the old URL redirecting
+    // (plan 2026-10-30-1815). Shared with the MCP `set_canvas_slug` tool.
     const body = z
-      .object({ slug: z.string().max(63).optional() })
+      .object({ slug: z.string().max(63).optional(), keepOldAsAlias: z.boolean().optional() })
       .safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
-    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
-    let updated: Canvas;
-    try {
-      updated = await deps.canvases.regenerateSlug(cv.id, resolved.slug, resolved.custom);
-    } catch (err) {
-      if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
-        return c.json({ error: "slug_taken" }, 409);
-      }
-      throw err;
-    }
-    deps.audit.recordAudit({ action: "slug_regen", actorId: c.get("user").id, targetId: cv.id });
-    // Old slug URLs are invalidated — drop all live sockets so clients reconnect
-    // under the new slug (D-RT-6 / §12.0 #5).
-    deps.hub?.dropCanvas(cv.id);
-    return c.json(await canvasView(updated, roleOf(c)));
+    const result = await renameCanvasSlug(slugAliasDeps, cv, body.data, c.get("user").id);
+    if ("error" in result) return slugErrorResponse(c, result.error);
+    return c.json(await canvasView(result.canvas, roleOf(c)));
+  });
+
+  // --- Slug aliases (plan 2026-10-30-1815) ---------------------------------------
+  // Extra names that redirect to the canonical URL. Same role as renaming (editor).
+  app.get("/:id/aliases", async (c) => {
+    const cv = await managedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    return c.json({ aliases: await aliasViews(cv.id) });
+  });
+
+  app.post("/:id/aliases", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const body = z
+      .object({ slug: z.string().max(63) })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const result = await addCanvasAlias(slugAliasDeps, cv, body.data.slug, c.get("user").id);
+    if ("error" in result) return slugErrorResponse(c, result.error);
+    return c.json({ aliases: await aliasViews(cv.id) }, 201);
+  });
+
+  app.delete("/:id/aliases/:slug", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const removed = await removeCanvasAlias(
+      slugAliasDeps,
+      cv,
+      c.req.param("slug"),
+      c.get("user").id,
+    );
+    if (!removed) return c.json({ error: "not_found" }, 404);
+    return c.json({ aliases: await aliasViews(cv.id) });
   });
 
   app.post("/:id/regenerate-key", sameOrigin, async (c) => {
@@ -1526,7 +1571,9 @@ export function managementRoutes(deps: ManagementDeps) {
     const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
     if ("error" in home) return c.json({ error: home.error }, 403);
     const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
-    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+    if ("error" in resolved) {
+      return c.json({ error: resolved.error }, resolved.error === "slug_taken" ? 409 : 400);
+    }
     const apiKey = generateApiKey();
     // A taken custom slug throws inside create() — BEFORE any row exists and before the
     // deploy try-block below — so map it to 409 here; there is no orphan to clean up

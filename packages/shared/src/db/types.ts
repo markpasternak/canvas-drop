@@ -6,6 +6,7 @@ import type {
   canvasAllowlist,
   canvasConnections,
   canvases,
+  canvasSlugAliases,
   canvasTeams,
   connectionProfiles,
   drafts,
@@ -109,6 +110,7 @@ export type ScreenshotJob = typeof screenshotJobs.$inferSelect;
 export type NewScreenshotJob = typeof screenshotJobs.$inferInsert;
 export type CanvasAllowlistEntry = typeof canvasAllowlist.$inferSelect;
 export type NewCanvasAllowlistEntry = typeof canvasAllowlist.$inferInsert;
+export type CanvasSlugAlias = typeof canvasSlugAliases.$inferSelect;
 type ConnectionProfileRow = typeof connectionProfiles.$inferSelect;
 type NewConnectionProfileRow = typeof connectionProfiles.$inferInsert;
 export type ConnectionProfile = Omit<

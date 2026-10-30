@@ -12,6 +12,26 @@ export function canvasUrl(config: Config, slug: string): string {
   return `${config.baseUrl.replace(/\/$/, "")}/c/${slug}/`;
 }
 
+/**
+ * Where a request that arrived on an alias slug is sent (plan 2026-10-30-1815): the same
+ * path within the canvas and the same query string, on the canonical slug. Path mode
+ * swaps the `/c/{alias}` prefix; subdomain mode swaps the host label (the path is
+ * already relative to the canvas).
+ */
+export function aliasRedirectUrl(
+  config: Config,
+  aliasSlug: string,
+  canonicalSlug: string,
+  requestUrl: URL,
+): string {
+  const base = canvasUrl(config, canonicalSlug).replace(/\/$/, "");
+  const rest =
+    config.urlMode === "subdomain"
+      ? requestUrl.pathname
+      : requestUrl.pathname.slice(`/c/${aliasSlug}`.length);
+  return `${base}${rest || "/"}${requestUrl.search}`;
+}
+
 /** Absolute base path of the keyed Deploy API for one canvas (`{apiBase}/v1/canvases/{id}`). */
 export function deployApiBase(config: Config, canvasId: string): string {
   return `${config.apiBaseUrl.replace(/\/$/, "")}/v1/canvases/${canvasId}`;

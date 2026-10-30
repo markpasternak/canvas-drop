@@ -11,8 +11,10 @@ import { SlugField } from "./SlugField.js";
  * behavior); a filled one renames to a custom slug. Unlike ConfirmDialog this needs a
  * form (to carry the typed value), so it composes the base Dialog directly.
  *
- * `onConfirm` receives the chosen slug (or `undefined` for random). The consequence
- * copy states BOTH effects of a rename: the old URL breaks AND live visitors drop.
+ * `onConfirm` receives the chosen slug (or `undefined` for random) and whether to keep
+ * the current slug as a redirecting alias (plan 2026-10-30-1815). That defaults ON for a
+ * custom rename (links keep working) and OFF for a random regenerate, which is the
+ * "this URL leaked, rotate it" path. The consequence copy follows the choice.
  */
 export function RenameSlugDialog({
   open,
@@ -24,7 +26,7 @@ export function RenameSlugDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onConfirm: (slug: string | undefined) => void;
+  onConfirm: (slug: string | undefined, keepOldAsAlias: boolean) => void;
   me: Me | undefined;
   /** Whether the canvas is shared — adds the "link you've shared" clause. */
   shared: boolean;
@@ -35,6 +37,9 @@ export function RenameSlugDialog({
     status: "idle",
   });
   const blocked = resolved.slug !== "" && resolved.status !== "available";
+  // null = follow the default for the current input (on for custom, off for random).
+  const [keepChoice, setKeepChoice] = useState<boolean | null>(null);
+  const keepOld = keepChoice ?? resolved.slug !== "";
 
   return (
     <Dialog open={open} onClose={onClose} title="Change the slug">
@@ -43,7 +48,7 @@ export function RenameSlugDialog({
         onSubmit={(e) => {
           e.preventDefault();
           if (blocked || loading) return;
-          onConfirm(resolved.slug || undefined);
+          onConfirm(resolved.slug || undefined, keepOld);
         }}
       >
         <SlugField
@@ -52,10 +57,30 @@ export function RenameSlugDialog({
           idleHint="Leave empty to generate a new random slug."
           autoFocus
         />
+        <label className="flex items-start gap-2 text-sm text-fg">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={keepOld}
+            onChange={(e) => setKeepChoice(e.target.checked)}
+          />
+          <span>
+            Keep the current URL working
+            <span className="block text-muted">
+              It becomes an alias that redirects to the new URL.
+            </span>
+          </span>
+        </label>
         <p className="text-sm text-muted">
-          The current URL will stop working
-          {shared ? ", including the link you've shared with others" : ""}. Anyone viewing the
-          canvas right now will be disconnected and will need to reload.
+          {keepOld ? (
+            "Links to the current URL will redirect to the new one."
+          ) : (
+            <>
+              The current URL will stop working
+              {shared ? ", including the link you've shared with others" : ""}.
+            </>
+          )}{" "}
+          Anyone viewing the canvas right now will be disconnected and will need to reload.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" type="button" onClick={onClose} disabled={loading}>

@@ -134,18 +134,23 @@ export async function generateUniqueSlug(
 
 /**
  * Resolve a create/rename slug: a trimmed non-empty `raw` is validated as a CUSTOM
- * slug (grammar + reserved-word check; uniqueness is the caller's DB concern), an
- * empty/absent `raw` mints a fresh random one. Shared by the management create/rename
- * routes and the MCP tools so the two can't diverge on slug policy.
+ * slug (grammar + reserved-word check, then `exists`), an empty/absent `raw` mints a
+ * fresh random one. Shared by the management create/rename routes and the MCP tools so
+ * the two can't diverge on slug policy.
+ *
+ * The `exists` pre-check is what refuses a name held as another canvas's ALIAS (plan
+ * 2026-10-30-1815): `canvases_slug_uq` can't see the alias table. A canonical slug taken
+ * in a race is still closed by that index, which callers map to `slug_taken` too.
  */
 export async function resolveCreateSlug(
   raw: string | undefined,
   exists: (slug: string) => Promise<boolean>,
-): Promise<{ slug: string; custom: boolean } | { error: "invalid_slug" }> {
+): Promise<{ slug: string; custom: boolean } | { error: "invalid_slug" | "slug_taken" }> {
   const trimmed = raw?.trim();
   if (trimmed) {
     const check = validateSlug(trimmed);
     if (!check.ok) return { error: "invalid_slug" };
+    if (await exists(trimmed)) return { error: "slug_taken" };
     return { slug: trimmed, custom: true };
   }
   return { slug: await generateUniqueSlug(exists), custom: false };

@@ -15,6 +15,7 @@ import { RenameSlugDialog } from "../components/RenameSlugDialog.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
+import { SlugAliases } from "../components/SlugAliases.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
@@ -115,7 +116,7 @@ export default function Settings() {
         <Section
           id="url-routing"
           title="URL & routing"
-          description="Control the stable URL and how unknown paths resolve."
+          description="Control the stable URL, its aliases, and how unknown paths resolve."
         >
           <Row
             title="Canvas URL"
@@ -134,6 +135,7 @@ export default function Settings() {
               Change slug
             </Button>
           </Row>
+          <SlugAliases canvasId={canvas.id} me={me} />
           <RowDivider />
           <Toggle
             label="Single-page app mode"
@@ -382,9 +384,9 @@ export default function Settings() {
       <RenameSlugDialog
         open={confirm === "slug"}
         onClose={() => setConfirm(null)}
-        onConfirm={async (slug) => {
+        onConfirm={async (slug, keepOldAsAlias) => {
           try {
-            await regenSlug.mutateAsync(slug);
+            await regenSlug.mutateAsync({ slug, keepOldAsAlias });
             setConfirm(null);
             toast(slug ? "Slug changed" : "Slug regenerated");
             requestAnimationFrame(() => urlCopyRef.current?.focus());
