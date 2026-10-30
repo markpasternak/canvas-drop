@@ -47,8 +47,15 @@ function recoveryApp(config: Config, user?: Pick<User, "email">) {
     c.set("canvasNotFound", {});
     return c.json({ error: "not_found" }, 404);
   });
+  app.get("/canvas-none-others", (c) => {
+    c.set("canvasNotFound", { hasOtherAccounts: true });
+    return c.json({ error: "not_found" }, 404);
+  });
   app.get("/canvas-other", (c) => {
-    c.set("canvasNotFound", { accessibleAs: { id: "u-bob", email: "bob@other.example" } });
+    c.set("canvasNotFound", {
+      accessibleAs: { id: "u-bob", email: "bob@other.example" },
+      hasOtherAccounts: true,
+    });
     return c.json({ error: "not_found" }, 404);
   });
   app.get("/disabled", (c) =>
@@ -264,28 +271,54 @@ describe("error-page recovery actions", () => {
     }
   });
 
-  it("offers 'Use another account' on a canvas 404 when no other account has access", async () => {
+  it("words a canvas 404 as 'Can't open this canvas', the same for missing and forbidden", async () => {
     const html = await htmlOf(
       recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" }),
       "/canvas-none",
     );
-    expect(html).toContain(">Use another account</a>");
-    expect(html).not.toContain("Continue as");
+    expect(html).toContain("<title>Can't open this canvas</title>");
+    expect(html).toContain(
+      "This canvas doesn't exist, or <strong>a@example.com</strong> doesn't have access to it.",
+    );
+    // An account question, not an HTTP error: no status kicker or code/path details.
+    expect(html).not.toContain("HTTP 404");
+    expect(html).not.toContain("<dt>Code</dt>");
+    // Only one account on this browser: offer to sign in with another; plain Sign out.
+    expect(html).toContain(">Sign in with another account</a>");
+    expect(html).toContain(">Sign out</a>");
+    expect(html).not.toContain("Switch to");
     expect(html).not.toContain("account=");
   });
 
-  it("makes 'Continue as …' the primary action when another signed-in account can open the canvas", async () => {
+  it("offers 'Use another account' and 'Sign out of all accounts' when the browser holds others", async () => {
+    const html = await htmlOf(
+      recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" }),
+      "/canvas-none-others",
+    );
+    expect(html).toContain(">Use another account</a>");
+    expect(html).toContain(">Sign out of all accounts</a>");
+    expect(html).not.toContain("account=");
+  });
+
+  it("makes 'Switch to …' the primary action when another signed-in account can open the canvas", async () => {
     const html = await htmlOf(
       recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" }),
       "/canvas-other",
     );
-    expect(html).toContain("Continue as bob@other.example");
+    expect(html).toContain("<title>Switch account to open this canvas</title>");
+    expect(html).toContain(">Switch to bob@other.example</a>");
     expect(html).toContain("account=u-bob");
-    expect(html).toContain("which can open this canvas");
-    // The dashboard link steps down to a secondary action.
+    // The account that can open it, as a card with its own avatar tint.
+    expect(html).toContain('class="account-card"');
+    expect(html).toContain("Can open this canvas");
+    expect(html).toMatch(/style="--avatar-hue: \d+"/);
+    // The dashboard link steps down to a secondary action, and the footer drops its
+    // own "Switch account" link (the primary action already is one).
     expect(html).toContain(
       '<a class="ghost" href="https://canvases.example.com/">Open dashboard</a>',
     );
+    expect(html).not.toContain(">Switch account</a>");
+    expect(html).toContain(">Sign out of all accounts</a>");
   });
 
   it("suppresses the identity footer on the public disabled page (hideIdentity)", async () => {

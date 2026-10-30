@@ -443,6 +443,11 @@ async function noteCanvasNotFound(
   if (!deps.otherAccountProbe || principal.kind !== "member") return;
   if (c.req.method !== "GET" || !wantsHtmlError(c.req.header("accept"))) return;
   // Probe a missing canvas too, so the work done doesn't hint which slugs exist.
-  const match = await deps.otherAccountProbe(c, canvas);
-  c.set("canvasNotFound", match ? { accessibleAs: { id: match.id, email: match.email } } : {});
+  const { accessibleAs: match, hasOtherAccounts } = await deps.otherAccountProbe(c, canvas);
+  c.set(
+    "canvasNotFound",
+    match
+      ? { accessibleAs: { id: match.id, email: match.email }, hasOtherAccounts }
+      : { hasOtherAccounts },
+  );
 }

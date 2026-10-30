@@ -1360,9 +1360,10 @@ export type AdminConfigField =
 
 export const api = {
   me: () => request<Me>("/api/me"),
-  /** The OTHER accounts signed in on this browser (empty outside oidc mode). */
+  /** The OTHER accounts signed in on this browser (empty outside oidc mode), most
+   *  recently used first, plus how many accounts one browser may hold in total. */
   otherAccounts: () =>
-    request<{ accounts: SignedInAccount[] }>("/api/me/accounts").then((r) => r.accounts),
+    request<{ accounts: SignedInAccount[]; maxAccounts?: number }>("/api/me/accounts"),
 
   /** Browse the opt-in gallery (M8). Empty params are omitted from the query string. */
   listGallery: (query: GalleryQuery = {}) => {

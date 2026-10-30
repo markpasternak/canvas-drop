@@ -179,12 +179,15 @@ including any `#…` part of the link the canvas routes on. Links opened in seve
 once each come back to their own canvas.
 
 If your instance uses OIDC sign-in, you can stay signed in with several accounts and
-switch between them from the account menu (**Add another account**). If you open a canvas
-your current account can't see, you get a "Page not found" page with **Use another
-account**. If another account you're signed in with can open it, the page offers
-**Continue as …** instead and brings you back to the canvas after the switch. Nobody else
-can tell the canvas exists, because the page looks the same as a missing canvas unless
-one of your own accounts has access.
+switch between them from the account menu (**Switch account**, **Add another account**).
+Each account has its own avatar colour, and after a switch the dashboard confirms which
+account you're now using. If you open a canvas your current account can't see, you get a
+**Can't open this canvas** page with **Use another account**. If another account you're
+signed in with can open it, the page says **Switch account to open this canvas** and offers
+**Switch to …**, which brings you back to the canvas after the switch. Nobody else can
+tell the canvas exists, because the page looks the same as a missing canvas unless one of
+your own accounts has access. The account chooser also lets you sign out of any one of
+the other accounts.
 
 ## Revoking
 

@@ -42,6 +42,15 @@ survives sign-in. See
 [the plan](plans/2026-10-27-001-feat-multi-account-switching-plan.md) and
 [the learnings](solutions/2026-10-27-multi-account-session-jar.md).
 
+Multi-account switcher UI (30 October 2026): the account menu groups the other accounts
+under "Switch account", gives every account its own avatar tint, names the account a
+sign-out affects, warns at the five-account limit and confirms a switch with a toast. The
+wrong-account page is now "Switch account to open this canvas" (or "Can't open this
+canvas", worded the same for missing and forbidden canvases), and the account chooser
+lists every account the same way, with photos and a Sign out for each other account
+(`POST /auth/logout/account`). See
+[the plan](plans/2026-10-30-001-feat-multi-account-switcher-ui-plan.md).
+
 The [deployment coordination round](plans/2026-09-12-1811-feat-deployment-coordination-plan.md)
 (12 September 2026) lets two publishers ship the same release to one canvas without a
 duplicate version or a stale overwrite: an optional opaque `releaseId` on the deploy

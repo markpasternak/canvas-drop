@@ -9,6 +9,7 @@ const stubSession: SessionService = {
   switchTo: async () => false,
   revoke: async () => ({ remaining: false }),
   revokeAll: async () => {},
+  revokeHeld: async () => false,
 };
 
 describe("authRoutes /logout", () => {

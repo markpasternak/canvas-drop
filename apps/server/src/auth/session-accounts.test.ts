@@ -76,6 +76,9 @@ function buildApp(
   app.get("/others", async (c) => c.json((await svc.otherAccounts(c)).map((a) => a.userId)));
   app.get("/switch/:uid", async (c) => c.json({ ok: await svc.switchTo(c, c.req.param("uid")) }));
   app.get("/revoke", async (c) => c.json(await svc.revoke(c)));
+  app.get("/revoke-held/:uid", async (c) =>
+    c.json({ ok: await svc.revokeHeld(c, c.req.param("uid")) }),
+  );
   app.get("/revoke-all", async (c) => {
     await svc.revokeAll(c);
     return c.text("bye");
@@ -279,6 +282,39 @@ describe.each(DIALECTS)("multi-account sessions [%s]", (dialect) => {
     });
     expect((await call<{ uid: string | null }>(app, browser, "/whoami")).uid).toBeNull();
     expect(browser.jar.has(SESSION_COOKIE)).toBe(false);
+  });
+
+  it("signs out of one held account, keeping the active one and the rest", async () => {
+    client = await makeTestDb(dialect);
+    const [a, b, c] = await seedUsers(client, 3);
+    const { app, events } = buildApp(client);
+    const browser = new Browser();
+    for (const id of [a, b, c]) await call(app, browser, `/issue/${id}`);
+    const active = browser.jar.get(SESSION_COOKIE);
+    const [tokenB] = jarTokens(browser); // most recently used first: b, a
+
+    expect((await call<{ ok: boolean }>(app, browser, `/revoke-held/${b}`)).ok).toBe(true);
+    expect(browser.jar.get(SESSION_COOKIE)).toBe(active);
+    expect((await call<{ uid: string }>(app, browser, "/whoami")).uid).toBe(c);
+    expect(await call<string[]>(app, browser, "/others")).toEqual([a]);
+    // Revoked server-side, not just dropped from the cookie.
+    expect(await sessionsRepository(client).findLiveByToken(tokenB as string)).toBeNull();
+    expect(events.filter((e) => e.action === "session_revoke")).toEqual([
+      expect.objectContaining({ actorId: b }),
+    ]);
+  });
+
+  it("won't sign out the active account, or one it doesn't hold, through revokeHeld", async () => {
+    client = await makeTestDb(dialect);
+    const [a, b, stranger] = await seedUsers(client, 3);
+    const { app } = buildApp(client);
+    const browser = new Browser();
+    await call(app, browser, `/issue/${a}`);
+    await call(app, browser, `/issue/${b}`);
+    expect((await call<{ ok: boolean }>(app, browser, `/revoke-held/${b}`)).ok).toBe(false);
+    expect((await call<{ ok: boolean }>(app, browser, `/revoke-held/${stranger}`)).ok).toBe(false);
+    expect((await call<{ uid: string }>(app, browser, "/whoami")).uid).toBe(b);
+    expect(await call<string[]>(app, browser, "/others")).toEqual([a]);
   });
 
   it("sign out of all revokes every held session", async () => {

@@ -136,7 +136,7 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     await client?.close();
   });
 
-  it("a canvas 404 offers 'Continue as' the held account that can open it", async () => {
+  it("a canvas 404 offers 'Switch to' the held account that can open it", async () => {
     client = await makeTestDb(dialect);
     const { app, owner, both } = await setup(client);
     const res = await app.request("/", {
@@ -144,8 +144,11 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     });
     expect(res.status).toBe(404);
     const html = await res.text();
-    expect(html).toContain("Continue as owner@example.com");
+    expect(html).toContain("Switch account to open this canvas");
+    expect(html).toContain("Switch to owner@example.com");
     expect(html).toContain(`account=${owner.id}`);
+    // Two accounts on this browser: the footer's sign-out says it signs out of both.
+    expect(html).toContain("Sign out of all accounts");
     expect(html).not.toContain("owner only");
   });
 
@@ -170,8 +173,10 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
       return html.replaceAll(host, "HOST").replaceAll(encodeURIComponent(host), "HOST");
     };
     const denied = await page(CANVAS_HOST);
-    expect(denied).toContain("Use another account");
-    expect(denied).not.toContain("Continue as");
+    expect(denied).toContain("Can't open this canvas");
+    // Only one account on this browser, so the offer is to sign in with another.
+    expect(denied).toContain("Sign in with another account");
+    expect(denied).not.toContain("Switch to");
     expect(await page("nope.canvases.example.com")).toBe(denied);
   });
 
@@ -182,9 +187,9 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     const html = await (
       await app.request("/", { headers: { host: CANVAS_HOST, accept: "text/html", cookie: both } })
     ).text();
-    expect(html).not.toContain("Continue as");
+    expect(html).not.toContain("Switch to");
     const list = await app.request("/api/me/accounts", { headers: { host: APEX, cookie: both } });
-    expect(await list.json()).toEqual({ accounts: [] });
+    expect(await list.json()).toEqual({ accounts: [], maxAccounts: 5 });
   });
 
   it("lists the other accounts as explicit summaries at /api/me/accounts", async () => {
@@ -194,6 +199,7 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       accounts: [{ id: owner.id, email: "owner@example.com", name: "Owner", avatarUrl: null }],
+      maxAccounts: 5,
     });
   });
 
@@ -210,8 +216,16 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     expect(html).toContain('action="/auth/switch"');
     expect(html).toContain(`value="${owner.id}"`);
     expect(html).toContain(`value="${CANVAS_URL}"`);
-    expect(html).toContain("Continue as owner@example.com?");
-    expect(html).toContain("other@example.com"); // the current account, marked Current
+    // The suggested account leads, marked as able to open the canvas.
+    expect(html).toContain("<strong>owner@example.com</strong> can open this canvas.");
+    expect(html).toContain('aria-label="Continue as owner@example.com"');
+    expect(html.indexOf("owner@example.com")).toBeLessThan(html.indexOf("other@example.com"));
+    expect(html).toContain("Can open this canvas");
+    // The current account is a row too, continuing back to the canvas.
+    expect(html).toContain('aria-label="Continue as other@example.com (current account)"');
+    // Other accounts carry their own Sign out (same-origin POST).
+    expect(html).toContain('action="/auth/logout/account"');
+    expect(html).toContain('aria-label="Sign out of owner@example.com"');
     // A canvas is same-site with the instance, so it must not be able to frame this.
     expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
   });
@@ -330,6 +344,60 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
     expect(setCookieValue(res, SESSION_COOKIE)).toBe(ownerToken);
+  });
+
+  it("signs out of one held account from the chooser, keeping the active one", async () => {
+    client = await makeTestDb(dialect);
+    const { app, owner, otherToken, both } = await setup(client);
+    const res = await app.request("/auth/logout/account", {
+      method: "POST",
+      headers: { host: APEX, cookie: both, "sec-fetch-site": "same-origin" },
+      body: switchForm(owner.id, CANVAS_URL),
+    });
+    expect(res.status).toBe(303);
+    // Nobody left to choose: on to where the visitor was headed.
+    expect(res.headers.get("location")).toBe(CANVAS_URL);
+    // The active session is untouched; the jar is cleared.
+    expect(setCookieValue(res, SESSION_COOKIE)).toBe(otherToken);
+    expect(setCookieValue(res, ACCOUNTS_COOKIE)).toBe("");
+    // owner's session is really revoked: the old jar no longer lists it.
+    const list = await app.request("/api/me/accounts", { headers: { host: APEX, cookie: both } });
+    expect(((await list.json()) as { accounts: unknown[] }).accounts).toEqual([]);
+    const me = await app.request("/api/me", { headers: { host: APEX, cookie: both } });
+    expect(me.status).toBe(200);
+  });
+
+  it("signing out of the active account by id from the chooser changes nothing", async () => {
+    client = await makeTestDb(dialect);
+    const { app, other, both } = await setup(client);
+    const res = await app.request("/auth/logout/account", {
+      method: "POST",
+      headers: { host: APEX, cookie: both, "sec-fetch-site": "same-origin" },
+      body: switchForm(other.id),
+    });
+    expect(res.status).toBe(303);
+    // owner is still held, so back to the chooser.
+    expect(res.headers.get("location")).toBe(`${BASE}/auth/accounts`);
+    expect(setCookieValue(res, SESSION_COOKIE)).toBeUndefined();
+  });
+
+  it("refuses a per-account sign-out cross-origin or from a canvas host", async () => {
+    client = await makeTestDb(dialect);
+    const { app, owner, both } = await setup(client);
+    for (const [host, site] of [
+      [APEX, "same-site"],
+      [APEX, "cross-site"],
+      [CANVAS_HOST, "same-origin"],
+    ] as const) {
+      const res = await app.request("/auth/logout/account", {
+        method: "POST",
+        headers: { host, cookie: both, "sec-fetch-site": site },
+        body: switchForm(owner.id),
+      });
+      expect(res.status).toBe(403);
+    }
+    const list = await app.request("/api/me/accounts", { headers: { host: APEX, cookie: both } });
+    expect(((await list.json()) as { accounts: unknown[] }).accounts).toHaveLength(1);
   });
 
   it("signs out of every account on /auth/logout, but ignores a cross-site navigation there", async () => {

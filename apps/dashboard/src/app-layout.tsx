@@ -17,7 +17,8 @@ import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
 import { CommandPalette } from "./components/CommandPalette.js";
 import { ShortcutsHost } from "./components/Shortcuts.js";
-import { UserMenu } from "./components/UserMenu.js";
+import { useToast } from "./components/Toast.js";
+import { UserMenu, useSwitchedAccountNotice } from "./components/UserMenu.js";
 import { cn } from "./lib/cn.js";
 import { useNavCollapsed } from "./lib/nav-collapsed.js";
 import { useMe } from "./lib/queries.js";
@@ -182,6 +183,9 @@ export function AppLayout() {
   // isAdmin is server-resolved (/api/me). Hiding the link is UX only — the admin
   // API independently 404s non-admins, so this is not a security boundary.
   const me = useMe();
+  // After an account switch (a full page load), say which account is now active.
+  const toast = useToast();
+  useSwitchedAccountNotice(me.data, toast);
   // lg+ rail collapse state, persisted in localStorage (default = expanded).
   const { collapsed, toggle: toggleCollapsed } = useNavCollapsed();
   const [menuOpen, setMenuOpen] = useState(false);

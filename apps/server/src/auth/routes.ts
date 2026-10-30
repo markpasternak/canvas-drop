@@ -11,7 +11,7 @@ import {
 } from "./accounts.js";
 import type { makeOidc } from "./oidc.js";
 import { accountChooserUrl, addAccountUrl, loginUrl, safeReturnTo } from "./return-to.js";
-import type { SessionService } from "./session.js";
+import { MAX_OTHER_ACCOUNTS, type SessionService } from "./session.js";
 
 export interface AuthRoutesDeps {
   sessionSvc: SessionService;
@@ -23,7 +23,7 @@ export interface AuthRoutesDeps {
 
 /**
  * Auth routes mounted at `/auth` (U11). `/login` + `/callback` are oidc-only, and so
- * is the multi-account surface (`/accounts`, `/switch`, `/logout/current`): in proxy
+ * is the multi-account surface (`/accounts`, `/switch`, `/logout/current`, `/logout/account`): in proxy
  * mode the IAP owns identity and in dev mode it is fixed by config, so there is no
  * second account to switch to.
  */
@@ -81,6 +81,7 @@ export function authRoutes(deps: AuthRoutesDeps) {
           others: others.map(accountSummary),
           returnTo,
           preselect: c.req.query("account"),
+          maxAccounts: MAX_OTHER_ACCOUNTS + 1,
         }),
       );
     });
@@ -101,6 +102,23 @@ export function authRoutes(deps: AuthRoutesDeps) {
         return c.redirect(accountChooserUrl(config, returnTo), 303);
       }
       return c.redirect(returnTo ?? "/", 303);
+    });
+
+    // Sign out of one other account this browser holds (the chooser's per-row Sign out).
+    // The active account stays. Back to the chooser while there is still someone to
+    // choose, else straight on to where the visitor was headed.
+    app.post("/logout/account", async (c) => {
+      if (!mayChangeAccount(c)) return c.json({ error: "cross_origin_forbidden" }, 403);
+      const form = await c.req.parseBody();
+      const field = (name: string) => (typeof form[name] === "string" ? form[name] : undefined);
+      const returnTo = safeReturnTo(config, field("returnTo"));
+      const account = field("account");
+      if (account) await sessionSvc.revokeHeld(c, account);
+      const remaining = await otherSignedInAccounts(accounts, c);
+      return c.redirect(
+        remaining.length > 0 ? accountChooserUrl(config, returnTo) : (returnTo ?? "/"),
+        303,
+      );
     });
 
     // Sign out of the active account only; the next signed-in account takes over.
