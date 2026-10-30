@@ -62,3 +62,49 @@ from the canvas 404 page would be refused by the same-origin check, which is the
 canvas must not be able to flip the visitor's account. So the 404 links to the
 server-rendered chooser on the apex (`/auth/accounts?returnTo=…&account=…`), whose forms
 are same-origin. That costs one extra click, the same as Google's account chooser.
+
+**But `/auth` is mounted for every host.** Sign-in starts from the canvas's own origin
+(the signed-out preview page's relative `/auth/login` link), so `/auth/*` answers on
+`<slug>.{baseHost}` too. There, a canvas page's own `fetch("/auth/switch")` IS
+`same-origin`, and the session cookies (scoped to `.{baseHost}`) ride along. The
+same-origin check alone let a canvas switch or sign out the visitor. The account-changing
+routes also require `resolveRequest(...).role !== "canvas"`, and the chooser on a canvas
+host redirects to the apex. The chooser also sets `frame-ancestors 'none'`: a canvas is
+same-site with the apex, so `SameSite=Lax` cookies are sent inside its iframe and a
+framed chooser could be clickjacked. Rule of thumb: any `/auth` route that changes state
+must check the host as well as the origin.
+
+## Why signing in from a canvas link sometimes failed or landed elsewhere
+
+Three bugs, all invisible to request-level tests and caught by a browser-level flow test
+with a fake IdP (`sign-in-flows.test.ts`):
+
+1. **One shared transaction cookie.** `__canvasdrop_oidc` held the single in-flight
+   sign-in. A second sign-in started before the first finished (two shared links, a
+   restored session's tabs) overwrote it, so the first came back as `state_mismatch` or
+   landed on the second's returnTo. Now each sign-in has its own
+   `__canvasdrop_oidc_<state>` cookie (ten minutes, at most five; the oldest is dropped).
+   The bare name is still read once so a sign-in in flight across a deploy completes.
+2. **The gateway redirected background requests.** Every unauthenticated request in oidc
+   mode got a 302 to `/auth/login`. An open, expired canvas tab's SDK calls, images and
+   frames each started an invisible sign-in, which replaced the person's real
+   transaction, burned the login rate limit (10/min/IP), and could set a returnTo that
+   pointed at an asset. Only a top-level page load (`Sec-Fetch-Mode: navigate` +
+   `Sec-Fetch-Dest: document`, or, without fetch metadata, an Accept that prefers HTML)
+   is redirected now; everything else gets the 401 that the dashboard and SDK already
+   handle.
+3. **Back onto a used callback** showed "This sign-in link expired". A callback the
+   browser can't match while it is already signed in now goes to `/`.
+
+Also: the server never sees a URL's `#fragment`, and static canvases often route on it.
+The signed-out preview page's script appends `location.hash` to the returnTo (always the
+last query parameter), and `safeReturnTo` keeps the fragment. Some canvases keep their
+whole state in the fragment, and a browser silently drops a cookie over 4 KB (the sign-in
+then reads as "expired"), so the transaction cookie is capped at 2 KB encoded: an
+oversized returnTo loses its fragment first, then is dropped. A gateway 302 (stale
+cookie) still loses it; that path is rarer, since an expired cookie is removed by the
+browser and lands on the preview page instead.
+
+When checking a "it sometimes goes wrong" auth report, model the browser: a cookie jar,
+redirects across hosts, several tabs, and the background requests an open page makes. The
+three bugs above each needed two concurrent actors to show up.

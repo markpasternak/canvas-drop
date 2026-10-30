@@ -12,8 +12,32 @@ import { loginUrl, safeReturnTo } from "./return-to.js";
 import type { SessionService } from "./session.js";
 import type { ResolvedIdentity } from "./strategy.js";
 
-/** Short-lived cookie carrying the PKCE verifier + state (+ returnTo) across the redirect. */
-const OIDC_TX_COOKIE = "__canvasdrop_oidc";
+/**
+ * Short-lived cookie carrying the PKCE verifier + state (+ returnTo) across the
+ * redirect. One cookie PER sign-in, named `${OIDC_TX_COOKIE}_<state>`: with a single
+ * shared cookie, a second sign-in started before the first finished (another tab, a
+ * restored session's tabs, two shared links opened at once) replaced the first's
+ * transaction, which then came back as `state_mismatch` with the wrong returnTo. The
+ * bare name is the pre-split cookie, still read so a sign-in in flight across a
+ * deploy completes.
+ */
+export const OIDC_TX_COOKIE = "__canvasdrop_oidc";
+
+/** Sign-ins a browser may have in flight at once; starting another drops the oldest. */
+const MAX_PENDING_TX = 5;
+
+/** Transaction cookie lifetime, seconds. */
+const TX_MAX_AGE = 600;
+
+/** Largest encoded transaction cookie we set. Browsers silently drop a cookie over 4 KB
+ *  (the sign-in would then come back as "expired"), and up to {@link MAX_PENDING_TX} of
+ *  these ride on every request to the instance for ten minutes. */
+const MAX_TX_BYTES = 2048;
+
+/** Shape of a state we minted ({@link client.randomState}: base64url). */
+const STATE_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
+const txCookieName = (state: string) => `${OIDC_TX_COOKIE}_${state}`;
 
 /**
  * Cookie options for the short-lived OIDC transaction cookie. In `subdomain` mode
@@ -171,24 +195,41 @@ export function makeOidc(deps: OidcDeps) {
         // extra prompt is rare.
         prompt: addAccount ? "select_account" : "login",
       });
-      setCookie(
-        c,
-        OIDC_TX_COOKIE,
-        JSON.stringify({ state, verifier, ...(returnTo ? { returnTo } : {}) }),
-        { ...txCookieOptions(deps.config), maxAge: 600 },
-      );
+      // Keep at most MAX_PENDING_TX sign-ins in flight (abandoned ones would otherwise
+      // pile up for their 10 minutes): drop the oldest before adding this one.
+      const pending = pendingTx(c).sort((a, b) => a.t - b.t);
+      for (const stale of pending.slice(0, Math.max(0, pending.length - (MAX_PENDING_TX - 1)))) {
+        deleteCookie(c, stale.name, txCookieOptions(deps.config));
+      }
+      setCookie(c, txCookieName(state), txValue({ state, verifier, t: Date.now() }, returnTo), {
+        ...txCookieOptions(deps.config),
+        maxAge: TX_MAX_AGE,
+      });
       return c.redirect(url.href);
     },
 
     /** Complete login: verify state, exchange code, establish the app session. */
     async callback(c: Context<AppEnv>) {
-      const tx = readTx(c);
-      deleteCookie(c, OIDC_TX_COOKIE, txCookieOptions(deps.config));
-      // Also reap any legacy host-only tx cookie left over from before the cookie
-      // was domain-scoped — the domain-scoped delete above won't match it, and a
-      // stale one coexisting on the apex could itself trigger a state_mismatch.
-      if (deps.config.urlMode === "subdomain") {
-        deleteCookie(c, OIDC_TX_COOKIE, { path: "/" });
+      const currentUrl = new URL(c.req.url);
+      const stateParam = currentUrl.searchParams.get("state");
+      const tx = readTx(c, stateParam);
+      if (tx && tx.cookie !== OIDC_TX_COOKIE) {
+        deleteCookie(c, tx.cookie, txCookieOptions(deps.config));
+      }
+      if (getCookie(c, OIDC_TX_COOKIE) !== undefined) {
+        deleteCookie(c, OIDC_TX_COOKIE, txCookieOptions(deps.config));
+        // Also reap any legacy host-only tx cookie left over from before the cookie
+        // was domain-scoped — the domain-scoped delete above won't match it, and a
+        // stale one coexisting on the apex could itself trigger a state_mismatch.
+        if (deps.config.urlMode === "subdomain") {
+          deleteCookie(c, OIDC_TX_COOKIE, { path: "/" });
+        }
+      }
+      // A callback this browser can't match while it is ALREADY signed in is a replay
+      // (the Back button onto a used callback URL) or a second tab finishing after the
+      // first: nothing to sign in, so go to the dashboard instead of an error page.
+      if (!tx || !stateParam || stateParam !== tx.state) {
+        if ((await deps.sessionSvc.resolveUserId(c)) !== null) return c.redirect("/");
       }
       if (!tx) {
         return recoverableAuthError(
@@ -199,8 +240,6 @@ export function makeOidc(deps: OidcDeps) {
         );
       }
 
-      const currentUrl = new URL(c.req.url);
-      const stateParam = currentUrl.searchParams.get("state");
       if (!stateParam || stateParam !== tx.state) {
         return recoverableAuthError(
           c,
@@ -320,20 +359,68 @@ export async function completeLogin(
   return c.redirect(safeReturnTo(deps.config, returnTo) ?? "/");
 }
 
-function readTx(c: Context<AppEnv>): { state: string; verifier: string; returnTo?: string } | null {
-  const raw = getCookie(c, OIDC_TX_COOKIE);
+interface Tx {
+  state: string;
+  verifier: string;
+  returnTo?: string;
+  /** When the sign-in started (ms); 0 for a pre-split cookie. */
+  t: number;
+  /** The cookie it was read from. */
+  cookie: string;
+}
+
+function parseTx(cookie: string, raw: string | undefined): Tx | null {
   if (!raw) return null;
   try {
-    const v = JSON.parse(raw) as { state?: unknown; verifier?: unknown; returnTo?: unknown };
+    const v = JSON.parse(raw) as {
+      state?: unknown;
+      verifier?: unknown;
+      returnTo?: unknown;
+      t?: unknown;
+    };
     if (typeof v.state === "string" && typeof v.verifier === "string") {
       return {
         state: v.state,
         verifier: v.verifier,
         returnTo: typeof v.returnTo === "string" ? v.returnTo : undefined,
+        t: typeof v.t === "number" ? v.t : 0,
+        cookie,
       };
     }
   } catch {
     // malformed cookie → treat as no transaction
   }
   return null;
+}
+
+/**
+ * The transaction cookie's value, within {@link MAX_TX_BYTES} once encoded. A destination
+ * too long to carry (app state encoded in the URL, usually its `#fragment`) is shortened
+ * to the page without the fragment, or dropped: landing on the canvas or the dashboard
+ * beats an "expired" sign-in.
+ */
+function txValue(base: { state: string; verifier: string; t: number }, returnTo?: string): string {
+  for (const dest of [returnTo, returnTo?.split("#")[0]]) {
+    const value = JSON.stringify(dest ? { ...base, returnTo: dest } : base);
+    if (encodeURIComponent(value).length <= MAX_TX_BYTES) return value;
+  }
+  return JSON.stringify(base);
+}
+
+/** The transaction for the callback's `state`: its own cookie, else the pre-split one. */
+function readTx(c: Context<AppEnv>, state: string | null): Tx | null {
+  if (state && STATE_RE.test(state)) {
+    const name = txCookieName(state);
+    const own = parseTx(name, getCookie(c, name));
+    if (own) return own;
+  }
+  return parseTx(OIDC_TX_COOKIE, getCookie(c, OIDC_TX_COOKIE));
+}
+
+/** Every per-sign-in transaction cookie this browser sent. */
+function pendingTx(c: Context<AppEnv>): Array<{ name: string; t: number }> {
+  const prefix = `${OIDC_TX_COOKIE}_`;
+  return Object.entries(getCookie(c))
+    .filter(([name]) => name.startsWith(prefix))
+    .map(([name, raw]) => ({ name, t: parseTx(name, raw)?.t ?? 0 }));
 }

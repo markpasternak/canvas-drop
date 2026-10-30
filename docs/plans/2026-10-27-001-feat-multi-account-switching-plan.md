@@ -52,10 +52,26 @@ an offer to switch to (or add) another account.
   person couldn't learn by switching. A missing and a denied canvas still render
   identically unless one of the visitor's own accounts has access.
 - A canvas can link to the chooser but can't switch: switch/sign-out refuse `same-site`
-  and `cross-site` fetch metadata. Path mode shares one origin (documented reduced
-  isolation, as for the management API).
+  and `cross-site` fetch metadata, and refuse any request on a canvas host (`/auth` also
+  answers there, where a canvas's own fetch is same-origin). The chooser renders only on
+  the instance host and sets `frame-ancestors 'none'`. Path mode shares one origin
+  (documented reduced isolation, as for the management API).
 - `session_switch` joins `session_create` / `session_revoke` in the audit log.
 - MCP authorization connects the active account, so switch first.
+
+## Signing in from a canvas link (added in review)
+
+Mark also reported that signing in from a canvas link sometimes errored or landed
+somewhere else. Causes and fixes:
+
+- One shared OIDC transaction cookie, overwritten by a second sign-in (several tabs,
+  restored tabs, two links). Now one cookie per sign-in, `__canvasdrop_oidc_<state>`.
+- The gateway redirected background requests (SDK calls, assets, frames) to sign-in,
+  replacing the real transaction and spending the login rate limit. Now only top-level
+  page loads are redirected; the rest get `401`.
+- Back onto a used callback showed an error while signed in. Now it goes to `/`.
+- A `#route` in the link was lost. The signed-out preview page now carries it into the
+  returnTo.
 
 ## Tests
 
@@ -63,4 +79,8 @@ an offer to switch to (or add) another account.
 cookie scope), `auth/multi-account.test.ts` (end to end through `buildApp`: canvas 404
 probe, JSON unchanged, denied = missing, blocked skipped, chooser, same-origin switch,
 open-redirect, sign-out handover, add-account), `http/error-pages.test.ts`,
-`auth/routes.test.ts`, dashboard `user-menu.test.tsx`. All on both dialects.
+`auth/routes.test.ts`, dashboard `user-menu.test.tsx`, and `auth/sign-in-flows.test.ts`
+(a cookie-keeping browser and a fake OpenID provider: signed out into a canvas in both URL
+modes, two tabs at once, background requests mid-sign-in, the Back button, a stale
+cookie, a refused account's retry, a `#route`, and both wrong-account paths). All on both
+dialects.

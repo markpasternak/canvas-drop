@@ -45,9 +45,23 @@ describe("socialPreview", () => {
     // returnTo so they land back on this shared canvas, not the apex welcome page.
     const returnTo = encodeURIComponent("https://showcase.canvas-drop.com/");
     expect(body).toContain(`url=/auth/login?returnTo=${returnTo}`);
-    expect(body).toContain(`location.replace("/auth/login?returnTo=${returnTo}")`);
+    expect(body).toContain(`location.replace("/auth/login?returnTo=${returnTo}"`);
     // Never indexed.
     expect(res.headers.get("x-robots-tag")).toBe("noindex");
+  });
+
+  it("carries the visitor's #fragment into the returnTo (canvases often route on it)", async () => {
+    const res = await app(oidc).request("/", {
+      headers: { host: "showcase.canvas-drop.com", ...HTML },
+    });
+    const script = /<script>([^<]+)<\/script>/.exec(await res.text())?.[1] as string;
+    const run = (hash: string) => {
+      let target = "";
+      new Function("location", script)({ hash, replace: (u: string) => (target = u) });
+      return new URL(target, "https://canvas-drop.com").searchParams.get("returnTo");
+    };
+    expect(run("#/board/42?tab=2")).toBe("https://showcase.canvas-drop.com/#/board/42?tab=2");
+    expect(run("")).toBe("https://showcase.canvas-drop.com/");
   });
 
   it("catches a crawler that sends Accept: */* but a recognizable UA", async () => {

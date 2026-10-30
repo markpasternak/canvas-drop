@@ -136,7 +136,7 @@ describe("oidc login — authorization request", () => {
     const res = await loginApp().request("/auth/login");
     const txCookie = res.headers
       .getSetCookie()
-      .find((c) => c.startsWith(`${OIDC_TX_COOKIE}=`)) as string;
+      .find((c) => c.startsWith(`${OIDC_TX_COOKIE}_`)) as string;
     expect(txCookie).toBeTruthy();
     expect(txCookie).toMatch(/Domain=\.?canvases\.example\.com/i);
   });
@@ -147,6 +147,24 @@ describe("oidc login — authorization request", () => {
     expect(readTxCookie(res).returnTo).toBe(target);
   });
 
+  it("keeps the transaction cookie small enough for the browser to store it", async () => {
+    // A canvas that keeps its state in the URL fragment: too long to carry whole.
+    const page = "https://my-canvas.canvases.example.com/board";
+    const res = await loginApp().request(
+      `/auth/login?returnTo=${encodeURIComponent(`${page}#state=${"a".repeat(5000)}`)}`,
+    );
+    const header = res.headers.getSetCookie().find((c) => c.startsWith(`${OIDC_TX_COOKIE}_`));
+    expect((header?.split(";")[0] ?? "").length).toBeLessThan(4096);
+    expect(readTxCookie(res).returnTo).toBe(page);
+
+    const huge = await loginApp().request(
+      `/auth/login?returnTo=${encodeURIComponent(`${page}?q=${"a".repeat(5000)}`)}`,
+    );
+    const tx = readTxCookie(huge);
+    expect(tx.returnTo).toBeUndefined();
+    expect(tx.state).toBeTruthy();
+  });
+
   it("drops an off-host returnTo rather than storing it", async () => {
     const res = await loginApp().request("/auth/login?returnTo=https%3A%2F%2Fevil.com%2F");
     expect(readTxCookie(res).returnTo).toBeUndefined();
@@ -155,7 +173,7 @@ describe("oidc login — authorization request", () => {
 
 /** Decode the JSON payload of the OIDC transaction Set-Cookie on a login response. */
 function readTxCookie(res: Response): { state?: string; verifier?: string; returnTo?: string } {
-  const header = res.headers.getSetCookie().find((c) => c.startsWith(`${OIDC_TX_COOKIE}=`));
+  const header = res.headers.getSetCookie().find((c) => c.startsWith(`${OIDC_TX_COOKIE}_`));
   const pair = header?.split(";")[0] ?? "";
   const value = pair.slice(pair.indexOf("=") + 1);
   return JSON.parse(decodeURIComponent(value));

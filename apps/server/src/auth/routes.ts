@@ -1,6 +1,7 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { isSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import { resolveRequest } from "../routing/resolve-request.js";
 import {
   type AccountsDeps,
   accountChooserPage,
@@ -49,17 +50,30 @@ export function authRoutes(deps: AuthRoutesDeps) {
   const accounts = deps.accounts;
   if (accounts) {
     const { config, sessionSvc } = accounts;
+    // `/auth` answers on canvas subdomains too (sign-in starts from the canvas's own
+    // origin), so there a canvas page's own fetch is "same-origin". Changing who the
+    // browser is signed in as happens only on the instance host.
+    const onCanvasHost = (c: Context<AppEnv>) =>
+      resolveRequest({ host: c.req.header("host") ?? "", pathname: c.req.path }, config).role ===
+      "canvas";
+    const mayChangeAccount = (c: Context<AppEnv>) => !onCanvasHost(c) && isSameOrigin(c, config);
 
     // The account chooser. Pre-gateway like the rest of /auth, so it resolves the
     // active account itself; with none, the visitor simply signs in.
     app.get("/accounts", async (c) => {
       const returnTo = safeReturnTo(config, c.req.query("returnTo"));
+      if (onCanvasHost(c)) {
+        return c.redirect(accountChooserUrl(config, returnTo, c.req.query("account")));
+      }
       const activeId = await sessionSvc.resolveUserId(c);
       const active = activeId ? await accounts.users.findById(activeId) : null;
       if (!active) return c.redirect(loginUrl(config, returnTo));
       const others = await otherSignedInAccounts(accounts, c);
       if (others.length === 0) return c.redirect(addAccountUrl(config, returnTo));
       c.header("Cache-Control", "no-store");
+      // A canvas (same-site in subdomain mode, so the session rides along) must not
+      // frame the chooser and steer a click onto "Continue as".
+      c.header("Content-Security-Policy", "frame-ancestors 'none'");
       return c.html(
         accountChooserPage({
           config,
@@ -71,10 +85,10 @@ export function authRoutes(deps: AuthRoutesDeps) {
       );
     });
 
-    // Switch the active account. Same-origin POST only: a canvas page (its own origin
-    // in subdomain mode) can link to the chooser but can't flip the account itself.
+    // Switch the active account. Same-origin POST on the instance host only: a canvas
+    // page can link to the chooser but can't flip the account itself.
     app.post("/switch", async (c) => {
-      if (!isSameOrigin(c, config)) return c.json({ error: "cross_origin_forbidden" }, 403);
+      if (!mayChangeAccount(c)) return c.json({ error: "cross_origin_forbidden" }, 403);
       const form = await c.req.parseBody();
       const field = (name: string) => (typeof form[name] === "string" ? form[name] : undefined);
       const returnTo = safeReturnTo(config, field("returnTo"));
@@ -91,7 +105,7 @@ export function authRoutes(deps: AuthRoutesDeps) {
 
     // Sign out of the active account only; the next signed-in account takes over.
     app.post("/logout/current", async (c) => {
-      if (!isSameOrigin(c, config)) return c.json({ error: "cross_origin_forbidden" }, 403);
+      if (!mayChangeAccount(c)) return c.json({ error: "cross_origin_forbidden" }, 403);
       const { remaining } = await sessionSvc.revoke(c);
       return c.redirect(remaining ? "/" : "/welcome", 303);
     });

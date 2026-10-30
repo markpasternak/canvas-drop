@@ -212,13 +212,50 @@ describe.each(DIALECTS)("authGateway [%s]", (dialect) => {
     };
     // Host header is the canvas subdomain; c.req.url is the internal proxy origin.
     const res = await buildApp(client, { strategy: anon, config: oidcConfig }).request("/c/deck/", {
-      headers: { host: "my-deck.canvases.example.com" },
+      headers: {
+        host: "my-deck.canvases.example.com",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+      },
     });
     expect(res.status).toBe(302);
     const loc = res.headers.get("location") as string;
     expect(loc.startsWith("/auth/login?returnTo=")).toBe(true);
     const returnTo = new URL(loc, "https://canvases.example.com").searchParams.get("returnTo");
     expect(returnTo).toBe("https://my-deck.canvases.example.com/c/deck/");
+  });
+
+  it("oidc mode: only a page load goes to sign-in; API calls, assets and frames get a 401", async () => {
+    client = await makeTestDb(dialect);
+    const oidcConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "oidc",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_OIDC_ISSUER: "https://idp.example.com",
+      CANVAS_DROP_OIDC_CLIENT_ID: "client",
+      CANVAS_DROP_OIDC_CLIENT_SECRET: "secret",
+    });
+    const anon: AuthStrategy = {
+      async resolveIdentity() {
+        return null;
+      },
+    };
+    const app = buildApp(client, { strategy: anon, config: oidcConfig });
+    const status = async (headers: Record<string, string>) =>
+      (await app.request("/c/deck/", { headers: { host: "canvases.example.com", ...headers } }))
+        .status;
+
+    // A browser page load (fetch metadata), or an HTML-preferring client without it.
+    expect(await status({ "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(302);
+    expect(await status({ accept: "text/html,application/xhtml+xml,*/*;q=0.8" })).toBe(302);
+    // SDK/dashboard fetches, sub-resources and iframes never start a sign-in.
+    expect(await status({ "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" })).toBe(401);
+    expect(await status({ "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" })).toBe(401);
+    expect(await status({ "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" })).toBe(401);
+    expect(await status({ accept: "application/json" })).toBe(401);
+    expect(await status({})).toBe(401);
   });
 
   it("missing identity can fall back to a pre-resolved anonymous public-link principal", async () => {

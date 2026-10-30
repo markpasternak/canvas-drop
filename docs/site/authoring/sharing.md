@@ -174,6 +174,10 @@ An admin can take a canvas down for moderation. A disabled canvas becomes **read
 
 ## Opened a canvas with the wrong account?
 
+Someone who opens a canvas link while signed out signs in and comes back to that canvas,
+including any `#…` part of the link the canvas routes on. Links opened in several tabs at
+once each come back to their own canvas.
+
 If your instance uses OIDC sign-in, you can stay signed in with several accounts and
 switch between them from the account menu (**Add another account**). If you open a canvas
 your current account can't see, you get a "Page not found" page with **Use another

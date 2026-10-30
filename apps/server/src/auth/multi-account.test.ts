@@ -212,6 +212,8 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     expect(html).toContain(`value="${CANVAS_URL}"`);
     expect(html).toContain("Continue as owner@example.com?");
     expect(html).toContain("other@example.com"); // the current account, marked Current
+    // A canvas is same-site with the instance, so it must not be able to frame this.
+    expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
   });
 
   it("sends a browser with no session from the chooser to sign-in", async () => {
@@ -259,6 +261,33 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
       expect(res.status).toBe(403);
       expect(setCookieValue(res, SESSION_COOKIE)).toBeUndefined();
     }
+  });
+
+  it("refuses a switch or sign-out from a canvas page's own origin (subdomain mode)", async () => {
+    client = await makeTestDb(dialect);
+    const { app, owner, both } = await setup(client);
+    // `/auth` answers on canvas hosts, where the canvas's own fetch is same-origin.
+    const switched = await app.request("/auth/switch", {
+      method: "POST",
+      headers: { host: CANVAS_HOST, cookie: both, "sec-fetch-site": "same-origin" },
+      body: switchForm(owner.id),
+    });
+    expect(switched.status).toBe(403);
+    expect(setCookieValue(switched, SESSION_COOKIE)).toBeUndefined();
+    const signedOut = await app.request("/auth/logout/current", {
+      method: "POST",
+      headers: { host: CANVAS_HOST, cookie: both, "sec-fetch-site": "same-origin" },
+    });
+    expect(signedOut.status).toBe(403);
+    expect(setCookieValue(signedOut, SESSION_COOKIE)).toBeUndefined();
+    // The chooser itself only renders on the instance host.
+    const chooser = await app.request(`/auth/accounts?account=${owner.id}`, {
+      headers: { host: CANVAS_HOST, cookie: both },
+    });
+    expect(chooser.status).toBe(302);
+    expect(chooser.headers.get("location")).toBe(
+      `https://${APEX}/auth/accounts?account=${owner.id}`,
+    );
   });
 
   it("won't switch to an account the browser doesn't hold, and never redirects off-site", async () => {
@@ -320,7 +349,7 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
     expect(setCookieValue(own, SESSION_COOKIE)).toBe("");
     expect(setCookieValue(own, ACCOUNTS_COOKIE)).toBe("");
     const after = await app.request("/api/me", { headers: { host: APEX, cookie: both } });
-    expect(after.status).toBe(302); // both sessions are gone → back to sign-in
+    expect(after.status).toBe(401); // both sessions are gone
   });
 
   it("'Add another account' asks the IdP for its account picker", async () => {
