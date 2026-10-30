@@ -81,8 +81,9 @@ export interface AppVariables {
    *  error page then offers the account chooser, and `accessibleAs` names another
    *  account this browser is signed in with that may open the canvas. A missing and
    *  a denied canvas set the same value, so the page never tells them apart unless
-   *  one of the visitor's OWN accounts has access. */
-  canvasNotFound?: { accessibleAs?: { id: string; email: string } };
+   *  one of the visitor's OWN accounts has access. `hasOtherAccounts` (the same for
+   *  every canvas) picks between offering the chooser and offering to add an account. */
+  canvasNotFound?: { accessibleAs?: { id: string; email: string }; hasOtherAccounts?: boolean };
   /** The verified MCP OAuth caller — set by the `/mcp` bearer-auth middleware from a
    *  validated access token. Identity (`userId`) comes only from the server-side token
    *  store, never the client. Tools read this to scope every action to the caller. */

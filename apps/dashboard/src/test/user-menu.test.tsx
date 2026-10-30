@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { UserMenu } from "../components/UserMenu.js";
+import { UserMenu, useSwitchedAccountNotice } from "../components/UserMenu.js";
 import type { AuthMode, Me } from "../lib/api.js";
 import { ThemeProvider } from "../lib/theme.js";
 
@@ -306,7 +306,9 @@ describe("UserMenu multi-account switcher", () => {
   const bob = { id: "u-bob", email: "bob@other.example", name: "Bob", avatarUrl: null };
 
   it("lists the other signed-in accounts as same-origin switch forms (oidc)", async () => {
-    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => [bob]} />);
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [bob], maxAccounts: 5 })} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /account/i }));
     const switchTo = await screen.findByRole("menuitem", { name: "Switch to bob@other.example" });
     const form = switchTo.closest("form") as HTMLFormElement;
@@ -316,7 +318,9 @@ describe("UserMenu multi-account switcher", () => {
   });
 
   it("offers 'Add another account' through the IdP's account picker", async () => {
-    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => []} />);
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [], maxAccounts: 5 })} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /account/i }));
     expect(screen.getByRole("menuitem", { name: /add another account/i })).toHaveAttribute(
       "href",
@@ -325,9 +329,14 @@ describe("UserMenu multi-account switcher", () => {
   });
 
   it("splits sign-out into this account / all accounts once there are two", async () => {
-    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => [bob]} />);
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [bob], maxAccounts: 5 })} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /account/i }));
-    const current = await screen.findByRole("menuitem", { name: /sign out of this account/i });
+    // The single sign-out names the account it affects.
+    const current = await screen.findByRole("menuitem", {
+      name: /sign out of mark@example\.com/i,
+    });
     expect(current.closest("form")).toHaveAttribute("action", "/auth/logout/current");
     expect(screen.getByRole("menuitem", { name: /sign out of all accounts/i })).toHaveAttribute(
       "href",
@@ -336,17 +345,124 @@ describe("UserMenu multi-account switcher", () => {
   });
 
   it("keeps a single plain Sign out with only one account", async () => {
-    renderMenu(<UserMenu me={makeMe()} loadAccounts={async () => []} />);
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [], maxAccounts: 5 })} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /account/i }));
     expect(await screen.findByRole("menuitem", { name: /^sign out$/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /sign out of/i })).not.toBeInTheDocument();
+    // No "Switch account" heading or current-account mark with nothing to switch to.
+    expect(screen.queryByRole("group", { name: "Switch account" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current account")).not.toBeInTheDocument();
+  });
+
+  it("groups the other accounts under a 'Switch account' heading and marks the current one", async () => {
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [bob], maxAccounts: 5 })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const group = await screen.findByRole("group", { name: "Switch account" });
+    expect(
+      within(group).getByRole("menuitem", { name: "Switch to bob@other.example" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Current account")).toBeInTheDocument();
+  });
+
+  it("gives each account its own avatar tint, keyed by email", async () => {
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [bob], maxAccounts: 5 })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const group = await screen.findByRole("group", { name: "Switch account" });
+    const bobDisc = group.querySelector<HTMLElement>(".account-avatar");
+    const markDisc = screen.getByRole("menu").querySelector<HTMLElement>(".account-avatar");
+    expect(bobDisc?.style.getPropertyValue("--avatar-hue")).toBe("240");
+    expect(markDisc?.style.getPropertyValue("--avatar-hue")).not.toBe(
+      bobDisc?.style.getPropertyValue("--avatar-hue"),
+    );
+  });
+
+  it("says when adding an account would sign out the least recently used one", async () => {
+    const others = ["a", "b", "c", "d"].map((x) => ({
+      id: `u-${x}`,
+      email: `${x}@example.com`,
+      name: null,
+      avatarUrl: null,
+    }));
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: others, maxAccounts: 5 })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const add = await screen.findByRole("menuitem", { name: /add another account/i });
+    await screen.findByText(/adding another signs out d@example\.com/i);
+    expect(add).toHaveAccessibleDescription(/5 accounts at once/i);
+  });
+
+  it("stays quiet about the limit below it", async () => {
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [bob], maxAccounts: 5 })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    await screen.findByRole("group", { name: "Switch account" });
+    expect(screen.queryByText(/accounts at once/i)).not.toBeInTheDocument();
+  });
+
+  it("prefetches the accounts when the trigger is hovered, before the menu opens", async () => {
+    let calls = 0;
+    const loadAccounts = async () => {
+      calls += 1;
+      return { accounts: [bob], maxAccounts: 5 };
+    };
+    renderMenu(<UserMenu me={makeMe()} loadAccounts={loadAccounts} />);
+    const trigger = screen.getByRole("button", { name: /account/i });
+    fireEvent.pointerEnter(trigger);
+    expect(calls).toBe(1);
+    // Opening right after the hover reuses that load instead of asking again.
+    fireEvent.click(trigger);
+    expect(calls).toBe(1);
+    expect(
+      await screen.findByRole("menuitem", { name: /sign out of all accounts/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("notes the account being switched to for the next page's notice", async () => {
+    sessionStorage.clear();
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [bob], maxAccounts: 5 })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const switchTo = await screen.findByRole("menuitem", { name: "Switch to bob@other.example" });
+    const form = switchTo.closest("form") as HTMLFormElement;
+    // jsdom doesn't navigate; the submit handler still runs.
+    form.addEventListener("submit", (e) => e.preventDefault());
+    fireEvent.submit(form);
+    expect(sessionStorage.getItem("canvas-drop:switched-to")).toBe("bob@other.example");
+  });
+
+  it("moves between items with the arrow keys, Home and End", async () => {
+    const user = userEvent.setup();
+    renderMenu(
+      <UserMenu me={makeMe()} loadAccounts={async () => ({ accounts: [bob], maxAccounts: 5 })} />,
+    );
+    await user.click(screen.getByRole("button", { name: /account/i }));
+    const first = await screen.findByRole("menuitem", { name: "Switch to bob@other.example" });
+    first.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: /add another account/i })).toHaveFocus();
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    // Wraps from the first item to the last.
+    expect(screen.getByRole("menuitem", { name: /sign out of all accounts/i })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(first).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(screen.getByRole("menuitem", { name: /sign out of all accounts/i })).toHaveFocus();
   });
 
   it.each(["dev", "proxy"] as AuthMode[])("shows no switcher in %s mode", (mode) => {
     let loaded = false;
     const loadAccounts = async () => {
       loaded = true;
-      return [bob];
+      return { accounts: [bob], maxAccounts: 5 };
     };
     renderMenu(<UserMenu me={makeMe({ authMode: mode })} loadAccounts={loadAccounts} />);
     fireEvent.click(screen.getByRole("button", { name: /account/i }));
@@ -354,5 +470,31 @@ describe("UserMenu multi-account switcher", () => {
       screen.queryByRole("menuitem", { name: /add another account/i }),
     ).not.toBeInTheDocument();
     expect(loaded).toBe(false);
+  });
+});
+
+describe("useSwitchedAccountNotice", () => {
+  function Probe({ me, notify }: { me: Me; notify: (m: string) => void }) {
+    useSwitchedAccountNotice(me, notify);
+    return null;
+  }
+
+  beforeEach(() => sessionStorage.clear());
+
+  it("confirms the account now active after a switch, once", () => {
+    sessionStorage.setItem("canvas-drop:switched-to", "Mark@Example.com");
+    const seen: string[] = [];
+    const { rerender } = render(<Probe me={makeMe()} notify={(m) => seen.push(m)} />);
+    rerender(<Probe me={makeMe()} notify={(m) => seen.push(m)} />);
+    expect(seen).toEqual(["Now using mark@example.com"]);
+    expect(sessionStorage.getItem("canvas-drop:switched-to")).toBeNull();
+  });
+
+  it("says nothing when the switch didn't land on that account", () => {
+    sessionStorage.setItem("canvas-drop:switched-to", "bob@other.example");
+    const seen: string[] = [];
+    render(<Probe me={makeMe()} notify={(m) => seen.push(m)} />);
+    expect(seen).toEqual([]);
+    expect(sessionStorage.getItem("canvas-drop:switched-to")).toBeNull();
   });
 });

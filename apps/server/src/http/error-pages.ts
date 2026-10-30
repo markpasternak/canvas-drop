@@ -1,4 +1,4 @@
-import { rampCssVars } from "@canvas-drop/shared";
+import { accountAvatarCss, accountAvatarHue, rampCssVars } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { accountChooserUrl, loginUrl, requestReturnTo } from "../auth/return-to.js";
@@ -39,8 +39,9 @@ interface RecoveryContext {
   /** Absolute account-chooser URL (oidc, signed in) — multi-account switching. */
   switchHref?: string;
   /** Canvas 404 for a signed-in member (oidc): offer another account. `accessibleAs`
-   *  is set only when one of the visitor's own other accounts may open the canvas. */
-  otherAccount?: { href: string; accessibleAs?: string };
+   *  is set only when one of the visitor's own other accounts may open the canvas;
+   *  `hasOthers` when the browser holds any other account (the same for every canvas). */
+  otherAccount?: { href: string; accessibleAs?: string; hasOthers: boolean };
 }
 
 /**
@@ -82,6 +83,7 @@ function recoveryContext(c: Context<AppEnv>): RecoveryContext | undefined {
             otherAccount: {
               href: accountChooserUrl(config, returnTo, notFound.accessibleAs?.id),
               accessibleAs: notFound.accessibleAs?.email,
+              hasOthers: !!notFound.hasOtherAccounts,
             },
           }
         : {}),
@@ -322,28 +324,57 @@ function renderErrorPage(input: ErrorPageDetails, recovery?: RecoveryContext): s
   const signIn = signInHref
     ? `<a class="ghost" href="${escapeAttribute(signInHref)}">Sign in</a>`
     : "";
+  // Canvas 404 for a signed-in member (multi-account) gets its own page: it's about
+  // which account you're using, not about an HTTP error, so the code/path details go.
+  //  - another of your accounts can open it → "Switch account to open this canvas",
+  //    with that account as a card and switching as the primary action;
+  //  - none can → "Can't open this canvas", worded so a missing canvas and a forbidden
+  //    one still read exactly the same (§12.0 no-leak), offering another account.
+  const other = identity ? recovery?.otherAccount : undefined;
+  const signOutLabel = other?.hasOthers ? "Sign out of all accounts" : "Sign out";
   const switchLink =
-    identity && recovery?.switchHref
+    identity && recovery?.switchHref && !other
       ? ` · <a class="textlink" href="${escapeAttribute(recovery.switchHref)}">Switch account</a>`
       : "";
   const identityLine =
     identity && recovery?.logoutHref
-      ? `<p class="identity">Signed in as <strong>${escapeHtml(identity.email)}</strong>${switchLink} · <a class="textlink" href="${escapeAttribute(recovery.logoutHref)}">Sign out</a></p>`
+      ? `<p class="identity">Signed in as <strong>${escapeHtml(identity.email)}</strong>${switchLink} · <a class="textlink" href="${escapeAttribute(recovery.logoutHref)}">${signOutLabel}</a></p>`
       : "";
 
-  // Canvas 404 for a signed-in member (multi-account): when another of the visitor's
-  // accounts may open it, switching becomes the primary action; otherwise "Use another
-  // account" sits beside the dashboard link.
-  const other = identity ? recovery?.otherAccount : undefined;
-  const dashboard = `<a${other?.accessibleAs ? ' class="ghost"' : ""} href="${dashboardHref}">${dashboardLabel}</a>`;
+  const dashboard = `<a${other ? ' class="ghost"' : ""} href="${dashboardHref}">${dashboardLabel}</a>`;
+  let pageTitle = title;
+  let heading = title;
+  let lede = `<p class="message">${message}</p>`;
+  let meta = `<dl class="meta">
+        <dt>Code</dt><dd>${code}</dd>
+        ${path ? `<dt>Path</dt><dd>${path}</dd>` : ""}
+      </dl>`;
+  let kicker = `<p class="kicker">HTTP ${status}</p>`;
+  let accountCard = "";
   let actions = `${dashboard}${signIn}`;
-  let accountHint = "";
-  if (other?.accessibleAs) {
-    const email = escapeHtml(other.accessibleAs);
-    actions = `<a href="${escapeAttribute(other.href)}">Continue as ${email}</a>${dashboard}`;
-    accountHint = `<p class="hint">You're also signed in as <strong>${email}</strong>, which can open this canvas.</p>`;
-  } else if (other) {
-    actions = `${dashboard}<a class="ghost" href="${escapeAttribute(other.href)}">Use another account</a>`;
+  if (identity && other) {
+    const current = escapeHtml(identity.email);
+    const href = escapeAttribute(other.href);
+    kicker = "";
+    meta = "";
+    if (other.accessibleAs) {
+      const email = escapeHtml(other.accessibleAs);
+      const hue = accountAvatarHue(other.accessibleAs);
+      pageTitle = "Switch account to open this canvas";
+      heading = pageTitle;
+      lede = `<p class="message">You're signed in as <strong>${current}</strong>, which can't open this canvas. Your other account can.</p>`;
+      accountCard = `<div class="account-card">
+        <span class="avatar avatar-h" style="--avatar-hue: ${hue}" aria-hidden="true">${escapeHtml(initialOf(other.accessibleAs))}</span>
+        <span class="who"><strong>${email}</strong><span>Can open this canvas</span></span>
+      </div>`;
+      actions = `<a href="${href}">Switch to ${email}</a>${dashboard}`;
+    } else {
+      pageTitle = "Can't open this canvas";
+      heading = pageTitle;
+      lede = `<p class="message">This canvas doesn't exist, or <strong>${current}</strong> doesn't have access to it.</p>`;
+      const label = other.hasOthers ? "Use another account" : "Sign in with another account";
+      actions = `<a href="${href}">${label}</a>${dashboard}`;
+    }
   }
 
   return `<!doctype html>
@@ -352,7 +383,7 @@ function renderErrorPage(input: ErrorPageDetails, recovery?: RecoveryContext): s
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>${status} ${title}</title>
+<title>${pageTitle === title ? `${status} ${title}` : pageTitle}</title>
 ${SYSTEM_THEME_INIT}
 <style>
 ${SYSTEM_PAGE_STYLES}
@@ -454,27 +485,46 @@ ${SYSTEM_PAGE_STYLES}
     text-decoration: underline;
   }
   .identity a.textlink:hover { background: none; color: var(--accent-hover); }
+  .message strong { color: var(--fg); font-weight: 600; }
+  /* The wrong-account headings are sentences, not two-word error titles. */
+  h1.account { max-width: 20ch; font-size: clamp(2rem, 5.5vw, 2.75rem); line-height: 1.1; }
+  /* The account that can open the canvas (multi-account wrong-account page). */
+  .account-card {
+    display: flex; align-items: center; gap: .75rem;
+    margin: 1.5rem 0 0; padding: .85rem 1rem;
+    border: 1px solid var(--border); border-radius: .75rem; background: var(--surface);
+  }
+  .avatar {
+    display: inline-grid; place-items: center; flex: none; width: 2.25rem; height: 2.25rem;
+    border-radius: 999px; font-weight: 650; font-size: .9rem;
+  }
+${accountAvatarCss(".avatar-h")}
+  .who { display: flex; min-width: 0; flex-direction: column; font-size: .875rem; }
+  .who strong { overflow: hidden; color: var(--fg); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .who span { color: var(--accent); font-size: .8125rem; font-weight: 600; }
 </style>
 </head>
 <body>
   <main>
 ${SYSTEM_PAGE_BRAND}
     <section class="content" aria-labelledby="error-title">
-      <p class="kicker">HTTP ${status}</p>
-      <h1 id="error-title">${title}</h1>
-      <p class="message">${message}</p>
-      <dl class="meta">
-        <dt>Code</dt><dd>${code}</dd>
-        ${path ? `<dt>Path</dt><dd>${path}</dd>` : ""}
-      </dl>
+      ${kicker}
+      <h1 id="error-title"${accountCard || (identity && other) ? ' class="account"' : ""}>${heading}</h1>
+      ${lede}
+      ${meta}
       ${hint ? `<p class="hint">${hint}</p>` : ""}
-      ${accountHint}
+      ${accountCard}
       <div class="actions">${actions}</div>
       ${identityLine}
     </section>
   </main>
 </body>
 </html>`;
+}
+
+/** First letter of an email, for an avatar disc. */
+function initialOf(email: string): string {
+  return (email.trim()[0] ?? "?").toUpperCase();
 }
 
 function detailsFromBody(

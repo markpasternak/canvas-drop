@@ -235,8 +235,9 @@ one.
   account that was active stays signed in. A browser with no live session keeps
   `prompt=login`, so after **Sign out** nobody can get back in through the identity
   provider's still-open session in one click.
-- **Switching** (`POST /auth/switch`) and **signing out of one account**
-  (`POST /auth/logout/current`) are same-origin POSTs on the instance host only (`/auth`
+- **Switching** (`POST /auth/switch`) and **signing out of one account** (the active one,
+  `POST /auth/logout/current`, or another held one from the chooser,
+  `POST /auth/logout/account`) are same-origin POSTs on the instance host only (`/auth`
   also answers on canvas subdomains, where a canvas's own request is same-origin, so
   those are refused there). The account chooser at `/auth/accounts` renders only on the
   instance host and refuses to be framed. A canvas can link to it, but it cannot switch
@@ -247,7 +248,7 @@ one.
   management API has there (see invariant 4).
 - **A canvas the active account can't open** still answers with the same `404`. For a
   browser navigation, the page now offers **Use another account**. If another account
-  signed in on that browser may open the canvas, it offers **Continue as …** instead. That
+  signed in on that browser may open the canvas, it offers **Switch to …** instead. That
   answer is the same access decision the account would get if it were active, and it is
   only shown to a browser that already holds that account's session. The JSON body is
   unchanged, and a missing canvas and a denied one look identical unless one of the

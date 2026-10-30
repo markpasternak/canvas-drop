@@ -1,6 +1,7 @@
 import type { AuthMode, SkinName } from "@canvas-drop/shared";
 import { type Context, Hono } from "hono";
 import type { AccountSummary } from "../auth/accounts.js";
+import { MAX_OTHER_ACCOUNTS } from "../auth/session.js";
 import type { OrgsRepository } from "../db/repositories/orgs.js";
 import type { AppEnv } from "../http/types.js";
 
@@ -88,7 +89,10 @@ export function meRoutes(deps: MeRoutesDeps) {
   // live session for, each an explicit {id,email,name,avatarUrl} projection.
   app.get("/accounts", async (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ accounts: deps.otherAccounts ? await deps.otherAccounts(c) : [] });
+    return c.json({
+      accounts: deps.otherAccounts ? await deps.otherAccounts(c) : [],
+      maxAccounts: MAX_OTHER_ACCOUNTS + 1,
+    });
   });
 
   return app;

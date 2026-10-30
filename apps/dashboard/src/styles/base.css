@@ -219,3 +219,24 @@
 
 .cd-window-dots { display: none; }
 :root[data-skin="canvas"] .cd-window-dots { display: inline-flex; }
+
+/*
+ * Account avatar discs (multi-account). Each account sets --avatar-hue from its email
+ * (lib/account-avatar.ts) so several signed-in accounts don't all read as the same
+ * teal initial. Same tones as accountAvatarCss() in packages/shared/src/brand/avatar.ts,
+ * which checks their contrast.
+ */
+.account-avatar {
+  background: oklch(0.92 0.05 var(--avatar-hue, 190));
+  color: oklch(0.42 0.1 var(--avatar-hue, 190));
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .account-avatar {
+    background: oklch(0.34 0.06 var(--avatar-hue, 190));
+    color: oklch(0.88 0.07 var(--avatar-hue, 190));
+  }
+}
+:root[data-theme="dark"] .account-avatar {
+  background: oklch(0.34 0.06 var(--avatar-hue, 190));
+  color: oklch(0.88 0.07 var(--avatar-hue, 190));
+}

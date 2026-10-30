@@ -1,6 +1,7 @@
 import {
   ArrowSquareOut,
   CaretDown,
+  CheckCircle,
   Info,
   Monitor,
   MoonStars,
@@ -9,7 +10,15 @@ import {
   Sun,
   UserPlus,
 } from "@phosphor-icons/react";
-import { useEffect, useId, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
+import { accountAvatarHue, SWITCHED_TO_KEY } from "../lib/account-avatar.js";
 import { api, type Me, type SignedInAccount } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { useTheme } from "../lib/theme.js";
@@ -19,6 +28,14 @@ import { SegmentedControl } from "./SegmentedControl.js";
  * move, so the two can never disagree on what the menu's first/last focusable is. */
 const FOCUSABLE_SELECTOR =
   'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/** The menu's items, for the arrow-key navigation the ARIA menu pattern expects. */
+const MENUITEM_SELECTOR = '[role="menuitem"]';
+
+/** How many accounts one browser may hold when the server doesn't say (it always does). */
+const DEFAULT_MAX_ACCOUNTS = 5;
+
+type AccountList = { accounts: SignedInAccount[]; maxAccounts?: number };
 
 /** First letter of the display name, falling back to the email — a calm avatar
  * fallback when the identity provider gives no `avatarUrl`. Tolerates a null/absent
@@ -53,11 +70,14 @@ function label(me: AccountLike): string {
  * rail's expanded footer); the compact form stays for the collapsed rail and the
  * mobile bar.
  *
- * Multi-account (oidc only): the menu lists the other accounts signed in on this
- * browser (loaded when it opens) with a Switch for each, "Add another account", and —
- * once there is more than one — separate "Sign out of this account" / "Sign out of all
+ * Multi-account (oidc only): under a "Switch account" heading the menu lists the other
+ * accounts signed in on this browser (prefetched when the trigger is hovered or focused,
+ * refreshed when it opens), then "Add another account" — which says so when one more
+ * would sign out the least recently used account. Once there is more than one account,
+ * sign-out names the account it affects ("Sign out of a@x") beside "Sign out of all
  * accounts". Switching and single sign-out are real same-origin form POSTs (the server
- * refuses them cross-origin), followed by a full page load as the new account. */
+ * refuses them cross-origin), followed by a full page load as the new account, which
+ * {@link useSwitchedAccountNotice} confirms with a toast. */
 export function UserMenu({
   me,
   placement = "down",
@@ -68,7 +88,7 @@ export function UserMenu({
   placement?: "down" | "up";
   expanded?: boolean;
   /** Loads the other signed-in accounts; injectable for tests. */
-  loadAccounts?: () => Promise<SignedInAccount[]>;
+  loadAccounts?: () => Promise<AccountList>;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -79,24 +99,68 @@ export function UserMenu({
   const canSignOut = me.authMode !== "proxy";
   const multiAccount = me.authMode === "oidc";
   const [others, setOthers] = useState<SignedInAccount[]>([]);
+  const [maxAccounts, setMaxAccounts] = useState(DEFAULT_MAX_ACCOUNTS);
   const openUp = placement === "up";
+  const switchHeadingId = useId();
 
-  // Refresh the other signed-in accounts each time the menu opens (a sign-in in
-  // another tab may have added one). A failed load just shows no other accounts. The
-  // loader is read through a ref so an inline prop can't re-trigger the load.
+  // Load the other signed-in accounts when the pointer or focus reaches the trigger
+  // (so the list and the sign-out labels are settled before the menu opens) and again
+  // each time it opens (a sign-in in another tab may have added one). A failed load
+  // just shows no other accounts. The loader is read through a ref so an inline prop
+  // can't re-trigger the load; `mounted` drops a reply that lands after unmount.
   const loadAccountsRef = useRef(loadAccounts);
   loadAccountsRef.current = loadAccounts;
+  const mounted = useRef(true);
   useEffect(() => {
-    if (!open || !multiAccount) return;
-    let live = true;
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const lastLoad = useRef(0);
+  const refreshAccounts = (force = false) => {
+    if (!multiAccount) return;
+    // Hover then click arrive within a moment of each other; one request covers both.
+    if (!force && Date.now() - lastLoad.current < 2000) return;
+    lastLoad.current = Date.now();
     loadAccountsRef
       .current()
-      .then((accounts) => live && setOthers(accounts))
-      .catch(() => live && setOthers([]));
-    return () => {
-      live = false;
-    };
-  }, [open, multiAccount]);
+      .then((list) => {
+        if (!mounted.current) return;
+        setOthers(list.accounts);
+        if (list.maxAccounts) setMaxAccounts(list.maxAccounts);
+      })
+      .catch(() => mounted.current && setOthers([]));
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refresh on open only.
+  useEffect(() => {
+    if (open) refreshAccounts();
+  }, [open]);
+  const signedInCount = others.length + 1;
+  // Accounts come most recently used first, so the last one is the next to be dropped.
+  const atLimit = multiAccount && others.length > 0 && signedInCount >= maxAccounts;
+  const leastRecent = others[others.length - 1];
+
+  // Arrow keys move between items (the ARIA menu pattern); Tab still reaches the theme
+  // switch, which is a group of toggle buttons rather than menu items.
+  const onMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>(MENUITEM_SELECTOR) ?? [],
+    );
+    if (items.length === 0) return;
+    e.preventDefault();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? items.length - 1
+          : e.key === "ArrowDown"
+            ? (at + 1) % items.length
+            : (at <= 0 ? items.length : at) - 1;
+    items[next]?.focus();
+  };
 
   // Close on outside pointerdown and on Escape; restore focus to the trigger so
   // keyboard users aren't dumped at the top of the document. While open, trap Tab
@@ -139,13 +203,17 @@ export function UserMenu({
     };
   }, [open]);
 
-  // On open, move focus into the menu (its first focusable control) so keyboard
-  // users land inside the popover; the Escape handler above restores focus to the
-  // trigger on close.
+  // On open, move focus into the menu (its first item, else its first focusable
+  // control) so keyboard users land inside the popover; the Escape handler above
+  // restores focus to the trigger on close.
   useEffect(() => {
     if (!open) return;
     const menu = menuRef.current;
-    (menu?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? menu)?.focus();
+    (
+      menu?.querySelector<HTMLElement>(MENUITEM_SELECTOR) ??
+      menu?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ??
+      menu
+    )?.focus();
   }, [open]);
 
   return (
@@ -154,6 +222,8 @@ export function UserMenu({
         ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
+        onPointerEnter={() => refreshAccounts()}
+        onFocus={() => refreshAccounts()}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
@@ -191,6 +261,7 @@ export function UserMenu({
           id={menuId}
           role="menu"
           aria-label="Account"
+          onKeyDown={onMenuKeyDown}
           className={cn(
             "absolute z-40 w-60 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
             // Open up (rail footer) vs. down (mobile bar). Horizontal alignment is
@@ -211,7 +282,7 @@ export function UserMenu({
         >
           <div className="flex items-center gap-3 border-border border-b px-3.5 py-3">
             <Avatar me={me} className="size-9 text-sm" />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <span className="truncate font-medium text-fg text-sm">{label(me)}</span>
                 {me.isAdmin && (
@@ -227,37 +298,75 @@ export function UserMenu({
                 <div className="truncate text-subtle text-xs">{me.email}</div>
               )}
             </div>
+            {/* With several accounts, mark which one this is. */}
+            {others.length > 0 && (
+              <CheckCircle
+                size={18}
+                weight="fill"
+                aria-label="Current account"
+                className="shrink-0 text-accent"
+              />
+            )}
           </div>
 
           {multiAccount && (
             <div className="border-border border-b py-1">
-              {others.map((account) => (
-                <form key={account.id} method="post" action="/auth/switch">
-                  <input type="hidden" name="account" value={account.id} />
-                  <button
-                    type="submit"
-                    role="menuitem"
-                    aria-label={`Switch to ${account.email}`}
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-surface-sunken"
+              {others.length > 0 && (
+                // biome-ignore lint/a11y/useSemanticElements: a labelled group of menu items (ARIA menu pattern), not form fields.
+                <div role="group" aria-labelledby={switchHeadingId}>
+                  <div
+                    id={switchHeadingId}
+                    role="presentation"
+                    className="px-3.5 pt-1.5 pb-1 font-medium text-[0.6875rem] text-subtle uppercase tracking-wider"
                   >
-                    <Avatar me={account} className="size-7" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-fg text-sm">{label(account)}</span>
-                      {account.name?.trim() && (
-                        <span className="block truncate text-subtle text-xs">{account.email}</span>
-                      )}
-                    </span>
-                  </button>
-                </form>
-              ))}
+                    Switch account
+                  </div>
+                  {others.map((account) => (
+                    <form
+                      key={account.id}
+                      method="post"
+                      action="/auth/switch"
+                      onSubmit={() => rememberSwitch(account)}
+                    >
+                      <input type="hidden" name="account" value={account.id} />
+                      <button
+                        type="submit"
+                        role="menuitem"
+                        aria-label={`Switch to ${account.email}`}
+                        className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none"
+                      >
+                        <Avatar me={account} className="size-7" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-fg text-sm">{label(account)}</span>
+                          {account.name?.trim() && (
+                            <span className="block truncate text-subtle text-xs">
+                              {account.email}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </form>
+                  ))}
+                </div>
+              )}
               <a
                 href="/auth/login?add=1"
                 role="menuitem"
-                className="flex items-center gap-2.5 px-3.5 py-2 text-fg text-sm transition-colors hover:bg-surface-sunken"
+                aria-describedby={atLimit ? `${switchHeadingId}-limit` : undefined}
+                className="flex items-center gap-2.5 px-3.5 py-2 text-fg text-sm transition-colors hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none"
               >
                 <UserPlus size={16} aria-hidden className="text-muted" />
                 Add another account
               </a>
+              {atLimit && leastRecent && (
+                <p
+                  id={`${switchHeadingId}-limit`}
+                  className="px-3.5 pb-1.5 text-subtle text-xs leading-snug"
+                >
+                  You can be signed in to {maxAccounts} accounts at once. Adding another signs out{" "}
+                  {leastRecent.email}.
+                </p>
+              )}
             </div>
           )}
 
@@ -302,14 +411,14 @@ export function UserMenu({
           </a>
 
           {canSignOut && others.length > 0 && (
-            <form method="post" action="/auth/logout/current">
+            <form method="post" action="/auth/logout/current" className="border-border border-t">
               <button
                 type="submit"
                 role="menuitem"
-                className="flex w-full items-center gap-2.5 border-border border-t px-3.5 py-2.5 text-left text-fg text-sm transition-colors hover:bg-surface-sunken"
+                className="flex w-full items-center gap-2.5 px-3.5 pt-2.5 pb-1.5 text-left text-fg text-sm transition-colors hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none"
               >
-                <SignOut size={16} aria-hidden className="text-muted" />
-                Sign out of this account
+                <SignOut size={16} aria-hidden className="shrink-0 text-muted" />
+                <span className="min-w-0 truncate">Sign out of {me.email || label(me)}</span>
               </button>
             </form>
           )}
@@ -317,7 +426,10 @@ export function UserMenu({
             <a
               href="/auth/logout"
               role="menuitem"
-              className="flex items-center gap-2.5 border-border border-t px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
+              className={cn(
+                "flex items-center gap-2.5 px-3.5 text-fg text-sm transition-colors hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none",
+                others.length > 0 ? "pt-1.5 pb-2.5" : "border-border border-t py-2.5",
+              )}
             >
               <SignOut size={16} aria-hidden className="text-muted" />
               {others.length > 0 ? "Sign out of all accounts" : "Sign out"}
@@ -340,15 +452,49 @@ function Avatar({ me, className }: { me: AccountLike; className?: string }) {
       />
     );
   }
+  // Each account gets its own tint (keyed by email), so two accounts with the same
+  // initial — or the same name — still look different.
   return (
     <span
       aria-hidden
+      style={{ "--avatar-hue": accountAvatarHue(me.email ?? "") } as CSSProperties}
       className={cn(
-        "grid shrink-0 place-items-center rounded-full bg-accent-subtle font-semibold text-[0.8125rem] text-accent",
+        "account-avatar grid shrink-0 place-items-center rounded-full font-semibold text-[0.8125rem]",
         className,
       )}
     >
       {initial(me)}
     </span>
   );
+}
+
+/** Leave the next page load a note of the account being switched to, for the toast. */
+function rememberSwitch(account: SignedInAccount) {
+  try {
+    sessionStorage.setItem(SWITCHED_TO_KEY, account.email);
+  } catch {
+    // Storage blocked (private mode): the switch still happens, just without a notice.
+  }
+}
+
+/**
+ * After a switch (a full page load), confirm which account is now active — the main
+ * risk with several accounts is acting as the wrong one. Call once, from the layout.
+ * Shows nothing unless the note matches the account actually signed in now.
+ */
+export function useSwitchedAccountNotice(me: Me | undefined, notify: (message: string) => void) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per signed-in account.
+  useEffect(() => {
+    if (!me?.email) return;
+    let switchedTo: string | null = null;
+    try {
+      switchedTo = sessionStorage.getItem(SWITCHED_TO_KEY);
+      sessionStorage.removeItem(SWITCHED_TO_KEY);
+    } catch {
+      return;
+    }
+    if (switchedTo && switchedTo.toLowerCase() === me.email.toLowerCase()) {
+      notify(`Now using ${me.email}`);
+    }
+  }, [me?.email]);
 }

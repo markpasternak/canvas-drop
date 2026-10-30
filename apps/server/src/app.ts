@@ -901,6 +901,9 @@ function noopSession(svc?: SessionService): SessionService {
         return { remaining: false };
       },
       async revokeAll() {},
+      async revokeHeld() {
+        return false;
+      },
     }
   );
 }

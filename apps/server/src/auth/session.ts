@@ -60,6 +60,9 @@ export interface SessionService {
   revoke(c: Context<AppEnv>): Promise<{ remaining: boolean }>;
   /** Revoke every session this browser holds and clear both cookies. */
   revokeAll(c: Context<AppEnv>): Promise<void>;
+  /** Sign out of one account this browser holds besides the active one (the account
+   *  chooser's per-row Sign out). False when no such account is held. */
+  revokeHeld(c: Context<AppEnv>, userId: string): Promise<boolean>;
 }
 
 /** Minimal audit sink for session lifecycle events (§12.1.8). Implemented by AuditLog. */
@@ -280,6 +283,22 @@ export function sessionService(
         if (userId) auditRevoke(c, userId);
       }
       write(c, undefined, []);
+    },
+
+    async revokeHeld(c, userId) {
+      const { active } = state(c);
+      if (!active) return false;
+      const jar = await liveJar(c);
+      const held = jar.filter((e) => e.userId === userId);
+      if (held.length === 0) return false;
+      for (const entry of held) await sessions.revokeByToken(entry.token);
+      auditRevoke(c, userId);
+      write(
+        c,
+        active,
+        jar.filter((e) => e.userId !== userId).map((e) => e.token),
+      );
+      return true;
     },
   };
 }

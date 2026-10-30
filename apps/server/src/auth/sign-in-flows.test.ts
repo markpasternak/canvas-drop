@@ -510,7 +510,7 @@ describe.each(DIALECTS)("sign-in flows into a canvas [%s]", (dialect) => {
   });
 
   for (const urlMode of ["subdomain", "path"] as const) {
-    it(`${urlMode}: signed in with the wrong account, "Use another account" adds the right one and returns to the canvas`, async () => {
+    it(`${urlMode}: signed in with the wrong account, "Sign in with another account" adds the right one and returns to the canvas`, async () => {
       db = await makeTestDb(dialect);
       const inst = await instance(db, urlMode);
       const browser = await signedInAs(inst, "other@example.com");
@@ -518,10 +518,10 @@ describe.each(DIALECTS)("sign-in flows into a canvas [%s]", (dialect) => {
       const denied = await browser.navigate(inst.canvasUrl("alpha"));
       expect(denied.res.status).toBe(404);
       expect(denied.body).toContain("Signed in as <strong>other@example.com</strong>");
-      expect(denied.body).not.toContain("Continue as");
+      expect(denied.body).not.toContain("Switch to");
 
-      // Use another account → the chooser has nobody else → straight to the IdP picker.
-      const chooser = linkLabelled(denied.body, "Use another account");
+      // Sign in with another account → the chooser has nobody else → the IdP picker.
+      const chooser = linkLabelled(denied.body, "Sign in with another account");
       const picker = await browser.navigate(chooser, { site: "same-site" });
       expect(new URL(picker.idp as string).searchParams.get("prompt")).toBe("select_account");
 
@@ -539,7 +539,7 @@ describe.each(DIALECTS)("sign-in flows into a canvas [%s]", (dialect) => {
     });
   }
 
-  it('with the right account already signed in, "Continue as" switches and returns to the canvas', async () => {
+  it('with the right account already signed in, "Switch to" switches and returns to the canvas', async () => {
     db = await makeTestDb(dialect);
     const inst = await instance(db);
     // Signed in as owner, then added other (now active).
@@ -551,11 +551,11 @@ describe.each(DIALECTS)("sign-in flows into a canvas [%s]", (dialect) => {
 
     const denied = await browser.navigate(inst.canvasUrl("alpha"));
     expect(denied.res.status).toBe(404);
-    const chooserUrl = linkLabelled(denied.body, "Continue as owner@example.com");
+    const chooserUrl = linkLabelled(denied.body, "Switch to owner@example.com");
 
     const chooser = await browser.navigate(chooserUrl, { site: "same-site" });
     expect(chooser.res.status).toBe(200);
-    expect(chooser.body).toContain("Continue as owner@example.com?");
+    expect(chooser.body).toContain("<strong>owner@example.com</strong> can open this canvas.");
     const account = /name="account" value="([^"]+)"/.exec(chooser.body)?.[1] as string;
     const returnTo = /name="returnTo" value="([^"]+)"/.exec(chooser.body)?.[1] as string;
 
