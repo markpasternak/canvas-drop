@@ -1,7 +1,10 @@
 import type { Canvas } from "@canvas-drop/shared/db";
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import type { OtherAccountProbe } from "../auth/accounts.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
+import { wantsHtmlError } from "../http/error-pages.js";
 import type { AppEnv, Principal } from "../http/types.js";
 import { disabledResponse } from "./disabled-page.js";
 
@@ -261,6 +264,9 @@ export interface CanvasAccessDeps {
   tenancyActive: boolean;
   /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
   publicLinksEnabled?: () => Promise<boolean>;
+  /** Multi-account switching (oidc): finds another account signed in on this browser
+   *  that may open a canvas the active account can't. Omitted outside oidc mode. */
+  otherAccountProbe?: OtherAccountProbe;
 }
 
 /** Current public-sharing policy for a canvas. Shared by serving, HTTP and MCP
@@ -365,6 +371,27 @@ export function principalAttributionId(c: {
   return p.kind === "capture" ? `capture:${p.canvasId}` : "anonymous-via-public-link";
 }
 
+/** The full canvas-content decision for one principal: its access context, then the
+ *  decision table. Shared by {@link canvasAccess} and the multi-account probe, so
+ *  "would this other account be let in?" is answered by exactly the same code. */
+export async function decideAccessFor(
+  deps: Pick<CanvasAccessDeps, "canvases" | "teams" | "tenancyActive" | "publicLinksEnabled">,
+  canvas: Canvas | null,
+  principal: Principal,
+): Promise<AccessDecision> {
+  const ctx = await resolveAccessContext(
+    deps.canvases,
+    deps.teams ?? NO_TEAM_MATCH,
+    canvas,
+    principal,
+    { publicLinksEnabled: deps.publicLinksEnabled, tenancyActive: deps.tenancyActive },
+  );
+  return decideCanvasAccess(canvas, principal, Date.now(), {
+    ...ctx,
+    tenancyActive: deps.tenancyActive,
+  });
+}
+
 /**
  * Middleware: resolve the slug (set by resolveRequest → `canvasSlug`), run the
  * decision, and on allow place the canvas + a `needsPasswordGate` flag on the
@@ -377,17 +404,7 @@ export function canvasAccess(deps: CanvasAccessDeps) {
 
     const canvas = await deps.canvases.findBySlug(slug);
     const principal = requestPrincipal(c);
-    const ctx = await resolveAccessContext(
-      deps.canvases,
-      deps.teams ?? NO_TEAM_MATCH,
-      canvas,
-      principal,
-      { publicLinksEnabled: deps.publicLinksEnabled, tenancyActive: deps.tenancyActive },
-    );
-    const decision = decideCanvasAccess(canvas, principal, Date.now(), {
-      ...ctx,
-      tenancyActive: deps.tenancyActive,
-    });
+    const decision = await decideAccessFor(deps, canvas, principal);
 
     if (decision.action === "deny") {
       if (decision.status === 403) {
@@ -398,6 +415,7 @@ export function canvasAccess(deps: CanvasAccessDeps) {
         if (decision.reason === "disabled") return disabledResponse(c);
         return c.json({ error: decision.reason }, 403);
       }
+      await noteCanvasNotFound(c, deps, canvas, principal);
       return c.json({ error: "not_found" }, 404);
     }
 
@@ -407,4 +425,24 @@ export function canvasAccess(deps: CanvasAccessDeps) {
     c.set("staticOnly", decision.staticOnly);
     await next();
   });
+}
+
+/**
+ * Multi-account hand-off for a canvas 404 (browser navigations by a signed-in member
+ * only). The JSON body stays the byte-identical `not_found`; only the branded HTML
+ * page reads this. A canvas that doesn't exist and one the active account can't open
+ * get the same marker, so the page tells them apart only when one of the visitor's
+ * OWN other accounts may open it — something they could learn by switching anyway.
+ */
+async function noteCanvasNotFound(
+  c: Context<AppEnv>,
+  deps: CanvasAccessDeps,
+  canvas: Canvas | null,
+  principal: Principal,
+): Promise<void> {
+  if (!deps.otherAccountProbe || principal.kind !== "member") return;
+  if (c.req.method !== "GET" || !wantsHtmlError(c.req.header("accept"))) return;
+  // Probe a missing canvas too, so the work done doesn't hint which slugs exist.
+  const match = await deps.otherAccountProbe(c, canvas);
+  c.set("canvasNotFound", match ? { accessibleAs: { id: match.id, email: match.email } } : {});
 }

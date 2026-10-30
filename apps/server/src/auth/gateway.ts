@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import { wantsHtmlError } from "../http/error-pages.js";
 import type { AppEnv } from "../http/types.js";
 import { isEmailAllowed, mapIdentityToUser } from "./identity-mapping.js";
 import { type InvitationApplyDeps, materializePendingInvitations } from "./invitations.js";
@@ -105,7 +106,12 @@ export function authGateway(deps: AuthGatewayDeps) {
 function unauthorized(c: Context<AppEnv>, config: Config) {
   // In oidc mode the app owns login; elsewhere a missing identity is a hard 401
   // (proxy mode should never reach the app unauthenticated — the IAP bounces it).
-  if (config.auth.mode === "oidc") {
+  // Only a top-level page load is sent to sign-in. An API call, asset or frame gets
+  // the 401 instead (the dashboard and SDK already handle it): redirecting those
+  // starts a sign-in nobody sees, spends the visitor's login rate limit, and used to
+  // replace their real sign-in mid-flight, so they came back to a state mismatch or
+  // to an asset URL instead of their canvas.
+  if (config.auth.mode === "oidc" && isPageNavigation(c)) {
     // Carry where the visitor was headed so login returns them there (a shared
     // canvas on a subdomain, not the apex welcome page). Rebuild from the forwarded
     // Host — c.req.url is the proxy's internal http origin behind Caddy.
@@ -113,4 +119,18 @@ function unauthorized(c: Context<AppEnv>, config: Config) {
     return c.redirect(loginUrl(config, returnTo));
   }
   return c.json({ error: "unauthorized" }, 401);
+}
+
+/**
+ * Whether this request is a top-level page load (a person who can be sent to sign-in).
+ * Browsers say so in fetch metadata (`Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest:
+ * document`); a client that sends none is judged by whether it prefers HTML.
+ */
+export function isPageNavigation(c: Context<AppEnv>): boolean {
+  const mode = c.req.header("sec-fetch-mode");
+  if (mode) {
+    const dest = c.req.header("sec-fetch-dest");
+    return mode === "navigate" && (!dest || dest === "document");
+  }
+  return wantsHtmlError(c.req.header("accept"));
 }

@@ -53,6 +53,14 @@ export interface Me {
   isGuest?: boolean;
 }
 
+/** Another account signed in on this browser (multi-account switcher, oidc only). */
+export interface SignedInAccount {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
 /** The five toggleable backend features (plan 006 + authoring). Identity is implicit (no flag). */
 export type FeatureCapability = "kv" | "files" | "ai" | "realtime" | "authoring";
 
@@ -1352,6 +1360,9 @@ export type AdminConfigField =
 
 export const api = {
   me: () => request<Me>("/api/me"),
+  /** The OTHER accounts signed in on this browser (empty outside oidc mode). */
+  otherAccounts: () =>
+    request<{ accounts: SignedInAccount[] }>("/api/me/accounts").then((r) => r.accounts),
 
   /** Browse the opt-in gallery (M8). Empty params are omitted from the query string. */
   listGallery: (query: GalleryQuery = {}) => {

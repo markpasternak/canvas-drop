@@ -82,7 +82,7 @@ function buildApp(client: DbClient, audit?: AuthEventSink) {
 describe("oidc login — authorization request", () => {
   // A real openid-client Configuration built from static metadata — login()
   // does no network of its own, so buildAuthorizationUrl runs offline here.
-  function loginApp(): Hono<AppEnv> {
+  function loginApp(signedInAs: string | null = null): Hono<AppEnv> {
     const cfg = new client.Configuration(
       {
         issuer: "https://idp.example.com",
@@ -98,8 +98,8 @@ describe("oidc login — authorization request", () => {
       // biome-ignore lint/suspicious/noExplicitAny: repos unused by login()
       users: {} as any,
       allowedEmails: { isAllowed: async () => false },
-      // biome-ignore lint/suspicious/noExplicitAny: session svc unused by login()
-      sessionSvc: {} as any,
+      // biome-ignore lint/suspicious/noExplicitAny: login() only asks who is signed in
+      sessionSvc: { resolveUserId: async () => signedInAs } as any,
       getConfig: () => Promise.resolve(cfg),
     });
     const app = new Hono<AppEnv>();
@@ -118,13 +118,25 @@ describe("oidc login — authorization request", () => {
     expect(loc.searchParams.get("state")).toBeTruthy();
   });
 
+  it("'Add another account' asks the IdP for its account picker when signed in", async () => {
+    const res = await loginApp("u-active").request("/auth/login?add=1");
+    const loc = new URL(res.headers.get("location") as string);
+    expect(loc.searchParams.get("prompt")).toBe("select_account");
+  });
+
+  it("keeps prompt=login for add=1 from a signed-out browser (no one-click re-entry after sign-out)", async () => {
+    const res = await loginApp(null).request("/auth/login?add=1");
+    const loc = new URL(res.headers.get("location") as string);
+    expect(loc.searchParams.get("prompt")).toBe("login");
+  });
+
   it("scopes the transaction cookie to the parent domain in subdomain mode so the apex callback can read it", async () => {
     // Regression: a host-only tx cookie set on a canvas subdomain is invisible at the
     // apex /auth/callback (redirect_uri is built from baseUrl), causing state_mismatch.
     const res = await loginApp().request("/auth/login");
     const txCookie = res.headers
       .getSetCookie()
-      .find((c) => c.startsWith(`${OIDC_TX_COOKIE}=`)) as string;
+      .find((c) => c.startsWith(`${OIDC_TX_COOKIE}_`)) as string;
     expect(txCookie).toBeTruthy();
     expect(txCookie).toMatch(/Domain=\.?canvases\.example\.com/i);
   });
@@ -135,6 +147,24 @@ describe("oidc login — authorization request", () => {
     expect(readTxCookie(res).returnTo).toBe(target);
   });
 
+  it("keeps the transaction cookie small enough for the browser to store it", async () => {
+    // A canvas that keeps its state in the URL fragment: too long to carry whole.
+    const page = "https://my-canvas.canvases.example.com/board";
+    const res = await loginApp().request(
+      `/auth/login?returnTo=${encodeURIComponent(`${page}#state=${"a".repeat(5000)}`)}`,
+    );
+    const header = res.headers.getSetCookie().find((c) => c.startsWith(`${OIDC_TX_COOKIE}_`));
+    expect((header?.split(";")[0] ?? "").length).toBeLessThan(4096);
+    expect(readTxCookie(res).returnTo).toBe(page);
+
+    const huge = await loginApp().request(
+      `/auth/login?returnTo=${encodeURIComponent(`${page}?q=${"a".repeat(5000)}`)}`,
+    );
+    const tx = readTxCookie(huge);
+    expect(tx.returnTo).toBeUndefined();
+    expect(tx.state).toBeTruthy();
+  });
+
   it("drops an off-host returnTo rather than storing it", async () => {
     const res = await loginApp().request("/auth/login?returnTo=https%3A%2F%2Fevil.com%2F");
     expect(readTxCookie(res).returnTo).toBeUndefined();
@@ -143,7 +173,7 @@ describe("oidc login — authorization request", () => {
 
 /** Decode the JSON payload of the OIDC transaction Set-Cookie on a login response. */
 function readTxCookie(res: Response): { state?: string; verifier?: string; returnTo?: string } {
-  const header = res.headers.getSetCookie().find((c) => c.startsWith(`${OIDC_TX_COOKIE}=`));
+  const header = res.headers.getSetCookie().find((c) => c.startsWith(`${OIDC_TX_COOKIE}_`));
   const pair = header?.split(";")[0] ?? "";
   const value = pair.slice(pair.indexOf("=") + 1);
   return JSON.parse(decodeURIComponent(value));

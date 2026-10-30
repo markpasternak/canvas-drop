@@ -32,6 +32,16 @@ instead of the generic sign-in card; automatic screenshots never leave. The same
 blank screenshot covers on smooth-scrolling canvases and broken unfurl images. See
 [the learnings](solutions/2026-10-01-link-unfurls-and-preview-covers.md).
 
+Multi-account sign-in (27 October 2026, oidc mode): a browser can stay signed in with up
+to five accounts and switch between them from the account menu. A canvas the active
+account can't open offers "Use another account", or "Continue as …" when another account
+on that browser can open it. Every account is an ordinary session; no migration. The
+same change fixes signing in from a canvas link: sign-ins in several tabs no longer
+collide, background requests get a `401` instead of starting a sign-in, and a `#route`
+survives sign-in. See
+[the plan](plans/2026-10-27-001-feat-multi-account-switching-plan.md) and
+[the learnings](solutions/2026-10-27-multi-account-session-jar.md).
+
 The [deployment coordination round](plans/2026-09-12-1811-feat-deployment-coordination-plan.md)
 (12 September 2026) lets two publishers ship the same release to one canvas without a
 duplicate version or a stale overwrite: an optional opaque `releaseId` on the deploy

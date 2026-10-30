@@ -325,9 +325,13 @@ export function renderPreviewShell(
   const loginHref = opts.loginHref ?? "/auth/login";
   const loginAttr = escapeAttribute(loginHref);
   const loginJs = escapeHtml(loginHref);
+  // The server never sees the `#fragment`, and static canvases often route on it
+  // (`#/board/42`). The script carries it into the returnTo (always the last query
+  // parameter) so sign-in lands on that view, not the canvas's home page.
+  const carryHash = loginHref.includes("?returnTo=") ? `+encodeURIComponent(location.hash)` : "";
   const redirectHead = redirect
     ? `<meta http-equiv="refresh" content="0; url=${loginAttr}">
-<script>location.replace("${loginJs}");</script>`
+<script>location.replace("${loginJs}"${carryHash});</script>`
     : "";
   const body = redirect
     ? `<p>Sign in to open this shared canvas… <a href="${loginAttr}">Continue</a></p>`

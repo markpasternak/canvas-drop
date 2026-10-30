@@ -74,7 +74,7 @@ flowchart TD
     Req([Incoming request]) --> Carve{Active public_link canvas?}
     Carve -->|yes, no identity| Anon[Anonymous principal]
     Carve -->|otherwise| Gate{Auth gateway resolves identity}
-    Gate -->|none| Unauth["oidc: 302 to login. proxy, dev: 401"]
+    Gate -->|none| Unauth["oidc page load: 302 to login. Otherwise 401"]
     Gate -->|identity| Allow{Email allowed?}
     Allow -->|no| Unauth
     Allow -->|yes| Blocked{User blocked?}
@@ -94,7 +94,7 @@ What each denial looks like, so you can read your logs and support tickets:
 
 | Situation | Response | Audit row |
 | --- | --- | --- |
-| No identity | `oidc`: `302` to `/auth/login?returnTo=`; `proxy` and `dev`: `401 {"error":"unauthorized"}` | `auth_denied` / `no_identity` |
+| No identity | `oidc`, top-level page load: `302` to `/auth/login?returnTo=`; any other request (API call, asset, frame) and `proxy` or `dev` mode: `401 {"error":"unauthorized"}` | `auth_denied` / `no_identity` |
 | Email not on the domain list or the permit list | same as no identity | `auth_denied` / `domain_not_allowed` |
 | User blocked by an admin | `403 {"error":"forbidden"}` | `auth_denied` / `blocked` |
 | Signed in, but no route into the canvas | `404 {"error":"not_found"}`, never a "forbidden" that confirms the canvas exists | none (the gateway already logged `auth_ok`) |
@@ -146,7 +146,7 @@ after this one names the mechanism behind one of them.
 | `dev` | the configured dev user | cookie, used only by `/auth/logout` | never happens |
 | `proxy`, JWT path | the proxy's signed JWT: signature against the JWKS, `iss`, `aud`, `exp`, and a string `email` claim | none | `401` |
 | `proxy`, trusted-header path | `X-Auth-Request-Email` (configurable), accepted only from a TCP peer in `CANVAS_DROP_TRUSTED_PROXY_IPS` | none | `401` |
-| `oidc` | the app's own session cookie, minted by the OIDC callback | `__canvasdrop_session`, 14-day rolling expiry | `302` to `/auth/login` |
+| `oidc` | the app's own session cookie, minted by the OIDC callback | `__canvasdrop_session`, 14-day rolling expiry | page load: `302` to `/auth/login`; otherwise `401` |
 
 Each mode namespaces the stored identity (`dev:`, `proxy:`, `oidc:` prefixes on the
 provider subject), so switching modes never merges accounts across trust sources.
@@ -189,7 +189,16 @@ identity fires only in `proxy` mode.
 
 ### `oidc` mode: the app owns the session
 
-Login uses PKCE (S256), a random `state`, and `prompt=login`. The callback rejects a
+Login uses PKCE (S256), a random `state`, and `prompt=login` (`prompt=select_account` when
+adding another account). Google doesn't support `prompt=login`, so with Google a
+signed-out visitor may be signed in with whichever Google account is active there
+without being asked; **Use another account** on the canvas page recovers from that.
+Each sign-in keeps its PKCE verifier, `state` and return
+address in its own short-lived HttpOnly cookie (`__canvasdrop_oidc_<state>`, ten minutes,
+at most five at once), so sign-ins started in several tabs each finish where they began.
+Only a top-level page load is sent to sign-in; background requests get a `401` and never
+start one. A callback the browser can't match while it is already signed in (the Back
+button onto a used callback) goes to the dashboard. The callback rejects a
 missing or mismatched state, a failed code exchange, a missing `email` claim, and
 `email_verified=false`, and only then runs the same allowlist and blocked checks as every
 other request. Every rejection writes an `auth_denied` audit row with its reason
@@ -198,9 +207,56 @@ other request. Every rejection writes an `auth_denied` audit row with its reason
 
 The session token is 256 bits of randomness; only its SHA-256 hash is stored, so the raw
 token never lands in the database. The cookie is HttpOnly always, Secure in production,
-`SameSite=Lax`, and scoped to `.{baseHost}` in subdomain mode. `/auth/logout` revokes the
-session (audit `session_revoke`). `CANVAS_DROP_SESSION_SECRET` must be at least 32
-characters outside `dev` mode; it also signs the password-gate grants below.
+`SameSite=Lax`, and scoped to `.{baseHost}` in subdomain mode. `/auth/logout` revokes
+every session the browser holds (audit `session_revoke`) and ignores a cross-site
+navigation. `CANVAS_DROP_SESSION_SECRET`
+must be at least 32 characters outside `dev` mode; it also signs the password-gate grants
+below.
+
+#### Several accounts on one browser
+
+In `oidc` mode a person can stay signed in with up to five accounts and switch between
+them, like the account switcher in Google Drive. There is one active account per browser,
+so other open tabs act as the new account from their next request. Each extra account is an ordinary session
+with its own row, expiry and revocation. The browser keeps its tokens in a second cookie,
+`__canvasdrop_accounts`, which is HttpOnly and scoped exactly like the session cookie. That
+cookie carries an HMAC (keyed by `CANVAS_DROP_SESSION_SECRET`) over the account list and the
+active session token. In subdomain mode a canvas's script can create a cookie on the
+parent domain, but it can't forge one bound to the visitor's own session, so it can't
+slip its author's account into the visitor's switcher. The extra accounts never sign a
+browser in without its active session cookie, and an account the gateway would refuse
+(blocked, or off the allowlist) is never listed, switched to or promoted.
+An account that is not active does not have its expiry extended, so it signs itself out
+after 14 days without use. Signing in to a sixth account revokes the least recently used
+one.
+
+- **Adding an account** goes through `/auth/login?add=1`, the normal login flow with
+  `prompt=select_account`. That means the same allowlist and blocked checks, and the
+  account that was active stays signed in. A browser with no live session keeps
+  `prompt=login`, so after **Sign out** nobody can get back in through the identity
+  provider's still-open session in one click.
+- **Switching** (`POST /auth/switch`) and **signing out of one account**
+  (`POST /auth/logout/current`) are same-origin POSTs on the instance host only (`/auth`
+  also answers on canvas subdomains, where a canvas's own request is same-origin, so
+  those are refused there). The account chooser at `/auth/accounts` renders only on the
+  instance host and refuses to be framed. A canvas can link to it, but it cannot switch
+  the account itself. A switch
+  only works for an account that would pass the gateway right now, and it is audited as
+  `session_switch`. In path mode every canvas shares the dashboard's origin, so this
+  check can't tell a canvas from the dashboard. That is the same reduced isolation the
+  management API has there (see invariant 4).
+- **A canvas the active account can't open** still answers with the same `404`. For a
+  browser navigation, the page now offers **Use another account**. If another account
+  signed in on that browser may open the canvas, it offers **Continue as …** instead. That
+  answer is the same access decision the account would get if it were active, and it is
+  only shown to a browser that already holds that account's session. The JSON body is
+  unchanged, and a missing canvas and a denied one look identical unless one of the
+  visitor's own accounts has access.
+- MCP authorization connects whichever account is active at the time, so switch first
+  if you want to connect an agent as a different account.
+
+`proxy` and `dev` modes have no switcher: there, the identity-aware proxy or the config
+decides who you are.
 
 ### Agents
 
@@ -431,7 +487,7 @@ other canvas can frame it. The dashboard itself runs under a strict CSP (`script
 ## What gets audited
 
 The audit log records `auth_ok` and `auth_denied` (with the reason) on every gateway
-decision, `session_create` and `session_revoke` in `oidc` mode, and every OIDC callback
+decision, `session_create`, `session_switch` and `session_revoke` in `oidc` mode, and every OIDC callback
 rejection. Canvas actions are attributed to the acting user or agent: `deploy`,
 `rollback`, `publish`, `canvas_unpublish`, `share_change`, `password_change`,
 `password_attempt`, `slug_regen`, `key_regen`, `canvas_transfer`, among others. Admin
