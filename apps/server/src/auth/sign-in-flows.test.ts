@@ -209,7 +209,7 @@ class Browser {
     let method = opts.method ?? "GET";
     let body = opts.body;
     for (let hop = 0; hop < 15; hop++) {
-      if (current.startsWith(IDP))
+      if (new URL(current).origin === IDP)
         return { res: new Response(null), url: current, body: "", idp: current };
       const res = await this.request(current, {
         method,

@@ -54,7 +54,11 @@ describe("socialPreview", () => {
     const res = await app(oidc).request("/", {
       headers: { host: "showcase.canvas-drop.com", ...HTML },
     });
-    const script = /<script>([^<]+)<\/script>/.exec(await res.text())?.[1] as string;
+    // The redirect script, cut out of the page this server just rendered.
+    const html = await res.text();
+    const start = html.indexOf("location.replace(");
+    const script = html.slice(start, html.indexOf(";", start) + 1);
+    expect(script).toContain("location.hash");
     const run = (hash: string) => {
       let target = "";
       new Function("location", script)({ hash, replace: (u: string) => (target = u) });
