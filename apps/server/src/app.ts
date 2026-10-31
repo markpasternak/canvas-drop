@@ -72,6 +72,7 @@ import {
   rateLimit,
   takeToken,
 } from "./http/rate-limit.js";
+import { restrictedResourcePolicy } from "./http/resource-policy.js";
 import { securityHeadersMiddleware } from "./http/security-headers.js";
 import { smallFormLimit } from "./http/small-form.js";
 import { socialPreview } from "./http/social-preview.js";
@@ -836,6 +837,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     c.get("role") === "canvas" && c.req.method === "POST" ? canvasFormLimit(c, next) : next(),
   );
 
+  // Wraps the whole canvas chain, so it sees the canvas `canvasAccess` resolves.
+  app.use("*", onlyCanvas(restrictedResourcePolicy(deps.config)));
   app.use(
     "*",
     onlyCanvas(

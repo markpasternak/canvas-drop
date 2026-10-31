@@ -67,6 +67,7 @@ export interface ServePreviewDeps {
 }
 
 export function servePreview(deps: ServePreviewDeps) {
+  const dashboardOrigin = new URL(deps.config.baseUrl).origin;
   return createMiddleware<AppEnv>(async (c, next) => {
     const canvas = c.get("canvas") as Canvas | undefined;
     if (!canvas) return next();
@@ -85,12 +86,24 @@ export function servePreview(deps: ServePreviewDeps) {
     const bytes = await deps.storage.get(screenshotKey(canvas.id, rendition));
     if (!bytes) return c.notFound(); // not captured yet → placeholder on the client
 
+    const headers: Record<string, string> = {
+      "Content-Type": "image/webp",
+      "Cache-Control": cacheControl(rendition, canvas),
+    };
+    // The dashboard loads covers from each canvas host with `crossorigin=use-credentials`
+    // so a restricted canvas can refuse plain cross-origin embeds (resource-policy.ts)
+    // and still show its cover there. Only the dashboard's own origin is allowed: another
+    // canvas cannot forge `Origin`.
+    if (deps.config.urlMode === "subdomain") {
+      headers.Vary = "Origin";
+      if (c.req.header("origin") === dashboardOrigin) {
+        headers["Access-Control-Allow-Origin"] = dashboardOrigin;
+        headers["Access-Control-Allow-Credentials"] = "true";
+      }
+    }
     // Copy into a fresh Uint8Array so the body is a plain ArrayBuffer view (mirrors
     // serveCanvas).
-    return new Response(new Uint8Array(bytes), {
-      status: 200,
-      headers: { "Content-Type": "image/webp", "Cache-Control": cacheControl(rendition, canvas) },
-    });
+    return new Response(new Uint8Array(bytes), { status: 200, headers });
   });
 }
 
