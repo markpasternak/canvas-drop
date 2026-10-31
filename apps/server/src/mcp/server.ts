@@ -1562,6 +1562,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       ) {
         await deletePreviewRenditions(deps.storage, cv.id);
       }
+      // Back to `auto`: capture the live version now (parity with the HTTP path).
+      if (cv.previewMode !== "auto" && updated.previewMode === "auto") {
+        await deps.engine.recapture(updated);
+      }
       const discoverabilityChanged =
         patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
       // The link-preview opt-in decides what a gated canvas reveals to link unfurlers.
@@ -1606,7 +1610,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       description:
         "Set or clear a canvas's custom preview cover (same as the dashboard preview upload). With " +
         "`image` (base64), it becomes the cover and `previewMode` is pinned to 'custom' so a publish " +
-        "never overwrites it. Omit `image` to clear it — reverts to 'auto' (next publish re-captures). " +
+        "never overwrites it. Omit `image` to clear it — reverts to 'auto' and captures a fresh screenshot of the live version. " +
         "Use update_canvas previewMode for the auto/off toggle.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
@@ -1658,6 +1662,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         if (cv.previewMode !== "custom") return ok(await viewWithIdentity(cv, gate.role));
         await deletePreviewRenditions(deps.storage, cv.id);
         const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
+        // Capture a fresh screenshot now instead of at the next publish.
+        await deps.engine.recapture(updated);
         deps.audit.recordAudit({
           action: "settings_update",
           actorId: caller.userId,

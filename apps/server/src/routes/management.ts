@@ -910,6 +910,11 @@ export function managementRoutes(deps: ManagementDeps) {
     ) {
       await deletePreviewRenditions(deps.storage, cv.id);
     }
+    // Back to `auto` (from custom or off): capture the live version now rather than
+    // waiting for the next publish, so the cover isn't left empty or stale.
+    if (cv.previewMode !== "auto" && updated.previewMode === "auto") {
+      await deps.engine.recapture(updated);
+    }
     const discoverabilityChanged =
       patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
     // The link-preview opt-in decides what a gated canvas reveals to link unfurlers.
@@ -1302,6 +1307,9 @@ export function managementRoutes(deps: ManagementDeps) {
     if (cv.previewMode !== "custom") return c.json(await canvasView(cv, roleOf(c)));
     await deletePreviewRenditions(deps.storage, cv.id);
     const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
+    // Capture a fresh screenshot of the live version now; otherwise the canvas has no
+    // cover at all until its next publish.
+    await deps.engine.recapture(updated);
     deps.audit.recordAudit({
       action: "settings_update",
       actorId: c.get("user").id,

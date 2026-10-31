@@ -78,12 +78,30 @@ function buildApp(
     "doneCanvasIds"
   > = screenshotsRepository(client),
   cfg: Config = config,
+  // Spy for scheduled screenshot captures (canvasId, versionId); omitted → none wired.
+  onCapture?: (canvasId: string, versionId: string) => void,
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const drafts = draftsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
-  const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
+  const engine = deployEngine({
+    config: cfg,
+    canvases,
+    versions,
+    drafts,
+    storage,
+    log: silent,
+    ...(onCapture
+      ? {
+          screenshots: {
+            enqueue: async (cv: { id: string; previewMode: string }, v: string) => {
+              if (cv.previewMode === "auto") onCapture(cv.id, v);
+            },
+          },
+        }
+      : {}),
+  });
   const clone = cloneService({ canvases, versions, drafts, storage });
   const versionHistory = versionHistoryService({ versions, drafts, storage, engine, audit });
   const connections = connectionService({
@@ -507,6 +525,68 @@ describe("managementRoutes", () => {
     for (const rendition of SCREENSHOT_RENDITIONS) {
       expect(await storage.exists(screenshotKey(created.id, rendition))).toBe(false);
     }
+  });
+
+  it("returning to auto (remove custom cover, or previewMode off→auto) captures the live version now", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const storage = memStorage();
+    const captures: Array<[string, string]> = [];
+    const app = () =>
+      buildApp(
+        client,
+        { id: owner.id, isAdmin: false },
+        storage,
+        undefined,
+        true,
+        false,
+        undefined,
+        undefined,
+        (id, v) => void captures.push([id, v]),
+      );
+    const same = { "Sec-Fetch-Site": "same-origin" };
+    const created = await jsonOf<{ id: string }>(
+      await app().request("/api/canvases", {
+        method: "POST",
+        headers: { ...same, "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const deployed = await app().request(`/api/canvases/${created.id}/deploy/paste`, {
+      method: "POST",
+      headers: { ...same, "content-type": "application/json" },
+      body: JSON.stringify({ html: "<h1>hi</h1>" }),
+    });
+    expect(deployed.status).toBe(200);
+    const live = (await canvasesRepository(client).findById(created.id))?.currentVersionId;
+    expect(captures).toEqual([[created.id, live]]); // the publish capture
+
+    // Custom cover, then remove it → a fresh capture of the live version is scheduled.
+    await app().request(`/api/canvases/${created.id}/preview`, {
+      method: "PUT",
+      headers: { ...same, "content-type": "image/png" },
+      body: await pngBytes(),
+    });
+    expect(captures).toHaveLength(1); // custom never captures
+    await app().request(`/api/canvases/${created.id}/preview`, { method: "DELETE", headers: same });
+    expect(captures).toEqual([
+      [created.id, live],
+      [created.id, live],
+    ]);
+
+    // off → auto through settings also captures; auto → auto does not.
+    const patch = (previewMode: string) =>
+      app().request(`/api/canvases/${created.id}/settings`, {
+        method: "PATCH",
+        headers: { ...same, "content-type": "application/json" },
+        body: JSON.stringify({ previewMode }),
+      });
+    await patch("off");
+    expect(captures).toHaveLength(2);
+    await patch("auto");
+    expect(captures).toHaveLength(3);
+    await patch("auto");
+    expect(captures).toHaveLength(3);
   });
 
   it("DELETE /:id/preview is a no-op on a non-custom canvas — never deletes an auto screenshot", async () => {
