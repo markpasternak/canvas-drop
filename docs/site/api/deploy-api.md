@@ -220,7 +220,10 @@ is not a JSON object is `400 INVALID_REQUEST`, and a body over 16 KB is
 and still an owner or editor of the canvas (else `404 UPLOAD_HANDLE_INVALID`). The
 handle is **single-use** and lives 15 minutes from begin (then `400 UPLOAD_EXPIRED`
 on stage or finalize). A finalize before every blob is staged returns
-`400 UPLOAD_MISSING_BLOB`; stage the rest and call finalize again. The handle is
+`400 UPLOAD_MISSING_BLOB`; stage the rest and call finalize again. Finalize also checks
+every referenced blob's stored size against the size declared in the manifest, including
+blobs that were already present and never staged; a mismatch is `400 BLOB_HASH_MISMATCH`.
+The handle is
 consumed when finalize commits a version, after which any further stage or finalize
 returns `409 UPLOAD_ALREADY_FINALIZED` and a fresh begin is required — with one
 exception: a repeated finalize of a consumed session whose `releaseId` is the live
@@ -564,7 +567,7 @@ The staged-upload routes map the same shape to richer statuses:
 | `UPLOAD_HANDLE_INVALID` | `404` | Unknown handle, a different canvas, a different actor, or an actor no longer active or no longer owner/editor at finalize |
 | `UPLOAD_EXPIRED` | `400` | More than 15 minutes since begin |
 | `UPLOAD_UNEXPECTED_BLOB` | `400` | The staged hash is not in the begin manifest |
-| `BLOB_HASH_MISMATCH` | `400` | The bytes do not hash to `{hash}`, or their size differs from the declared size |
+| `BLOB_HASH_MISMATCH` | `400` | The bytes do not hash to `{hash}`, or their size (staged or already stored) differs from the declared size |
 | `UPLOAD_MISSING_BLOB` | `400` | Finalize before every manifest hash is staged; stage the rest and retry |
 | `UPLOAD_IN_PROGRESS` | `409` | Another finalize holds the lease; retry shortly |
 | `UPLOAD_ALREADY_FINALIZED` | `409` | The handle was consumed; begin again |

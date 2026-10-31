@@ -96,7 +96,8 @@ Every canvas gets a slug and a URL. The default slug is random
 1 to 63 characters, no leading or trailing hyphen, with a reserved-word list
 (`api`, `admin`, `docs`, `mcp`, and similar). Change it later under
 **Settings → URL & routing → Change slug**; leave the field empty for a fresh
-random one. The old URL stops working immediately.
+random one. The old URL stops working immediately, and the old slug stays reserved for
+your canvases for 30 days.
 
 | URL mode | Canvas URL | Locally |
 |----------|------------|---------|
