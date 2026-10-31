@@ -280,19 +280,20 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
   it("refuses a switch or sign-out from a canvas page's own origin (subdomain mode)", async () => {
     client = await makeTestDb(dialect);
     const { app, owner, both } = await setup(client);
-    // `/auth` answers on canvas hosts, where the canvas's own fetch is same-origin.
+    // A canvas's own fetch is same-origin on its host; platform routes, `/auth`
+    // included, are refused there before any handler runs (canvas-host guard).
     const switched = await app.request("/auth/switch", {
       method: "POST",
       headers: { host: CANVAS_HOST, cookie: both, "sec-fetch-site": "same-origin" },
       body: switchForm(owner.id),
     });
-    expect(switched.status).toBe(403);
+    expect(switched.status).toBe(404);
     expect(setCookieValue(switched, SESSION_COOKIE)).toBeUndefined();
     const signedOut = await app.request("/auth/logout/current", {
       method: "POST",
       headers: { host: CANVAS_HOST, cookie: both, "sec-fetch-site": "same-origin" },
     });
-    expect(signedOut.status).toBe(403);
+    expect(signedOut.status).toBe(404);
     expect(setCookieValue(signedOut, SESSION_COOKIE)).toBeUndefined();
     // The chooser itself only renders on the instance host.
     const chooser = await app.request(`/auth/accounts?account=${owner.id}`, {
@@ -394,7 +395,8 @@ describe.each(DIALECTS)("multi-account sign-in [%s]", (dialect) => {
         headers: { host, cookie: both, "sec-fetch-site": site },
         body: switchForm(owner.id),
       });
-      expect(res.status).toBe(403);
+      // Canvas hosts are refused by the canvas-host guard (404) before the route's 403.
+      expect(res.status).toBe(host === CANVAS_HOST ? 404 : 403);
     }
     const list = await app.request("/api/me/accounts", { headers: { host: APEX, cookie: both } });
     expect(((await list.json()) as { accounts: unknown[] }).accounts).toHaveLength(1);

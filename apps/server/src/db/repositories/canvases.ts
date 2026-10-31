@@ -1257,11 +1257,12 @@ export function canvasesRepository(client: DbClient) {
      * The composite ownership write (editor-roles plan, KTD7) — transfer and admin
      * reassign share it. Runs in the transaction helper (a real transaction on Postgres;
      * a passthrough on SQLite, where the WRITE ORDER is the safety net):
-     *  1. previous owner's direct editor row (upsert → editor) — first, so a failure
-     *     after the swap still leaves both parties with access;
-     *  2. `owner_id` swap in ONE conditional update (`owner_id = fromUserId` must still
+     *  1. `owner_id` swap in ONE conditional update (`owner_id = fromUserId` must still
      *     hold → two concurrent transfers: exactly one succeeds; the loser reads
-     *     `swapped: false`);
+     *     `swapped: false`) — first, so a lost swap writes nothing at all (a stale
+     *     request must never re-grant a former owner who was since removed);
+     *  2. previous owner's direct editor row (upsert → editor), only after a won swap;
+     *     a failure here on SQLite fails closed (the former owner simply loses access);
      *  3. delete the new owner's own people-list row (one row each, AE16);
      *  4. revert a `public_link` rung when asked (the new owner lacks the entitlement).
      * The audit event is the caller's, written after this returns.
@@ -1270,6 +1271,16 @@ export function canvasesRepository(client: DbClient) {
       const now = Date.now();
       try {
         return await inTransaction(async (q) => {
+          const swapped = (await q
+            .update(t)
+            .set({
+              ownerId: input.toUserId,
+              updatedAt: nextUpdatedAt(now),
+              ...(input.newApiKeyHash ? { apiKeyHash: input.newApiKeyHash } : {}),
+            })
+            .where(and(eq(t.id, input.canvasId), eq(t.ownerId, input.fromUserId)))
+            .returning({ id: t.id })) as Array<{ id: string }>;
+          if (swapped.length === 0) throw new TransferConflict();
           if (input.previousOwnerEditor) {
             await q
               .insert(allowlistT)
@@ -1287,16 +1298,6 @@ export function canvasesRepository(client: DbClient) {
                 set: { role: "editor" },
               });
           }
-          const swapped = (await q
-            .update(t)
-            .set({
-              ownerId: input.toUserId,
-              updatedAt: nextUpdatedAt(now),
-              ...(input.newApiKeyHash ? { apiKeyHash: input.newApiKeyHash } : {}),
-            })
-            .where(and(eq(t.id, input.canvasId), eq(t.ownerId, input.fromUserId)))
-            .returning({ id: t.id })) as Array<{ id: string }>;
-          if (swapped.length === 0) throw new TransferConflict();
           await q
             .delete(allowlistT)
             .where(

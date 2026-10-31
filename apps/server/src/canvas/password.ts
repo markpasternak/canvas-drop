@@ -21,11 +21,47 @@ export function hashPasswordMutation(
   return hashPassword(password);
 }
 
+/**
+ * Process-wide bound on concurrent verifies. Each one costs ~100 ms of CPU and 64 MiB,
+ * and the gate accepts them from anonymous visitors, so the per-requester throttle
+ * alone doesn't bound the total. A short queue absorbs bursts; past it, callers are
+ * told to retry rather than piling up work.
+ */
+export const MAX_CONCURRENT_VERIFIES = 4;
+export const MAX_QUEUED_VERIFIES = 32;
+
+/** Thrown by {@link verifyPassword} when the verify queue is full. */
+export class PasswordCheckBusy extends Error {
+  constructor() {
+    super("too many password checks in progress");
+  }
+}
+
+let activeVerifies = 0;
+const waitingVerifies: Array<() => void> = [];
+
+async function acquireVerifySlot(): Promise<void> {
+  if (activeVerifies < MAX_CONCURRENT_VERIFIES) {
+    activeVerifies += 1;
+    return;
+  }
+  if (waitingVerifies.length >= MAX_QUEUED_VERIFIES) throw new PasswordCheckBusy();
+  // The releasing caller hands its slot over directly (activeVerifies is unchanged).
+  await new Promise<void>((resolve) => waitingVerifies.push(resolve));
+}
+
+function releaseVerifySlot(): void {
+  const next = waitingVerifies.shift();
+  if (next) next();
+  else activeVerifies -= 1;
+}
+
 export async function verifyPassword(
   storedHash: string,
   password: string,
   log?: Logger,
 ): Promise<boolean> {
+  await acquireVerifySlot();
   try {
     return await verify(storedHash, password);
   } catch (err) {
@@ -35,5 +71,7 @@ export async function verifyPassword(
     // wrong-password attempt, masking infra problems (review server-canvas-17).
     log?.warn({ err }, "argon2 password verify failed — treating as no match");
     return false;
+  } finally {
+    releaseVerifySlot();
   }
 }

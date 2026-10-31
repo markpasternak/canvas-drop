@@ -36,6 +36,8 @@ const PLATFORM_PREFIXES = [
   "/.well-known/oauth-protected-resource",
 ];
 
+const REDIRECTED_PAGES = new Set(["/auth/login", "/auth/accounts"]);
+
 function isPlatformPath(path: string): boolean {
   return PLATFORM_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 }
@@ -47,11 +49,13 @@ export function canvasHostGuard(config: Config) {
       config,
     );
     if (role !== "canvas" || !isPlatformPath(c.req.path)) return next();
-    // The gateway sends a signed-out canvas visitor to a relative `/auth/login`;
-    // carry that one navigation to the base host instead of serving it here.
-    if (c.req.path === "/auth/login" && (c.req.method === "GET" || c.req.method === "HEAD")) {
+    // Two sign-in pages are reached from canvas hosts by navigation: the gateway sends
+    // a signed-out visitor to a relative `/auth/login`, and the account chooser has
+    // always bounced to the base host. Carry those GETs there instead of serving them.
+    const isNav = c.req.method === "GET" || c.req.method === "HEAD";
+    if (isNav && REDIRECTED_PAGES.has(c.req.path)) {
       const search = new URL(c.req.url).search;
-      return c.redirect(`${config.baseUrl.replace(/\/$/, "")}/auth/login${search}`, 302);
+      return c.redirect(`${config.baseUrl.replace(/\/$/, "")}${c.req.path}${search}`, 302);
     }
     return c.json({ error: "not_found" }, 404);
   });

@@ -7,6 +7,7 @@ import {
   captureCanvas,
   encodeRenditions,
   RENDITION_SIZES,
+  SETTLE_DEADLINE_MS,
 } from "./capture.js";
 import { CAPTURE_TOKEN_HEADER } from "./capture-token.js";
 
@@ -112,6 +113,28 @@ describe("captureCanvas (U4)", () => {
     expect(Object.keys(out).sort()).toEqual(["card", "og", "thumb"]);
     expect((await sharp(out.og).metadata()).format).toBe("webp");
     expect(f.closed()).toBe(true);
+  });
+
+  it("a settle step that never finishes cannot hold the capture past its deadline", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const f = fakePage({
+        evaluate: () => new Promise(() => {}), // the page never lets the settle resolve
+      });
+      const done = captureCanvas({
+        context: ctxFor(f.page),
+        url: "https://cv.example.test/",
+        token: "tok",
+        timeoutMs: 5000,
+      });
+      await vi.advanceTimersByTimeAsync(SETTLE_DEADLINE_MS + 10);
+      vi.useRealTimers();
+      const out = await done;
+      expect(Object.keys(out).sort()).toEqual(["card", "og", "thumb"]);
+      expect(f.closed()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("neuters the network: allows same-origin GETs, aborts everything else (R7)", async () => {

@@ -12,6 +12,7 @@ import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.
 import type { OauthRepository } from "../db/repositories/oauth.js";
 import { LIMITS } from "../deploy/errors.js";
 import { HOUR_MS, type RateLimitStore, takeToken } from "../http/rate-limit.js";
+import { smallFormLimit } from "../http/small-form.js";
 import type { AppEnv } from "../http/types.js";
 import { type McpAuditSink, McpOAuthProvider } from "./provider.js";
 import { buildMcpServer, type McpToolDeps } from "./server.js";
@@ -83,7 +84,7 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   }
 
   // The consent form's POST — ahead of the AS router (its `/authorize` POST takes JSON).
-  app.post("/authorize/consent", (c) => provider.handleConsent(c));
+  app.post("/authorize/consent", smallFormLimit(), (c) => provider.handleConsent(c));
 
   // OAuth AS endpoints + authorization-server / protected-resource metadata. Must
   // mount at root so the `.well-known/*` discovery documents resolve (RFC 8414/9728).
