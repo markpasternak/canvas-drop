@@ -11,7 +11,8 @@ import { VersionHistoryError } from "../canvas/version-history.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { OauthRepository } from "../db/repositories/oauth.js";
 import { LIMITS } from "../deploy/errors.js";
-import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
+import { HOUR_MS, type RateLimitStore, takeToken } from "../http/rate-limit.js";
+import { smallFormLimit } from "../http/small-form.js";
 import type { AppEnv } from "../http/types.js";
 import { type McpAuditSink, McpOAuthProvider } from "./provider.js";
 import { buildMcpServer, type McpToolDeps } from "./server.js";
@@ -58,6 +59,33 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
     audit: deps.oauthAudit,
   });
 
+  // The unauthenticated OAuth endpoints, throttled per client IP on the app's shared
+  // store. `@hono/mcp`'s own limiter is disabled below: it builds a fresh in-memory
+  // store per request (so it never limits) and keys every caller alike.
+  const oauthLimits: Array<[path: string, limit: number, windowMs: number]> = [
+    ["/register", 30, HOUR_MS],
+    ["/authorize", 120, 15 * 60_000],
+    ["/authorize/consent", 60, 15 * 60_000],
+    ["/token", 300, 15 * 60_000],
+    ["/revoke", 120, 15 * 60_000],
+  ];
+  for (const [path, limit, windowMs] of oauthLimits) {
+    app.use(path, async (c, next) => {
+      if (deps.rateLimitStore && deps.config.rateLimit.enabled) {
+        const ip = c.get("clientIp") ?? "unknown";
+        const r = takeToken(deps.rateLimitStore, `oauth:${path}:${ip}`, limit, windowMs);
+        if (!r.allowed) {
+          c.header("Retry-After", String(r.retryAfterSec));
+          return c.json({ error: "rate_limited" }, 429);
+        }
+      }
+      await next();
+    });
+  }
+
+  // The consent form's POST — ahead of the AS router (its `/authorize` POST takes JSON).
+  app.post("/authorize/consent", smallFormLimit(), (c) => provider.handleConsent(c));
+
   // OAuth AS endpoints + authorization-server / protected-resource metadata. Must
   // mount at root so the `.well-known/*` discovery documents resolve (RFC 8414/9728).
   app.route(
@@ -67,6 +95,10 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
       issuerUrl: new URL(deps.config.baseUrl),
       scopesSupported: ["canvas-drop"],
       resourceName: "canvas-drop",
+      authorizationOptions: { rateLimit: false },
+      tokenOptions: { rateLimit: false },
+      clientRegistrationOptions: { rateLimit: false },
+      revocationOptions: { rateLimit: false },
     }),
   );
 

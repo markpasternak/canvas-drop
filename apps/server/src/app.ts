@@ -61,6 +61,7 @@ import { noopMailer } from "./email/noop.js";
 import { checkHealth } from "./health.js";
 import { brandAssetRoutes } from "./http/brand-assets.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
+import { canvasHostGuard } from "./http/canvas-host-guard.js";
 import { resolveClientIp } from "./http/client-ip.js";
 import { errorPageMiddleware, errorResponse } from "./http/error-pages.js";
 import { landingGate, landingResponse } from "./http/landing-page.js";
@@ -72,6 +73,7 @@ import {
   takeToken,
 } from "./http/rate-limit.js";
 import { securityHeadersMiddleware } from "./http/security-headers.js";
+import { smallFormLimit } from "./http/small-form.js";
 import { socialPreview } from "./http/social-preview.js";
 import type { AppEnv } from "./http/types.js";
 import { inviteService } from "./invites/service.js";
@@ -333,6 +335,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     await next();
   });
 
+  // Platform routes never answer on a canvas host — ahead of every pre-gateway router.
+  app.use("*", canvasHostGuard(deps.config));
+
   // Public health check.
   app.get("/healthz", async (c) => {
     const health = await checkHealth(deps.db);
@@ -394,17 +399,27 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // endpoint (oidc-only; a 404 no-op in proxy/dev mode — proxy mode delegates
   // login to the IAP). Set CANVAS_DROP_TRUSTED_PROXY_IPS to your proxy's egress
   // for per-user bucketing; without it the peer (the proxy) is the bucket.
-  app.use("/auth/login", async (c, next) => {
-    if (deps.config.rateLimit.enabled) {
-      const ip = c.get("clientIp") ?? "unknown";
-      const r = takeToken(rlStore, `login:${ip}`, deps.config.rateLimit.loginPerMin);
-      if (!r.allowed) {
-        c.header("Retry-After", String(r.retryAfterSec));
-        return c.json({ error: "rate_limited" }, 429);
+  // Pre-sign-in form posts are small; cap them before any handler buffers the body.
+  app.post("/auth/*", smallFormLimit());
+
+  // The callback gets its own bucket at the same rate: every callback makes an
+  // authenticated token request to the IdP, and a real sign-in needs only one.
+  for (const [path, bucket] of [
+    ["/auth/login", "login"],
+    ["/auth/callback", "callback"],
+  ] as const) {
+    app.use(path, async (c, next) => {
+      if (deps.config.rateLimit.enabled) {
+        const ip = c.get("clientIp") ?? "unknown";
+        const r = takeToken(rlStore, `${bucket}:${ip}`, deps.config.rateLimit.loginPerMin);
+        if (!r.allowed) {
+          c.header("Retry-After", String(r.retryAfterSec));
+          return c.json({ error: "rate_limited" }, 429);
+        }
       }
-    }
-    await next();
-  });
+      await next();
+    });
+  }
 
   // CORS preflight for the canvas runtime API (§9.4) — answered BEFORE the gateway,
   // since preflights carry no credentials and must not 401. In subdomain mode it echoes
@@ -813,6 +828,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // Canvas content chain (only for the canvas role): authorize → password gate → serve.
   const onlyCanvas = (mw: ReturnType<typeof createMiddleware<AppEnv>>) =>
     createMiddleware<AppEnv>((c, next) => (c.get("role") === "canvas" ? mw(c, next) : next()));
+
+  // Canvases are static: the only POST on the canvas surface is the password gate's
+  // form, so cap the body before the gate reads it.
+  const canvasFormLimit = smallFormLimit();
+  app.use("*", (c, next) =>
+    c.get("role") === "canvas" && c.req.method === "POST" ? canvasFormLimit(c, next) : next(),
+  );
 
   app.use(
     "*",

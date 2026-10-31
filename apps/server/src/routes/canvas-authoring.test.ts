@@ -128,6 +128,7 @@ function buildApi(
     canvases?: CanvasesRepository;
     teams?: TeamsRepository;
     authoringSettings?: AuthoringSettings;
+    hubCalls?: string[];
   } = {},
 ) {
   const { audit, events } = fakeAudit();
@@ -163,6 +164,21 @@ function buildApi(
       authoringUsage: authoringUsageRepository(client),
       teams: opts.teams,
       authoringSettings: opts.authoringSettings,
+      ...(opts.hubCalls
+        ? {
+            realtime: {
+              hub: {
+                revalidateCanvas: async (id: string) =>
+                  void opts.hubCalls?.push(`revalidate:${id}`),
+                dropGatedNonOwners: async (id: string) =>
+                  void opts.hubCalls?.push(`dropGated:${id}`),
+                // biome-ignore lint/suspicious/noExplicitAny: only the revalidation calls are exercised
+              } as any,
+              // biome-ignore lint/suspicious/noExplicitAny: the WS route is not exercised here
+              upgradeWebSocket: (() => async (c: any) => c.text("no ws", 426)) as any,
+            },
+          }
+        : {}),
     }),
   );
   return { app, events, canvases };
@@ -714,6 +730,25 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     const res = await putUpdate(revokedApp, pub.id, formData({ password: null }));
     expect(res.status).toBe(403);
     expect(((await res.json()) as { code: string }).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
+  it("update setting a password drops gated live sockets, like the dashboard path (D-RT-6)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const hubCalls: string[] = [];
+    const { app } = buildApi(client, asMember(owner.id), ON, { hubCalls });
+    const pub = (await (
+      await publish(app, publishBody({ title: "S", access: "whole_org" }))
+    ).json()) as AuthoredCanvas;
+    hubCalls.length = 0;
+    const res = await putUpdate(app, pub.id, formData({ password: "hunter2" }));
+    expect(res.status).toBe(200);
+    expect(hubCalls).toEqual([`revalidate:${pub.id}`, `dropGated:${pub.id}`]);
+
+    hubCalls.length = 0;
+    const revoked = await app.request(`/v1/c/app/authoring/${pub.id}`, { method: "DELETE" });
+    expect(revoked.status).toBe(204);
+    expect(hubCalls).toEqual([`revalidate:${pub.id}`]);
   });
 
   it("update keeps an existing password when no replacement is supplied", async () => {

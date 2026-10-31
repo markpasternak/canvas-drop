@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { createMiddleware } from "hono/factory";
 import { assetPathFor } from "../canvas/asset-resolver.js";
+import { isAnonymouslyPublic } from "../canvas/authorization.js";
 import {
   SCREENSHOT_RENDITIONS,
   type ScreenshotRendition,
@@ -37,9 +38,18 @@ export const PREVIEW_ASSET_PATH = "__canvasdrop_preview";
 // access rung, not the rendition alone (review server-canvas-8): an authorized member
 // requesting ?rendition=og on a whole_org/private canvas would otherwise hand an
 // intermediary cache a `public` screenshot of non-public content. The URL is
-// version-cache-busted, so a public_link og is safe to shared-cache.
+// version-cache-busted, so a public_link og is safe to shared-cache — unless it is
+// password-gated or expired, which only some requesters may see (same rule as the
+// canvas assets' CDN scope).
 const cacheControl = (rendition: ScreenshotRendition, canvas: Canvas): string => {
-  const shareable = rendition === "og" && canvas.access === "public_link";
+  const shareable =
+    rendition === "og" &&
+    isAnonymouslyPublic(
+      canvas.access,
+      canvas.passwordHash !== null,
+      canvas.sharedExpiresAt,
+      Date.now(),
+    );
   return `${shareable ? "public" : "private"}, max-age=300, must-revalidate`;
 };
 

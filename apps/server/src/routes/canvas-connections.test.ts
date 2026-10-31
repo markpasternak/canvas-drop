@@ -402,6 +402,33 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
     expect(input?.protectedHeaders).toEqual([["user-agent", "controlled-stock-agent"]]);
   });
 
+  it("never forwards the ingress proxy's identity headers to the upstream", async () => {
+    const { app, fetch } = await fixture();
+    const response = await app.request("/v1/c/stocks/connections/market/quote", {
+      headers: {
+        accept: "application/json",
+        "x-request-id": "kept",
+        "cf-access-jwt-assertion": "visitor.jwt.value",
+        "x-forwarded-access-token": "visitor.access.token",
+        "x-forwarded-email": "visitor@example.com",
+        "x-auth-request-email": "visitor@example.com",
+        "x-auth-request-preferred-username": "visitor",
+      },
+    });
+    expect(response.status).toBe(200);
+    const names = (fetch.mock.calls[0]?.[0]?.callerHeaders ?? []).map(([n]) => n);
+    expect(names).toContain("x-request-id");
+    for (const leaked of [
+      "cf-access-jwt-assertion",
+      "x-forwarded-access-token",
+      "x-forwarded-email",
+      "x-auth-request-email",
+      "x-auth-request-preferred-username",
+    ]) {
+      expect(names, leaked).not.toContain(leaked);
+    }
+  });
+
   it("preserves repeated connection-looking segments in the upstream path", async () => {
     const { app, fetch } = await fixture();
     const response = await app.request(

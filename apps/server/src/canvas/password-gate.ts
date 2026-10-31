@@ -13,7 +13,7 @@ import {
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { principalAttributionId, requestPrincipal } from "./authorization.js";
-import { verifyPassword } from "./password.js";
+import { PasswordCheckBusy, verifyPassword } from "./password.js";
 
 const GATE_COOKIE = "__canvasdrop_gate";
 
@@ -107,9 +107,17 @@ export function passwordGate(deps: PasswordGateDeps) {
       }
       const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
       const password = typeof form.password === "string" ? form.password : "";
-      const ok = canvas.passwordHash
-        ? await verifyPassword(canvas.passwordHash, password, c.get("log"))
-        : false;
+      let ok = false;
+      try {
+        ok = canvas.passwordHash
+          ? await verifyPassword(canvas.passwordHash, password, c.get("log"))
+          : false;
+      } catch (err) {
+        if (!(err instanceof PasswordCheckBusy)) throw err;
+        // Too many checks in flight instance-wide: ask the visitor to retry shortly.
+        c.header("Retry-After", "2");
+        return c.html(gatePage(canvas.title, true), 503);
+      }
       deps.audit.recordAudit({
         action: "password_attempt",
         actorId: principalAttributionId(c),

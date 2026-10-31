@@ -78,12 +78,17 @@ export function canvasApiIsolation(config: Config) {
       const expected = slug ? expectedCanvasOrigin(config, slug) : null;
       const origin = c.req.header("origin");
       // A browser request carries Origin; it must match this canvas. No Origin =
-      // a non-browser/programmatic caller (no ambient cross-canvas authority).
+      // a non-browser/programmatic caller (no ambient cross-canvas authority) —
+      // unless fetch metadata says a page sent it: a same-origin GET omits Origin,
+      // and no canvas page is same-origin with the base-host API.
       if (origin) {
         if (!expected || origin !== expected) {
           return c.json({ code: "CROSS_CANVAS_FORBIDDEN" }, 403);
         }
         applyCors(c, origin);
+      } else {
+        const sfs = c.req.header("sec-fetch-site");
+        if (sfs && sfs !== "none") return c.json({ code: "CROSS_CANVAS_FORBIDDEN" }, 403);
       }
     } else {
       // Path mode: best-effort per §12.2 (reduced isolation, documented).

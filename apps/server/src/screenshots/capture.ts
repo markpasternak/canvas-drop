@@ -36,6 +36,24 @@ export const RENDITION_SIZES: Record<ScreenshotRendition, { width: number; heigh
 
 const WEBP_QUALITY = 80;
 
+/** Node-side ceiling on the in-page settle (its own ~3 s budget plus headroom). */
+export const SETTLE_DEADLINE_MS = 5_000;
+
+/** Wait for `p` (ignoring its outcome) or `ms`, whichever comes first. */
+async function withDeadline(p: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    p.then(
+      () => {},
+      () => {},
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
 // ── Minimal structural types (real Playwright Page/Context satisfy these) ──────
 export interface CaptureRoute {
   request(): { url(): string; method(): string };
@@ -183,7 +201,10 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
     // above-the-fold images to finish — so the hero isn't shot with a fallback font or
     // blank/half-loaded media. Any failure (no DOM in a unit test, a hung asset) is
     // swallowed by the outer .catch; the Promise.race caps the total wait.
-    await page.evaluate(settleForCapture).catch(() => {});
+    // That in-page budget runs on the page's own timers, which canvas code can replace,
+    // so a Node-side deadline bounds it too: past it we capture as-is (page.close in the
+    // finally block ends the still-pending evaluate).
+    await withDeadline(page.evaluate(settleForCapture), SETTLE_DEADLINE_MS);
     // A short paint settle after returning to the top.
     await page.waitForTimeout(150).catch(() => {});
     // `animations: "disabled"` fast-forwards finite animations to completion, so

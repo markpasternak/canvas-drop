@@ -330,6 +330,22 @@ describe("htmlDeclaresSocialTags", () => {
       htmlDeclaresSocialTags('<head><meta name="description" content="x"><title>t</title></head>'),
     ).toBe(false);
   });
+
+  it("keeps the old pattern's edge cases: <metadata> is not <meta>, attributes stop at '>', any case", () => {
+    expect(htmlDeclaresSocialTags('<metadata property="og:title">')).toBe(false);
+    expect(htmlDeclaresSocialTags('<metadata x><META Property="OG:title" content="x">')).toBe(true);
+    expect(htmlDeclaresSocialTags('<meta charset="utf-8"> property="og:title"')).toBe(false);
+    expect(htmlDeclaresSocialTags('<meta <meta name="twitter:card">')).toBe(true);
+    expect(htmlDeclaresSocialTags('<meta property="og:title"')).toBe(false); // never closed
+  });
+
+  it("stays fast on adversarial input (many unclosed <meta openers at the 64 KiB cap)", () => {
+    const html = "<meta ".repeat(Math.floor((64 * 1024) / 6));
+    const t0 = performance.now();
+    expect(htmlDeclaresSocialTags(html)).toBe(false);
+    expect(htmlDeclaresSocialTags(`${html}>`)).toBe(false);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
 });
 
 describe("socialPreview — defers to a canvas's own social tags", () => {

@@ -1,7 +1,7 @@
 import { accessModeOf, type Config, publicationStatusOf, shareStatus } from "@canvas-drop/shared";
 import type { AccessRung, Canvas, Json } from "@canvas-drop/shared/db";
 import { isRestrictedRung } from "@canvas-drop/shared/db";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { AdminSettingsService } from "../admin/settings-service.js";
@@ -26,6 +26,7 @@ import type { DeployEngine } from "../deploy/engine.js";
 import { fromZip } from "../deploy/ingest.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 
 /** The slice of the settings service the authoring route reads (DB-effective config). */
@@ -57,6 +58,8 @@ export interface CanvasAuthoringDeps {
   publicLinksEnabled?: () => Promise<boolean>;
   /** Canonical team-grant cleanup + management-only audience projection. */
   teams?: Pick<TeamsRepository, "setCanvasTeams" | "listCanvasTeamGrants" | "findByIds">;
+  /** Live sockets re-check after a share change (D-RT-6), same as the dashboard/MCP. */
+  hub?: Pick<RealtimeHub, "revalidateCanvas" | "dropGatedNonOwners">;
 }
 
 const accessEnum = z.enum(["private", "specific_people", "whole_org", "public_link", "password"]);
@@ -106,6 +109,18 @@ type ValidationError = { code: string; message?: string; status: 400 | 403 };
 export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const settings = deps.settings;
+
+  /** Revoke-drops-socket (D-RT-6): sockets that lost access close; a newly set password
+   *  also closes gated non-owners — matching the dashboard and MCP settings paths. */
+  const refreshLiveSockets = async (c: Context<AppEnv>, canvasId: string, passwordSet: boolean) => {
+    if (!deps.hub) return;
+    const warn = (err: unknown, step: string) =>
+      c.get("log")?.warn({ err, canvasId }, `hub: ${step} failed`);
+    await deps.hub.revalidateCanvas(canvasId).catch((err) => warn(err, "revalidateCanvas"));
+    if (passwordSet) {
+      await deps.hub.dropGatedNonOwners(canvasId).catch((err) => warn(err, "dropGatedNonOwners"));
+    }
+  };
 
   app.use(
     "*",
@@ -742,6 +757,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       targetId: cv.id,
       meta: { requestedAccess: requestedAccess ?? null, persistedAccess: finalCv.access },
     });
+    await refreshLiveSockets(c, cv.id, typeof settings.password === "string");
     return c.json(await toAuthoredCanvas(finalCv, managed.role));
   });
 
@@ -823,6 +839,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       actorId: viewer.id,
       targetId: cv.id,
     });
+    await refreshLiveSockets(c, cv.id, false);
     return c.body(null, 204);
   });
 

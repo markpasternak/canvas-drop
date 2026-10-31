@@ -208,6 +208,26 @@ export function oauthRepository(client: DbClient) {
         return row;
       },
 
+      /**
+       * True when the user still holds a live refresh token for this client — i.e.
+       * they approved it before and haven't revoked it. Remembered MCP consent.
+       */
+      async hasLiveGrant(userId: string, clientId: string): Promise<boolean> {
+        const rows = await db
+          .select({ id: tokensT.id })
+          .from(tokensT)
+          .where(
+            and(
+              eq(tokensT.userId, userId),
+              eq(tokensT.clientId, clientId),
+              eq(tokensT.kind, "refresh"),
+              isNull(tokensT.revokedAt),
+            ),
+          )
+          .limit(1);
+        return rows.length > 0;
+      },
+
       async revokeAllForUser(userId: string): Promise<void> {
         await db
           .update(tokensT)

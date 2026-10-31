@@ -23,7 +23,16 @@ import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.
 import type { OauthRepository } from "../db/repositories/oauth.js";
 import { generateSessionToken } from "../db/repositories/sessions.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import { isSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import {
+  CONSENT_HEADERS,
+  CONSENT_PARAM,
+  carriedParams,
+  renderConsentPage,
+  signConsent,
+  verifyConsent,
+} from "./consent.js";
 
 /** Authorization codes are single-use and short-lived (defense against replay). */
 const CODE_TTL_MS = 60_000;
@@ -116,6 +125,31 @@ export class McpOAuthProvider implements OAuthServerProvider {
       throw new AccessDeniedError("user is blocked");
     }
 
+    // Consent: the member must have approved this client — now, on the consent page,
+    // or before (a live grant they haven't revoked). Signing in alone never delegates.
+    const binding = {
+      userId: user.id,
+      clientId: client.client_id,
+      redirectUri: params.redirectUri,
+      codeChallenge: params.codeChallenge,
+    };
+    const approved =
+      verifyConsent(config.sessionSecret, binding, c.req.query(CONSENT_PARAM)) ||
+      (await oauth.tokens.hasLiveGrant(user.id, client.client_id));
+    if (!approved) {
+      audit?.record({ action: "mcp_authorize_consent_prompt", actorId: user.id, ip });
+      c.res = new Response(
+        renderConsentPage({
+          client,
+          redirectUri: params.redirectUri,
+          accountEmail: user.email,
+          params: carriedParams(new URL(c.req.url).searchParams),
+        }),
+        { status: 200, headers: CONSENT_HEADERS },
+      );
+      return;
+    }
+
     const code = generateSessionToken();
     await oauth.codes.create({
       code,
@@ -134,6 +168,54 @@ export class McpOAuthProvider implements OAuthServerProvider {
     redirect.searchParams.set("code", code);
     if (params.state) redirect.searchParams.set("state", params.state);
     c.res = c.redirect(redirect.href);
+  }
+
+  /**
+   * The consent form's POST (`/authorize/consent`). Same-origin only, identity from
+   * the server-side strategy. Allow → back to `/authorize` with a bound approval;
+   * Cancel → the client's registered redirect with `access_denied`.
+   */
+  async handleConsent(c: Context<AppEnv>): Promise<Response> {
+    const { config, strategy, users, allowedEmails, oauth, audit } = this.deps;
+    if (!isSameOrigin(c, config)) return c.json({ error: "forbidden" }, 403);
+    const form = await c.req.parseBody();
+    const fields = new URLSearchParams();
+    for (const [k, v] of Object.entries(form)) if (typeof v === "string") fields.set(k, v);
+    const params = carriedParams(fields);
+    const clientId = params.get("client_id");
+    const redirectUri = params.get("redirect_uri");
+    const codeChallenge = params.get("code_challenge");
+    const client = clientId ? await oauth.clients.get(clientId) : undefined;
+    if (!client || !redirectUri || !codeChallenge || !client.redirect_uris.includes(redirectUri)) {
+      return c.json({ error: "invalid_request" }, 400);
+    }
+
+    if (fields.get("decision") !== "allow") {
+      const back = new URL(redirectUri);
+      back.searchParams.set("error", "access_denied");
+      const state = params.get("state");
+      if (state) back.searchParams.set("state", state);
+      return c.redirect(back.href, 303);
+    }
+
+    const identity = await strategy.resolveIdentity(c);
+    if (!identity || !(await isEmailAllowed(identity.email, config, allowedEmails))) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    const user = await mapIdentityToUser(users, identity, config);
+    if (user.isBlocked) return c.json({ error: "forbidden" }, 403);
+
+    params.set(
+      CONSENT_PARAM,
+      signConsent(config.sessionSecret, {
+        userId: user.id,
+        clientId: client.client_id,
+        redirectUri,
+        codeChallenge,
+      }),
+    );
+    audit?.record({ action: "mcp_authorize_consent_ok", actorId: user.id, ip: c.get("clientIp") });
+    return c.redirect(`/authorize?${params.toString()}`, 303);
   }
 
   /** Return the stored PKCE challenge so the token handler can verify the verifier. */

@@ -23,6 +23,8 @@ describe("servePreview — handler logic (U7)", () => {
     storeKey?: string;
     previewMode?: string;
     access?: Canvas["access"];
+    passwordHash?: string | null;
+    sharedExpiresAt?: number | null;
   }) {
     const storage = memStorage();
     if (opts.storeKey) storage.put(opts.storeKey, webp, { contentType: "image/webp" });
@@ -34,6 +36,8 @@ describe("servePreview — handler logic (U7)", () => {
         status: "active",
         access: opts.access ?? "public_link",
         previewMode: opts.previewMode ?? "auto",
+        passwordHash: opts.passwordHash ?? null,
+        sharedExpiresAt: opts.sharedExpiresAt ?? null,
       } as Canvas);
       await next();
     });
@@ -109,6 +113,21 @@ describe("servePreview — handler logic (U7)", () => {
     }).request(`${PREVIEW_URL}?rendition=og`);
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toContain("public");
+  });
+
+  it("og rendition is PRIVATE-cached for a password-protected or expired public link", async () => {
+    for (const gate of [{ passwordHash: "argon2-hash" }, { sharedExpiresAt: Date.now() - 1000 }]) {
+      const res = await app({
+        enabled: true,
+        access: "public_link",
+        storeKey: screenshotKey("cv1", "og"),
+        ...gate,
+      }).request(`${PREVIEW_URL}?rendition=og`);
+      expect(res.status).toBe(200);
+      const cc = res.headers.get("Cache-Control") ?? "";
+      expect(cc, JSON.stringify(gate)).toContain("private");
+      expect(cc).not.toContain("public");
+    }
   });
 
   it("og rendition is PRIVATE-cached for a whole_org canvas (no public CDN leak; server-canvas-8)", async () => {

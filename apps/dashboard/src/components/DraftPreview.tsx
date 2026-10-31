@@ -27,8 +27,9 @@ export interface DraftPreviewProps {
    * so ES modules are CORS-blocked and the SDK's signed-in calls can't authenticate.
    * Rather than hard-gate the preview off, we start on a notice that explains the
    * caveat and offers an opt-in **Run preview** that loads the draft into the SAME
-   * sandbox — classic inline scripts still run there; only ES-module / signed-in-SDK
-   * features won't (those need the top-level "Open full preview" tab). See {@link onHide}.
+   * sandbox — classic inline scripts still run there; ES-module / signed-in-SDK
+   * features don't. The new-tab preview is sandboxed the same way by the server's
+   * CSP, so those features only run once the draft is published. See {@link onHide}.
    */
   usesScripts?: boolean;
 }
@@ -42,8 +43,8 @@ const iconBtn = "border-border bg-surface-raised text-muted hover:bg-surface-hov
  * `allow-same-origin` is intentionally absent so the draft runs in an opaque origin
  * and can't touch the dashboard session. That isolation means JS-driven canvases
  * can't run in the frame (ES modules are CORS-blocked from the null origin; signed-in
- * SDK calls can't send the session cookie), so for those we show a notice pointing at
- * the full top-level preview instead — see {@link usesScripts}.
+ * SDK calls can't send the session cookie), so for those we show a notice first — see
+ * {@link usesScripts}.
  */
 export function DraftPreview({
   canvasId,
@@ -55,7 +56,8 @@ export function DraftPreview({
   usesScripts = false,
 }: DraftPreviewProps) {
   const src = `/api/canvases/${canvasId}/preview/?r=${refreshKey}`;
-  // The full, live preview: top-level (not sandboxed), so scripts + signed-in calls run.
+  // The full-size preview in a new tab. The server sandboxes it (opaque origin), so
+  // like the frame it runs classic scripts but never with the dashboard session.
   const fullSrc = `/api/canvases/${canvasId}/preview/`;
 
   // For a scripted draft we start on the notice and let the owner opt into running it
@@ -190,8 +192,8 @@ export function DraftPreview({
       <div className="space-y-1.5">
         <p className="text-sm font-medium text-fg">This canvas runs JavaScript</p>
         <p className="mx-auto max-w-[22rem] text-xs leading-relaxed text-subtle">
-          Run a limited preview here, or open the full preview to test modules, signed-in features,
-          and fonts. Your draft stays unpublished.
+          Run a limited preview here or full size in a new tab. Modules and signed-in features run
+          once you publish. Your draft stays unpublished.
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2">
@@ -217,8 +219,8 @@ export function DraftPreview({
   );
 
   // Live-status ribbon (M5 polish): once the draft is actually rendering in the frame,
-  // a footer signals it's live and offers a one-click jump to the full top-level preview
-  // (the only place a scripted/signed-in canvas runs exactly as it ships). The pulsing
+  // a footer signals it's live and offers a one-click jump to the full-size preview in a
+  // new tab (sandboxed like the frame). The pulsing
   // ring is decorative — the solid dot + "Live preview" label carry the state under reduced motion.
   const liveRibbon = showFrame ? (
     <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-surface px-3 py-1.5">

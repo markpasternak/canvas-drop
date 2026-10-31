@@ -68,11 +68,33 @@ const CRAWLER_UA =
 // (`twitter:`) value. When the canvas's own home document already declares these,
 // the author is managing their own unfurl — we must NOT shadow it with a generated
 // card (a public_link's static HTML is what a real visitor gets anyway).
-const OWN_SOCIAL_META = /<meta\b[^>]*\b(?:property|name)\s*=\s*["'](?:og:|twitter:)[^"']*["']/i;
+//
+// Scanned tag by tag rather than with one regex over the whole document: the
+// author controls this HTML and it is checked on anonymous requests, so the cost
+// must stay linear (a single `<meta\b[^>]*…` pattern backtracks quadratically over
+// many unclosed `<meta` openers).
+const SOCIAL_META_ATTR = /\b(?:property|name)\s*=\s*["'](?:og:|twitter:)[^"']*["']/i;
 
 /** True when an HTML document already declares its own Open Graph / Twitter tags. */
 export function htmlDeclaresSocialTags(html: string): boolean {
-  return OWN_SOCIAL_META.test(html);
+  const lower = html.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const start = lower.indexOf("<meta", from);
+    if (start < 0) return false;
+    const after = lower.charCodeAt(start + 5);
+    // `\b` after "meta": the next char must not be a word character (`<metadata>`).
+    if ((after >= 48 && after <= 57) || (after >= 97 && after <= 122) || after === 95) {
+      from = start + 5;
+      continue;
+    }
+    const end = lower.indexOf(">", start);
+    if (end < 0) return false; // no closing `>` — no complete tag left to inspect
+    // Any later `<meta` before this `>` shares the same attribute text, which the
+    // unanchored test below already searches — so resume past the tag (each char once).
+    if (SOCIAL_META_ATTR.test(html.slice(start + 5, end))) return true;
+    from = end + 1;
+  }
 }
 
 // An image the crawler is fetching (the og:image it just scraped, or a direct link

@@ -357,6 +357,7 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         settings: deps.authoringSettings,
         publicLinksEnabled: deps.publicLinksEnabled,
         teams: deps.teams,
+        hub: deps.realtime?.hub,
       }),
     );
   }

@@ -86,6 +86,14 @@ export function teamsService(deps: {
     return { ok: true, team };
   }
 
+  /** A team-member row that still counts: on an ORG team the actor must still belong to
+   *  its org (a departed member's stale row grants nothing — the same live check as
+   *  `teamMatch` and `visible`); a PERSONAL team has no org, so the row is the boundary. */
+  async function liveMember(actor: TeamActor, team: Team): Promise<boolean> {
+    if (team.orgId !== null && !actor.isAdmin && !actor.orgIds.has(team.orgId)) return false;
+    return deps.teams.isTeamMember(team.id, actor.id);
+  }
+
   /** Load a team + assert the actor may act as a MEMBER on it (the self-serve tier:
    *  add / cancel-pending / remove). Membership counts as visibility — `visible()`
    *  alone reads a PERSONAL team as creator-only, which wrongly 404'd its other
@@ -97,7 +105,7 @@ export function teamsService(deps: {
   ): Promise<TeamResult & { isMember?: boolean }> {
     const team = await deps.teams.findById(teamId);
     if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
-    const isMember = await deps.teams.isTeamMember(teamId, actor.id);
+    const isMember = await liveMember(actor, team);
     if (!visible(actor, team) && !isMember) return { ok: false, error: "TEAM_NOT_FOUND" };
     if (!actor.isAdmin && !isMember) return { ok: false, error: "FORBIDDEN" };
     return { ok: true, team, isMember };
@@ -207,7 +215,7 @@ export function teamsService(deps: {
     ): Promise<{ ok: true; roster: TeamRoster } | Fail> {
       const team = await deps.teams.findById(teamId);
       if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
-      const canSee = visible(actor, team) || (await deps.teams.isTeamMember(teamId, actor.id));
+      const canSee = visible(actor, team) || (await liveMember(actor, team));
       if (!canSee) return { ok: false, error: "TEAM_NOT_FOUND" };
       const [rows, invites] = await Promise.all([
         deps.teams.getMembers(teamId),
@@ -270,9 +278,13 @@ export function teamsService(deps: {
     ): Promise<VoidResult> {
       const team = await deps.teams.findById(teamId);
       if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
-      const isMember = await deps.teams.isTeamMember(teamId, actor.id);
-      if (!visible(actor, team) && !isMember) return { ok: false, error: "TEAM_NOT_FOUND" };
+      const isMember = await liveMember(actor, team);
       const selfLeave = targetUserId === actor.id;
+      // Anyone may drop their own row, even a stale one left after leaving the org.
+      const ownRow = selfLeave && (await deps.teams.isTeamMember(teamId, actor.id));
+      if (!visible(actor, team) && !isMember && !ownRow) {
+        return { ok: false, error: "TEAM_NOT_FOUND" };
+      }
       if (!selfLeave && !actor.isAdmin && !isMember) return { ok: false, error: "FORBIDDEN" };
       await deps.teams.removeMember(teamId, targetUserId);
       deps.audit.recordAudit({ action: "team_member_remove", actorId: actor.id, targetId: teamId });

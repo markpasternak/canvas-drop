@@ -239,7 +239,28 @@ describe.each(DIALECTS)("ownershipService [%s]", (dialect) => {
     expect([editor.id, viewer.id]).toContain(finalOwner);
   });
 
-  it("a failure after the editor row is written leaves the previous owner with access (write order is the safety net)", async () => {
+  it("a stale transfer request cannot re-grant a former owner who was since removed", async () => {
+    const { svc, canvases, canvas, owner, editor, viewer } = await seed();
+    await canvases.addAllowlistEntry({
+      canvasId: canvas.id,
+      principalKind: "member",
+      userId: viewer.id,
+      role: "editor",
+    });
+    const staleSnapshot = canvas; // loaded while `owner` still owned the canvas
+    expect((await svc.transfer(canvas, { id: owner.id, name: "o" }, editor.id)).ok).toBe(true);
+    // The new owner removes the former owner's (kept) editor row.
+    const row = (await canvases.listAllowlist(canvas.id)).find((e) => e.userId === owner.id);
+    await canvases.removeAllowlistEntry(canvas.id, row?.id ?? "");
+
+    const late = await svc.transfer(staleSnapshot, { id: owner.id, name: "o" }, viewer.id);
+    expect(late).toMatchObject({ ok: false, code: "CONFLICT" });
+    expect((await canvases.listAllowlist(canvas.id)).filter((e) => e.userId === owner.id)).toEqual(
+      [],
+    );
+  });
+
+  it("a failed swap writes nothing: the owner keeps ownership (write order is the safety net)", async () => {
     const { canvases, canvas, owner, roleOf } = await seed();
     // Force the swap to fail AFTER step 1: a recipient that violates the users FK.
     await expect(

@@ -288,4 +288,28 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     expect((await svc.removeMember(actor(colleague), teamId, colleague.id)).ok).toBe(true);
     expect(await teams.isTeamMember(teamId, colleague.id)).toBe(false);
   });
+
+  it("a stale org-team row grants nothing once the actor has left the org (self-leave still works)", async () => {
+    const { svc, org, teams, mkUser, actor } = await setup();
+    const creator = await mkUser("c@acme.com", { member: true });
+    const leaver = await mkUser("l@acme.com", { member: true });
+    const colleague = await mkUser("k@acme.com", { member: true });
+    const created = await svc.create(actor(creator), { orgId: org.id, name: "Eng" });
+    if (!created.ok) throw new Error("setup");
+    const teamId = created.team.id;
+    await svc.addMemberByEmail(actor(creator), teamId, "l@acme.com");
+    await svc.addMemberByEmail(actor(creator), teamId, "k@acme.com");
+
+    // The leaver's live org set is now empty, but their team_members row remains.
+    const departed = actor(leaver, false);
+    const notFound = { ok: false, error: "TEAM_NOT_FOUND" };
+    expect(await svc.roster(departed, teamId)).toEqual(notFound);
+    expect(await svc.removeMember(departed, teamId, colleague.id)).toEqual(notFound);
+    expect(await svc.addMemberByEmail(departed, teamId, "c@acme.com")).toEqual(notFound);
+    expect(await teams.isTeamMember(teamId, colleague.id)).toBe(true);
+
+    // They can still drop their own stale row.
+    expect((await svc.removeMember(departed, teamId, leaver.id)).ok).toBe(true);
+    expect(await teams.isTeamMember(teamId, leaver.id)).toBe(false);
+  });
 });

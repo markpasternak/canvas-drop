@@ -478,11 +478,17 @@ describe("buildApp", () => {
     expect(html.status).toBe(200);
     expect(await html.text()).toContain("public");
 
+    // The SDK calls the runtime API on the base host with the canvas's Origin.
     const api = await a.request("/v1/c/public-demo/me", {
-      headers: { host: "public-demo.canvases.example.com" },
+      headers: { host: "canvases.example.com", origin: "https://public-demo.canvases.example.com" },
     });
     expect(api.status).toBe(403);
     expect((await jsonOf<{ code: string }>(api)).code).toBe("STATIC_ONLY");
+    // The canvas host itself never serves the runtime API.
+    const onCanvasHost = await a.request("/v1/c/public-demo/me", {
+      headers: { host: "public-demo.canvases.example.com" },
+    });
+    expect(onCanvasHost.status).toBe(404);
     const service = connectionService({
       repository: connectionsRepository(client),
       canvases,
@@ -868,6 +874,30 @@ describe("buildApp", () => {
     expect((await hit("1.1.1.1")).status).toBe(429);
     // A different real client behind the same proxy gets its OWN bucket.
     expect((await hit("2.2.2.2")).status).not.toBe(429);
+  });
+
+  it("pre-sign-in form posts over the small-form cap are refused before parsing", async () => {
+    client = await makeTestDb("sqlite");
+    const a = loginApp(loginCfg("100"), "8.8.8.8");
+    const big = "x".repeat(32 * 1024);
+    const res = await a.request("/auth/switch", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `account=${big}`,
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it("the OIDC callback is throttled per client IP, in its own bucket", async () => {
+    client = await makeTestDb("sqlite");
+    const a = loginApp(loginCfg("1"), "10.0.0.1");
+    const at = (path: string, xff: string) =>
+      a.request(path, { headers: { "x-forwarded-for": xff } });
+    expect((await at("/auth/login", "1.1.1.1")).status).not.toBe(429);
+    // The login just spent its own bucket; the callback still has one.
+    expect((await at("/auth/callback", "1.1.1.1")).status).not.toBe(429);
+    expect((await at("/auth/callback", "1.1.1.1")).status).toBe(429);
+    expect((await at("/auth/callback", "2.2.2.2")).status).not.toBe(429);
   });
 
   it("login throttle ignores X-Forwarded-For from an untrusted peer (no evasion)", async () => {

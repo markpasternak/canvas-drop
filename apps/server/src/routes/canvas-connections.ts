@@ -71,6 +71,30 @@ export function canvasConnectionStatusRoutes(deps: CanvasConnectionsDeps) {
 // It is transport metadata, not a caller override of an admin-protected upstream header.
 const BROWSER_AMBIENT_HEADERS = new Set(["user-agent"]);
 
+// Identity the ingress proxy attaches to the visitor's request authenticates them to
+// canvas-drop only; it must never reach an upstream (§12.0 #1, no credential leak).
+// The configured header names plus the common IAP/oauth2-proxy identity headers.
+const PROXY_IDENTITY_HEADERS = [
+  "cf-access-jwt-assertion",
+  "cf-access-authenticated-user-email",
+  "x-forwarded-access-token",
+  "x-forwarded-email",
+  "x-forwarded-user",
+  "x-forwarded-preferred-username",
+  "x-forwarded-groups",
+];
+const PROXY_IDENTITY_PREFIX = "x-auth-request-";
+
+function strippedCallerHeaders(config: Config): Set<string> {
+  const p = config.auth.proxy;
+  const names = [p.jwtHeader, p.emailHeader, p.nameHeader, p.clientIpHeader];
+  return new Set([
+    ...BROWSER_AMBIENT_HEADERS,
+    ...PROXY_IDENTITY_HEADERS,
+    ...names.filter((n): n is string => !!n).map((n) => n.toLowerCase()),
+  ]);
+}
+
 export interface CanvasConnectionsDeps {
   config: Config;
   service: ConnectionService;
@@ -154,10 +178,11 @@ function upstreamResponse(c: Context<AppEnv>, result: ConnectionFetchResult) {
   );
 }
 
-function callerHeaders(request: Request): [string, string][] {
-  return [...request.headers.entries()].filter(
-    ([name]) => !BROWSER_AMBIENT_HEADERS.has(name.toLowerCase()),
-  );
+function callerHeaders(request: Request, stripped: Set<string>): [string, string][] {
+  return [...request.headers.entries()].filter(([name]) => {
+    const n = name.toLowerCase();
+    return !stripped.has(n) && !n.startsWith(PROXY_IDENTITY_PREFIX);
+  });
 }
 
 async function readRequestBody(
@@ -220,6 +245,7 @@ async function readRequestBody(
 /** Transparent, bounded request forwarder for one live admin grant. */
 export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
   const app = new Hono<AppEnv>();
+  const stripped = strippedCallerHeaders(deps.config);
 
   const handle = async (c: Context<AppEnv>) => {
     const startedAt = Date.now();
@@ -325,7 +351,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
         path: `${relativePath}${search}`,
         method: method as ConnectionMethod,
         allowedMethods: profile.allowedMethods,
-        callerHeaders: callerHeaders(c.req.raw),
+        callerHeaders: callerHeaders(c.req.raw, stripped),
         protectedHeaders: Object.entries(profile.protectedHeaders),
         body: rawBody,
         maxResponseBytes: deps.config.connections.maxResponseBytes,

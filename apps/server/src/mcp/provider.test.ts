@@ -8,12 +8,14 @@ import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { Context } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
+import { mapIdentityToUser } from "../auth/identity-mapping.js";
 import type { ResolvedIdentity } from "../auth/strategy.js";
 import type { DbClient } from "../db/factory.js";
 import { oauthRepository } from "../db/repositories/oauth.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
+import { signConsent } from "./consent.js";
 import { McpOAuthProvider } from "./provider.js";
 
 const CLIENT: OAuthClientInformationFull = {
@@ -37,6 +39,7 @@ function fakeCtx(url = "http://localhost:3000/authorize?client_id=client-a"): Co
     get: (k: string) => (k === "clientIp" ? "127.0.0.1" : undefined),
     req: {
       header: (h: string) => (h.toLowerCase() === "host" ? "localhost:3000" : undefined),
+      query: (k: string) => new URL(url).searchParams.get(k) ?? undefined,
       url,
     },
     redirect: (to: string) => new Response(null, { status: 302, headers: { location: to } }),
@@ -65,6 +68,8 @@ interface Harness {
   oauth: ReturnType<typeof oauthRepository>;
   users: ReturnType<typeof usersRepository>;
   setIdentity: (id: ResolvedIdentity | null) => void;
+  /** A context whose `/authorize` URL carries the current user's approval of CLIENT. */
+  approvedCtx: () => Promise<Context<AppEnv>>;
 }
 
 function harness(client: DbClient, config: Config): Harness {
@@ -78,7 +83,19 @@ function harness(client: DbClient, config: Config): Harness {
     allowedEmails: { isAllowed: async () => false },
     oauth,
   });
-  return { provider, oauth, users, setIdentity: (id) => (identity = id) };
+  const approvedCtx = async () => {
+    const user = await mapIdentityToUser(users, must(identity), config);
+    const consent = signConsent(config.sessionSecret, {
+      userId: user.id,
+      clientId: CLIENT.client_id,
+      redirectUri: PARAMS.redirectUri,
+      codeChallenge: PARAMS.codeChallenge,
+    });
+    return fakeCtx(
+      `http://localhost:3000/authorize?client_id=client-a&consent=${encodeURIComponent(consent)}`,
+    );
+  };
+  return { provider, oauth, users, setIdentity: (id) => (identity = id), approvedCtx };
 }
 
 const devConfig = () => loadConfig({ CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com" });
@@ -141,7 +158,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const h = harness(client, devConfig());
     h.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const loc = c.res?.headers.get("location") ?? "";
     expect(loc.startsWith("https://client.example/callback")).toBe(true);
@@ -157,7 +174,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const h = harness(client, devConfig());
     h.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const code = codeFrom(c.res);
 
@@ -192,7 +209,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const h = harness(client, devConfig());
     h.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const code = codeFrom(c.res);
     const other = { ...CLIENT, client_id: "client-b" } as OAuthClientInformationFull;
@@ -210,7 +227,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const h = harness(client, devConfig());
     h.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const code = codeFrom(c.res);
     await expect(
@@ -230,7 +247,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     await expect(h.provider.verifyAccessToken("not-a-token")).rejects.toBeInstanceOf(
       InvalidTokenError,
     );
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const tokens = await h.provider.exchangeAuthorizationCode(
       CLIENT,
@@ -248,7 +265,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const h = harness(client, devConfig());
     h.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const tokens = await h.provider.exchangeAuthorizationCode(
       CLIENT,
@@ -268,7 +285,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const h = harness(client, devConfig());
     h.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const tokens = await h.provider.exchangeAuthorizationCode(
       CLIENT,
@@ -288,7 +305,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const h = harness(client, devConfig());
     h.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await h.approvedCtx();
     await h.provider.authorize(CLIENT, PARAMS, c);
     const tokens = await h.provider.exchangeAuthorizationCode(
       CLIENT,
@@ -314,7 +331,7 @@ describe.each(DIALECTS)("McpOAuthProvider [%s]", (dialect) => {
     // Issue under a config where example.com is allowed…
     const issue = harness(client, devConfig());
     issue.setIdentity({ sub: "oidc:owner", email: "owner@example.com", name: "Owner" });
-    const c = fakeCtx();
+    const c = await issue.approvedCtx();
     await issue.provider.authorize(CLIENT, PARAMS, c);
     const tokens = await issue.provider.exchangeAuthorizationCode(
       CLIENT,

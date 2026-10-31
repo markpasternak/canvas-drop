@@ -32,6 +32,23 @@ export function isEmailDomainAllowed(email: string, config: Config): boolean {
 }
 
 /**
+ * Live account check for long-lived connections (realtime sockets): the user still
+ * exists, is not blocked, and may still sign in — the same admission the gateway
+ * applies to every HTTP request, so removing a sign-in permit ends sockets too.
+ */
+export function userStillAdmitted(
+  users: Pick<UsersRepository, "findById">,
+  allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">,
+  config: Config,
+): (userId: string) => Promise<boolean> {
+  return async (userId) => {
+    const u = await users.findById(userId);
+    if (!u || u.isBlocked) return false;
+    return isEmailAllowed(u.email, config, allowedEmails);
+  };
+}
+
+/**
  * Whether an email may sign in: its domain is in the env allowlist (D14), OR it is
  * an admin-added individual email (the DB allowlist supplement). The DB lookup only
  * fires when the domain check fails, so the hot path stays a synchronous array check.
