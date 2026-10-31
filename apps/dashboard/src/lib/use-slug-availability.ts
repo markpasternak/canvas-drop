@@ -15,7 +15,7 @@ const DEBOUNCE_MS = 400;
  * input is `idle`. A network hiccup falls back to `idle` (non-blocking) — the server
  * re-validates authoritatively on submit, so we never hard-fail the UI on a flaky GET.
  */
-export function useSlugAvailability(slug: string): SlugStatus {
+export function useSlugAvailability(slug: string, canvasId?: string): SlugStatus {
   const [status, setStatus] = useState<SlugStatus>("idle");
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export function useSlugAvailability(slug: string): SlugStatus {
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const res = await api.slugAvailable(slug);
+        const res = await api.slugAvailable(slug, canvasId);
         if (cancelled) return;
         setStatus(res.available ? "available" : (res.reason ?? "taken"));
       } catch (err) {
@@ -43,7 +43,7 @@ export function useSlugAvailability(slug: string): SlugStatus {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [slug]);
+  }, [slug, canvasId]);
 
   return status;
 }

@@ -90,6 +90,21 @@ describe.each(DIALECTS)("released slug reservation [%s]", (dialect) => {
     expect(await canvases.slugTaken("launch-old", { ownerId: alice })).toBe(false);
   });
 
+  it("an ownership transfer hands the canvas's reservations to the new owner", async () => {
+    client = await makeTestDb(dialect);
+    const { alice, bob, canvases, cv, deps } = await seed(client);
+    await renameCanvasSlug(deps, cv, { slug: "launch-v2" }, alice);
+    await canvases.transferOwner({
+      canvasId: cv.id,
+      fromUserId: alice,
+      toUserId: bob,
+      previousOwnerEditor: false,
+      revertPublicLink: false,
+    });
+    expect(await canvases.slugTaken("launch", { ownerId: alice })).toBe(true);
+    expect(await canvases.slugTaken("launch", { ownerId: bob })).toBe(false);
+  });
+
   it("a released slug claimed again and released again restarts its window for the new holder", async () => {
     client = await makeTestDb(dialect);
     const { alice, bob, canvases, cv, deps } = await seed(client);

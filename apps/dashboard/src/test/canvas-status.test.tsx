@@ -148,7 +148,7 @@ describe("canvas Overview tab", () => {
     expect(preview).toHaveAttribute("href", CANVAS.url);
     expect(preview.querySelector("img")).toHaveAttribute(
       "src",
-      `${CANVAS.url}/__canvasdrop_preview?rendition=card&v=${CANVAS.updatedAt}`,
+      `${CANVAS.url}/__canvasdrop_preview?rendition=card&cors=1&v=${CANVAS.updatedAt}`,
     );
     expect(screen.getByLabelText("Title")).not.toBeVisible();
     expect(screen.getByRole("link", { name: "Edit draft" })).toHaveAttribute(

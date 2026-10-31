@@ -90,4 +90,22 @@ describe.each(DIALECTS)("MCP OAuth CORS scope (%s)", (dialect) => {
     const body = (await meta.json()) as { registration_endpoint?: string };
     expect(body.registration_endpoint).toBe("http://localhost:3000/register");
   });
+
+  it("the bearer-only /mcp endpoint keeps CORS and exposes its auth challenge", async () => {
+    client = await makeTestDb(dialect);
+    const app = appFor(client);
+    const pre = await app.request("/mcp", {
+      method: "OPTIONS",
+      headers: {
+        ...EVIL,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,content-type",
+      },
+    });
+    expect(pre.headers.get("access-control-allow-origin")).toBe("*");
+    const unauth = await app.request("/mcp", { method: "POST", headers: EVIL });
+    expect(unauth.status).toBe(401);
+    expect(unauth.headers.get("access-control-allow-origin")).toBe("*");
+    expect(unauth.headers.get("access-control-expose-headers")).toContain("WWW-Authenticate");
+  });
 });

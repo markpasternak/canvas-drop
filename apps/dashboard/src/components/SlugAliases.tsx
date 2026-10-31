@@ -91,6 +91,7 @@ export function SlugAliases({ canvasId, me }: { canvasId: string; me: Me | undef
         open={adding}
         onClose={() => setAdding(false)}
         me={me}
+        canvasId={canvasId}
         loading={add.isPending}
         onConfirm={async (slug) => {
           try {
@@ -111,12 +112,14 @@ function AddAliasDialog({
   onClose,
   onConfirm,
   me,
+  canvasId,
   loading,
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (slug: string) => void;
   me: Me | undefined;
+  canvasId: string;
   loading: boolean;
 }) {
   const [resolved, setResolved] = useState<{ slug: string; status: SlugStatus }>({
@@ -139,6 +142,7 @@ function AddAliasDialog({
           onResolved={setResolved}
           label="Alias"
           idleHint="Another name for this canvas. It redirects to the main URL."
+          canvasId={canvasId}
           optional={false}
           autoFocus
         />

@@ -1467,9 +1467,11 @@ export const api = {
 
   /** Check whether a custom slug is usable (plan 004). Read-only; advisory — the
    *  server re-validates on create/rename and the unique index is the authority. */
-  slugAvailable: (slug: string) =>
+  slugAvailable: (slug: string, canvasId?: string) =>
     request<{ available: boolean; reason?: "invalid" | "reserved" | "taken" }>(
-      `/api/canvases/slug-available?slug=${encodeURIComponent(slug)}`,
+      `/api/canvases/slug-available?slug=${encodeURIComponent(slug)}${
+        canvasId ? `&canvasId=${encodeURIComponent(canvasId)}` : ""
+      }`,
     ),
 
   /** Clone a canvas into a new one owned by the caller (plan 002). The clone gets its

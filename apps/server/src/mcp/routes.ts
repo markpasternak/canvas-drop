@@ -253,13 +253,18 @@ export const OAUTH_CORS_PATHS = [
  * The routes `@hono/mcp`'s `mcpAuthRouter` builds, assembled from its exported
  * handlers. That router opens with `use(cors())`, and mounted at root its wildcard
  * CORS covered every route in the app, not just OAuth. Here CORS is scoped to
- * {@link OAUTH_CORS_PATHS}. Rate limiting is ours (`oauthLimits` above), so the
+ * {@link OAUTH_CORS_PATHS} and the bearer-only `/mcp` endpoint. Rate limiting is ours (`oauthLimits` above), so the
  * library's limiters are not wired in.
  */
 function oauthServerRouter(provider: McpOAuthProvider, issuerUrl: URL): Hono {
   const metadata = createOAuthMetadata({ provider, issuerUrl, scopesSupported: ["canvas-drop"] });
   const router = new Hono();
   for (const path of OAUTH_CORS_PATHS) router.use(path, cors());
+  // The MCP endpoint is bearer-only (no cookies), so any origin may call it; browser
+  // clients need the auth challenge and session id headers too.
+  const mcpCors = cors({ exposeHeaders: ["WWW-Authenticate", "Mcp-Session-Id"] });
+  router.use("/mcp", mcpCors);
+  router.use("/mcp/*", mcpCors);
   const clientAuth = authenticateClient({ clientsStore: provider.clientsStore });
   router.on(["GET", "POST"], "/authorize", authorizeHandler(provider));
   router.post("/token", clientAuth, tokenHandler(provider));

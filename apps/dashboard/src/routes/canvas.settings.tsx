@@ -442,6 +442,7 @@ export default function Settings() {
         }}
         me={me}
         shared={canvas.shared}
+        canvasId={canvas.id}
         loading={regenSlug.isPending}
       />
 

@@ -1336,6 +1336,11 @@ export function canvasesRepository(client: DbClient) {
             .where(and(eq(t.id, input.canvasId), eq(t.ownerId, input.fromUserId)))
             .returning({ id: t.id })) as Array<{ id: string }>;
           if (swapped.length === 0) throw new TransferConflict();
+          // Names this canvas released now belong to its new owner's reservation.
+          await q
+            .update(releasedT)
+            .set({ ownerId: input.toUserId })
+            .where(eq(releasedT.canvasId, input.canvasId));
           if (input.previousOwnerEditor) {
             await q
               .insert(allowlistT)

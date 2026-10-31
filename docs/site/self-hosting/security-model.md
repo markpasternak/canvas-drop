@@ -471,7 +471,11 @@ canvas from learning anything through that:
   learn from the result whether the visitor can open it. Whole-org and public-link
   canvases don't, so org canvases can still share assets. The dashboard loads covers in
   CORS mode, which the preview route allows for the dashboard's own origin only.
-- The MCP OAuth endpoints are the only routes with open (`*`) CORS.
+- Only the MCP OAuth endpoints and the bearer-only `/mcp` endpoint answer with open
+  (`*`) CORS; no cookie-authenticated route does.
+- Known limit: whole-org and public-link canvases don't send that header, so on an
+  instance with several orgs a canvas can still tell whether its visitor may open another
+  org's whole-org canvas (that is, whether the visitor belongs to that org).
 - A slug a canvas lets go of (a rename that drops it, a removed alias, aliases freed by a
   purge) stays reserved for 30 days: only that canvas, or another canvas with the same
   owner, can take it. The slug is the browser origin, so a stranger's canvas on it would

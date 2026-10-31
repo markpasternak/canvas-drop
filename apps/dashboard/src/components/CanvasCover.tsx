@@ -28,7 +28,9 @@ export function previewCoverUrl(
   canvasUrl: string,
   rendition: "card" | "thumb" | "og" = "card",
 ): string {
-  return `${canvasUrl.replace(/\/$/, "")}/${PREVIEW_PATH}?rendition=${rendition}`;
+  // `cors=1` keys the CORS-mode request apart from cached no-cors responses of the same
+  // URL, which carry no Access-Control-Allow-Origin and would fail the check.
+  return `${canvasUrl.replace(/\/$/, "")}/${PREVIEW_PATH}?rendition=${rendition}&cors=1`;
 }
 
 /**

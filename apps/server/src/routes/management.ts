@@ -715,9 +715,12 @@ export function managementRoutes(deps: ManagementDeps) {
     const raw = (c.req.query("slug") ?? "").trim();
     const check = validateSlug(raw);
     if (!check.ok) return c.json({ available: false, reason: check.reason });
-    // Advisory for the dashboard's create and rename fields: a slug the signed-in user
-    // released is still theirs to take back.
-    const taken = await deps.canvases.slugTaken(raw, { ownerId: c.get("user").id });
+    // Advisory for the dashboard's create, rename and alias fields: a slug the signed-in
+    // user released, or (`canvasId`) the canvas being renamed released, is theirs to take
+    // back. The id only widens the answer to that canvas's own released names, and the
+    // rename itself re-checks with the server-resolved canvas.
+    const canvasId = c.req.query("canvasId") || undefined;
+    const taken = await deps.canvases.slugTaken(raw, { ownerId: c.get("user").id, canvasId });
     return c.json(taken ? { available: false, reason: "taken" } : { available: true });
   });
 
