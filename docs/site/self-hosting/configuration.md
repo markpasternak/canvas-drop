@@ -435,6 +435,7 @@ personal-team adds, canvas Add person, and admin sign-in permits.
 | `invites.maxPerActorPerHour` | `20` | Add-person actions per actor per hour (admins get a higher allowance). |
 | `invites.pendingCap` | `50` | Max unconsumed pending sign-ins one actor may hold. |
 | `access.publicLinksEnabled` | `true` | Instance-wide switch for the Public link rung. Off denies new public-link publishes and returns existing public-link canvases to **Restricted**. |
+| `access.linkPreviewDefault` | `off` | What a Slack/iMessage unfurl shows for a whole-org canvas with no per-canvas choice: `off` (generic sign-in card), `title` (title and description) or `cover` (also the custom cover). Automatic screenshots are never shown. See [Link previews](/docs/self-hosting/screenshots#link-previews-for-non-public-canvases). |
 
 Adding a brand-new person to a team or canvas sends them the sign-in invitation, gated only by
 the master switch and the mailer; existing team members are not re-notified.

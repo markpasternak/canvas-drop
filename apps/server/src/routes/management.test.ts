@@ -1793,6 +1793,7 @@ describe("managementRoutes", () => {
       "id",
       "isAdmin",
       "isGuest",
+      "linkPreviewDefault",
       "name",
       "orgs",
       "urlMode",
@@ -3412,8 +3413,11 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     const app = buildApp(client, { id: owner.id, isAdmin: false });
     const id = await publishedCanvas(owner.id);
 
-    const before = await jsonOf<{ linkPreview: boolean }>(await app.request(`/api/canvases/${id}`));
-    expect(before.linkPreview).toBe(false);
+    const before = await jsonOf<{ linkPreview: boolean | null }>(
+      await app.request(`/api/canvases/${id}`),
+    );
+    // No choice yet: follows the admin default.
+    expect(before.linkPreview).toBeNull();
     const res = await app.request(`/api/canvases/${id}/settings`, {
       method: "PATCH",
       headers: mut,
@@ -3436,6 +3440,19 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       });
       expect(audit?.targetId).toBe(id);
     });
+    // The legacy boolean column stays in step (a rollback keeps the opt-in).
+    expect((await canvasesRepository(client).findById(id))?.linkPreview).toBe(true);
+
+    // false is an explicit off; null goes back to following the default.
+    for (const choice of [false, null]) {
+      const r = await app.request(`/api/canvases/${id}/settings`, {
+        method: "PATCH",
+        headers: mut,
+        body: JSON.stringify({ linkPreview: choice }),
+      });
+      expect((await jsonOf<{ linkPreview: boolean | null }>(r)).linkPreview).toBe(choice);
+      expect((await canvasesRepository(client).findById(id))?.linkPreview).toBe(false);
+    }
   });
 
   it("individual invite (plan 003 U8): an existing user is granted (allowlist member); a new external email is rejected for a self-serve owner", async () => {

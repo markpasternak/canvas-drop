@@ -25,6 +25,7 @@ import { memberPrincipal, resolvePublicLinkEnabled } from "../canvas/authorizati
 import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
+import { linkPreviewChoice } from "../canvas/link-preview.js";
 import { liveManifest, manifestFiles, rootEntry } from "../canvas/manifest.js";
 import {
   classifyMutability,
@@ -211,9 +212,10 @@ const settingsSchema = z.object({
   // Preview policy: auto (screenshot on publish) or off (generative cover). `custom`
   // is set only by uploading an image via PUT /:id/preview, never through settings.
   previewMode: z.enum(["auto", "off"]).optional(),
-  // Link preview opt-in: a non-public canvas's unfurl shows its title, description
-  // and custom cover to signed-out link unfurlers.
-  linkPreview: z.boolean().optional(),
+  // Link preview choice: a non-public canvas's unfurl shows its title, description
+  // and custom cover to signed-out link unfurlers. true = on, false = off, null =
+  // follow the admin default (whole-org canvases only).
+  linkPreview: z.boolean().nullable().optional(),
   galleryListed: z.boolean().optional(),
   galleryTemplatable: z.boolean().optional(),
   tags: z.array(z.string().max(CANVAS_MAX_TAG_LENGTH)).max(CANVAS_MAX_TAGS).optional(),
@@ -278,7 +280,9 @@ function ownerCanvasView(
     // Preview policy (plan 004): auto = screenshot on publish, off = generative cover,
     // custom = owner-uploaded image (survives publishes). Drives the settings control.
     previewMode: cv.previewMode,
-    linkPreview: cv.linkPreview,
+    // Link preview choice: true / false, or null = follow the admin default (/api/me
+    // `linkPreviewDefault`, whole-org canvases only).
+    linkPreview: linkPreviewChoice(cv),
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,
     // tags is stored as JSON (Json | null); the API contract is string[] | null.
@@ -910,7 +914,7 @@ export function managementRoutes(deps: ManagementDeps) {
       patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
     // The link-preview opt-in decides what a gated canvas reveals to link unfurlers.
     const linkPreviewChanged =
-      patch.linkPreview !== undefined && patch.linkPreview !== cv.linkPreview;
+      patch.linkPreview !== undefined && patch.linkPreview !== linkPreviewChoice(cv);
     // Audit a rung change, discoverability change, OR a grant-only change to the team set
     // (no rung change) — all change who can find/open the share surface.
     if (targetAccess !== undefined || discoverabilityChanged || teamGranted || linkPreviewChanged) {

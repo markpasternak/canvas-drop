@@ -2,8 +2,9 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "../auth/session.js";
+import type { LinkPreviewDefault } from "../canvas/link-preview.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
-import { htmlDeclaresSocialTags, linkPreviewEligible, socialPreview } from "./social-preview.js";
+import { htmlDeclaresSocialTags, socialPreview } from "./social-preview.js";
 import type { AppEnv, Principal } from "./types.js";
 
 const oidc: Config = loadConfig({
@@ -48,6 +49,28 @@ describe("socialPreview", () => {
     expect(body).toContain(`location.replace("/auth/login?returnTo=${returnTo}"`);
     // Never indexed.
     expect(res.headers.get("x-robots-tag")).toBe("noindex");
+    // Named after the slug in the link itself, never the canvas's real title.
+    expect(body).toContain('property="og:title" content="showcase"');
+    expect(body).toContain("A private canvas on canvas-drop.");
+  });
+
+  it("titles the generic card from the URL alone (path mode, unknown canvas, apex)", async () => {
+    // The stub repo would return a canvas for any slug — the card must not consult it.
+    const repo = canvasRepo("Secret Plans", { access: "whole_org", currentVersionId: "v1" });
+    const a = new Hono<AppEnv>();
+    a.use("*", socialPreview(oidc, repo));
+    a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+    const pathMode = await a.request("/c/roadmap/", {
+      headers: { host: "canvas-drop.com", ...HTML },
+    });
+    const pathBody = await pathMode.text();
+    expect(pathBody).not.toContain("Secret Plans");
+    const apex = await app(oidc).request("/", { headers: { host: "canvas-drop.com", ...HTML } });
+    expect(await apex.text()).toContain('property="og:title" content="canvas-drop"');
+    const unknown = await app(oidc).request("/", {
+      headers: { host: "does-not-exist.canvas-drop.com", ...HTML },
+    });
+    expect(await unknown.text()).toContain('property="og:title" content="does-not-exist"');
   });
 
   it("carries the visitor's #fragment into the returnTo (canvases often route on it)", async () => {
@@ -408,7 +431,7 @@ describe("socialPreview — link preview opt-in for a gated canvas", () => {
     access: "whole_org",
     status: "active",
     currentVersionId: "v1",
-    linkPreview: true,
+    linkPreviewMode: "on",
     previewMode: "custom",
     updatedAt: 1700,
     description: "Plans for the quarter",
@@ -417,7 +440,11 @@ describe("socialPreview — link preview opt-in for a gated canvas", () => {
   const SLACK = { host: "planner.canvas-drop.com", accept: "*/*", "user-agent": "Slackbot 1.0" };
 
   /** No principal (signed-out unfurler) in oidc mode, or a pre-set one. */
-  function gated(overrides: Record<string, unknown>, principal?: Principal) {
+  function gated(
+    overrides: Record<string, unknown>,
+    principal?: Principal,
+    instanceDefault?: () => Promise<LinkPreviewDefault>,
+  ) {
     const a = new Hono<AppEnv>();
     if (principal) {
       a.use("*", async (c, next) => {
@@ -433,6 +460,7 @@ describe("socialPreview — link preview opt-in for a gated canvas", () => {
         undefined,
         undefined,
         async () => COVER,
+        instanceDefault,
       ),
     );
     a.all("*", (c) => c.text("PASSED_THROUGH", 418));
@@ -471,9 +499,9 @@ describe("socialPreview — link preview opt-in for a gated canvas", () => {
   });
 
   it("keeps the generic card when the canvas is not opted in", async () => {
-    const app = gated({ linkPreview: false });
+    const app = gated({ linkPreviewMode: null });
     const body = await (await app.request("/", { headers: SLACK })).text();
-    expect(body).toContain('property="og:title" content="canvas-drop"');
+    expect(body).toContain('property="og:title" content="planner"');
     expect(body).not.toContain("Quarterly Planner");
     const cover = await app.request("/__canvasdrop_preview?rendition=og", { headers: SLACK });
     expect(cover.headers.get("content-type")).not.toBe("image/webp");
@@ -514,26 +542,109 @@ describe("socialPreview — link preview opt-in for a gated canvas", () => {
     });
     expect(cover.headers.get("content-type")).toBe("image/webp");
     // Without the opt-in the gate keeps everything (falls through to the password gate).
-    const closed = await gated({ ...protectedLink, linkPreview: false }, ANON).request("/", {
+    const closed = await gated({ ...protectedLink, linkPreviewMode: null }, ANON).request("/", {
       headers: SLACK,
     });
     expect(closed.status).toBe(418);
   });
 });
 
-describe("linkPreviewEligible", () => {
-  const live = {
-    linkPreview: true,
+describe("socialPreview — admin link-preview default", () => {
+  const WHOLE_ORG = {
+    id: "c1",
+    slug: "planner",
+    access: "whole_org",
     status: "active",
-    currentVersionId: "v",
+    currentVersionId: "v1",
     sharedExpiresAt: null,
+    linkPreviewMode: null,
+    previewMode: "custom",
+    updatedAt: 1700,
+    description: "Plans for the quarter",
   };
-  it("requires the opt-in on a live, published, unexpired canvas", () => {
-    expect(linkPreviewEligible(live, 10)).toBe(true);
-    expect(linkPreviewEligible({ ...live, linkPreview: false }, 10)).toBe(false);
-    expect(linkPreviewEligible({ ...live, status: "disabled" }, 10)).toBe(false);
-    expect(linkPreviewEligible({ ...live, currentVersionId: null }, 10)).toBe(false);
-    expect(linkPreviewEligible({ ...live, sharedExpiresAt: 10 }, 10)).toBe(false);
-    expect(linkPreviewEligible({ ...live, sharedExpiresAt: 11 }, 10)).toBe(true);
+  const COVER = new Uint8Array([0x52, 0x49, 0x46, 0x46]);
+  const SLACK = { host: "planner.canvas-drop.com", accept: "*/*", "user-agent": "Slackbot 1.0" };
+
+  function withDefault(
+    overrides: Record<string, unknown>,
+    instanceDefault: () => Promise<LinkPreviewDefault>,
+  ) {
+    const a = new Hono<AppEnv>();
+    a.use(
+      "*",
+      socialPreview(
+        oidc,
+        canvasRepo("Quarterly Planner", { ...WHOLE_ORG, ...overrides }),
+        undefined,
+        undefined,
+        async () => COVER,
+        instanceDefault,
+      ),
+    );
+    a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+    return a;
+  }
+  const card = async (a: Hono<AppEnv>) => (await a.request("/", { headers: SLACK })).text();
+  const cover = (a: Hono<AppEnv>) =>
+    a.request("/__canvasdrop_preview?rendition=og", { headers: SLACK });
+
+  it("title: a whole-org canvas unfurls with its title and the brand image, never the cover", async () => {
+    const a = withDefault({}, async () => "title");
+    const body = await card(a);
+    expect(body).toContain('property="og:title" content="Quarterly Planner"');
+    expect(body).toContain('property="og:image" content="https://canvas-drop.com/og.png"');
+    expect((await cover(a)).headers.get("content-type")).not.toBe("image/webp");
+  });
+
+  it("cover: also shows the custom cover, but never an automatic screenshot", async () => {
+    const a = withDefault({}, async () => "cover");
+    expect(await card(a)).toContain("__canvasdrop_preview?rendition=og");
+    expect((await cover(a)).headers.get("content-type")).toBe("image/webp");
+    const auto = withDefault({ previewMode: "auto" }, async () => "cover");
+    expect(await card(auto)).toContain('content="https://canvas-drop.com/og.png"');
+    expect((await cover(auto)).headers.get("content-type")).not.toBe("image/webp");
+  });
+
+  it("off (the default) keeps the generic card", async () => {
+    const body = await card(withDefault({}, async () => "off"));
+    expect(body).not.toContain("Quarterly Planner");
+  });
+
+  it("applies to whole-org canvases only", async () => {
+    for (const access of ["private", "specific_people", "team"]) {
+      const body = await card(withDefault({ access }, async () => "cover"));
+      expect(body, access).not.toContain("Quarterly Planner");
+    }
+    // A password-protected public link reaches its gate untouched.
+    const protectedLink = withDefault(
+      { access: "public_link", passwordHash: "h" },
+      async () => "cover",
+    );
+    const a = new Hono<AppEnv>();
+    a.use("*", async (c, next) => {
+      c.set("principal", ANON);
+      await next();
+    });
+    a.route("/", protectedLink);
+    expect((await a.request("/", { headers: SLACK })).status).toBe(418);
+  });
+
+  it("an owner's explicit off wins over the default", async () => {
+    const body = await card(withDefault({ linkPreviewMode: "off" }, async () => "cover"));
+    expect(body).not.toContain("Quarterly Planner");
+  });
+
+  it("a canvas that is not live stays generic", async () => {
+    const body = await card(withDefault({ currentVersionId: null }, async () => "cover"));
+    expect(body).not.toContain("Quarterly Planner");
+  });
+
+  it("a settings read failure reveals nothing", async () => {
+    const body = await card(
+      withDefault({}, async () => {
+        throw new Error("db down");
+      }),
+    );
+    expect(body).not.toContain("Quarterly Planner");
   });
 });

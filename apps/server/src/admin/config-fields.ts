@@ -1,5 +1,6 @@
 import { type Config, SKIN_NAMES } from "@canvas-drop/shared";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
+import { LINK_PREVIEW_DEFAULTS } from "../canvas/link-preview.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "../routes/canvas-kv.js";
 import { defaultInstanceName, INSTANCE_NAME_SETTING_KEY } from "./instance-display-name.js";
 
@@ -542,6 +543,19 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     editable: true,
     settingKey: "access.publicLinksEnabled",
     fromConfig: () => true,
+  },
+  {
+    key: "access.linkPreviewDefault",
+    env: "—",
+    group: "Access",
+    label: "Link previews for whole-org canvases",
+    help: "What Slack, iMessage and similar apps show when someone shares a link to a whole-org canvas. off: a generic sign-in card naming only what is already in the link. title: the canvas's title and description. cover: also its custom cover, if one was uploaded. Automatic screenshots are never shown. Anyone holding the link can see what you allow here. Owners and editors can still turn previews on or off per canvas; restricted canvases show a preview only when turned on per canvas.",
+    type: "enum",
+    enumValues: LINK_PREVIEW_DEFAULTS,
+    secret: false,
+    editable: true,
+    settingKey: "access.linkPreviewDefault",
+    fromConfig: () => "off",
   },
   {
     key: "quota.ai.user.daily.usd",

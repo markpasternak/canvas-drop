@@ -250,6 +250,76 @@ describe("settings route", () => {
     });
   });
 
+  it("shows a whole-org canvas following the admin's link-preview default as on", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({
+          id: "u1",
+          email: "u@x",
+          name: "U",
+          avatarUrl: null,
+          isAdmin: false,
+          linkPreviewDefault: "title",
+        }),
+      "GET /api/canvases/c1": () => json({ ...CANVAS, access: "whole_org", linkPreview: null }),
+    });
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: /show in link previews/i });
+    await vi.waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    expect(screen.getByText(/on by your organization's default/i)).toBeInTheDocument();
+    // Following the default already: no reset offered.
+    expect(screen.queryByRole("button", { name: /use your organization's default/i })).toBeNull();
+  });
+
+  it("lets an owner who turned previews off go back to the admin default", async () => {
+    const calls = mockFetch({
+      "GET /api/me": () =>
+        json({
+          id: "u1",
+          email: "u@x",
+          name: "U",
+          avatarUrl: null,
+          isAdmin: false,
+          linkPreviewDefault: "cover",
+        }),
+      "GET /api/canvases/c1": () => json({ ...CANVAS, access: "whole_org", linkPreview: false }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ ...CANVAS, access: "whole_org", linkPreview: null }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: /show in link previews/i });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(
+      await screen.findByRole("button", { name: /use your organization's default/i }),
+    );
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(JSON.parse(patch?.body ?? "{}")).toEqual({ linkPreview: null });
+    });
+  });
+
+  it("ignores the admin default on a restricted canvas", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({
+          id: "u1",
+          email: "u@x",
+          name: "U",
+          avatarUrl: null,
+          isAdmin: false,
+          linkPreviewDefault: "cover",
+        }),
+      "GET /api/canvases/c1": () => json({ ...CANVAS, linkPreview: null }),
+    });
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: /show in link previews/i });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByText(/on by your organization's default/i)).toBeNull();
+  });
+
   it("hides the link-preview toggle on an open public link (it already unfurls)", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, access: "public_link" }) });
     renderSettings();

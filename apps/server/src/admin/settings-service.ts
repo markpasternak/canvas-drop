@@ -1,5 +1,6 @@
 import { type Config, isSkinName, type SkinName } from "@canvas-drop/shared";
 import { z } from "zod";
+import { isLinkPreviewDefault, type LinkPreviewDefault } from "../canvas/link-preview.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
   asDisplayString,
@@ -20,6 +21,8 @@ const SCREENSHOTS_KEY = "config.screenshots.enabled";
 const DESIGN_SKIN_KEY = "config.core.designSkin";
 /** Instance-wide public-link publishing switch (editable; default on). */
 export const PUBLIC_LINKS_ENABLED_KEY = "access.publicLinksEnabled";
+/** Instance default for whole-org canvas link previews (editable; default off). */
+const LINK_PREVIEW_DEFAULT_KEY = "access.linkPreviewDefault";
 /** Authoring capability instance switch (editable; default off — plan 2026-07-04). */
 const AUTHORING_ENABLED_KEY = "config.authoring.enabled";
 
@@ -298,6 +301,16 @@ export function adminSettingsService(deps: {
      */
     async effectivePublicLinksEnabled(): Promise<boolean> {
       return (await boolOverride(PUBLIC_LINKS_ENABLED_KEY)) ?? true;
+    },
+
+    /**
+     * Effective link-preview default for whole-org canvases whose owner made no
+     * per-canvas choice. Default `off`; a stored value that isn't a known level reads
+     * as `off`, so a bad override can only ever reveal less.
+     */
+    async effectiveLinkPreviewDefault(): Promise<LinkPreviewDefault> {
+      const v = await strOverride(LINK_PREVIEW_DEFAULT_KEY);
+      return isLinkPreviewDefault(v) ? v : "off";
     },
 
     // ── Invite / notification email settings (plan 003 phase 3) ──────────────

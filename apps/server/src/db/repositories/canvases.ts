@@ -40,6 +40,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
+import { linkPreviewModeOf } from "../../canvas/link-preview.js";
 import type { DbClient } from "../factory.js";
 import { teamOrgClause } from "./teams.js";
 
@@ -154,7 +155,8 @@ export interface CanvasSettingsPatch {
   sharedExpiresAt?: number | null;
   spaFallback?: boolean;
   previewMode?: PreviewMode;
-  linkPreview?: boolean;
+  /** The link-preview choice: true = on, false = off, null = follow the instance default. */
+  linkPreview?: boolean | null;
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   tags?: Json;
@@ -829,7 +831,11 @@ export function canvasesRepository(client: DbClient) {
     if (patch.description !== undefined) set.description = patch.description;
     if (patch.spaFallback !== undefined) set.spaFallback = patch.spaFallback;
     if (patch.previewMode !== undefined) set.previewMode = patch.previewMode;
-    if (patch.linkPreview !== undefined) set.linkPreview = patch.linkPreview;
+    if (patch.linkPreview !== undefined) {
+      set.linkPreviewMode = linkPreviewModeOf(patch.linkPreview);
+      // Kept in step (= explicit on) so a rollback to the boolean-only code keeps opt-ins.
+      set.linkPreview = patch.linkPreview === true;
+    }
     if (patch.sharedExpiresAt !== undefined) set.sharedExpiresAt = patch.sharedExpiresAt;
     if (patch.galleryListed !== undefined) {
       set.galleryListed = patch.galleryListed;

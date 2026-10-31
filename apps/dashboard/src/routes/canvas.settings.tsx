@@ -20,6 +20,7 @@ import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
 import { deployCurl } from "../lib/deploy-curl.js";
+import { linkPreviewToggleState } from "../lib/link-preview.js";
 import {
   useArchiveCanvas,
   useClearPreview,
@@ -108,6 +109,11 @@ export default function Settings() {
   // Compute the deploy snippet once and reuse it for both the copy button and the
   // visible <pre> — building it twice risks the two surfaces drifting.
   const curlSnippet = deployCurl({ url: canvas.url, id: canvas.id, apiKey: "$CANVAS_DROP_KEY" });
+  const {
+    on: linkPreviewOn,
+    note: linkPreviewNote,
+    resettable: linkPreviewResettable,
+  } = linkPreviewToggleState(canvas, me?.linkPreviewDefault);
 
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
@@ -241,11 +247,26 @@ export default function Settings() {
               <Toggle
                 label="Show in link previews"
                 description={
-                  canvas.previewMode === "custom"
-                    ? "When someone shares this link in Slack, iMessage or similar apps, show the title, description and your custom cover instead of a generic sign-in card. The canvas itself stays behind sign-in."
-                    : "When someone shares this link in Slack, iMessage or similar apps, show the title and description instead of a generic sign-in card. Upload a custom cover to show it too; automatic screenshots are never shared. The canvas itself stays behind sign-in."
+                  <>
+                    {canvas.previewMode === "custom"
+                      ? "When someone shares this link in Slack, iMessage or similar apps, show the title, description and your custom cover instead of a generic sign-in card. The canvas itself stays behind sign-in."
+                      : "When someone shares this link in Slack, iMessage or similar apps, show the title and description instead of a generic sign-in card. Upload a custom cover to show it too; automatic screenshots are never shared. The canvas itself stays behind sign-in."}
+                    {linkPreviewNote && <> {linkPreviewNote}</>}
+                    {linkPreviewResettable && (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          className="font-medium text-accent hover:underline"
+                          onClick={() => save({ linkPreview: null })}
+                        >
+                          Use your organization's default
+                        </button>
+                      </>
+                    )}
+                  </>
                 }
-                checked={canvas.linkPreview}
+                checked={linkPreviewOn}
                 onChange={(linkPreview) => save({ linkPreview })}
               />
             </>

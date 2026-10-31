@@ -31,6 +31,9 @@ Cover image, MCP `update_canvas`) to unfurl with its title, description and cust
 instead of the generic sign-in card; automatic screenshots never leave. The same day fixed
 blank screenshot covers on smooth-scrolling canvases and broken unfurl images. See
 [the learnings](solutions/2026-10-01-link-unfurls-and-preview-covers.md).
+On 31 October 2026 an admin default followed (`access.linkPreviewDefault`: off, title or
+cover, whole-org canvases only), the per-canvas choice became on / off / follow the
+default, and the generic card is titled with the canvas name from the link itself.
 
 Multi-account sign-in (27 October 2026, oidc mode): a browser can stay signed in with up
 to five accounts and switch between them from the account menu. A canvas the active

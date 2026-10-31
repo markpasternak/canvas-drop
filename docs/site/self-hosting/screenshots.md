@@ -62,12 +62,24 @@ Each canvas owner controls its cover from **Settings → Preview** (and over MCP
 
 A link to a canvas that isn't an open public link unfurls (Slack, iMessage, …) with a
 generic canvas-drop sign-in card: the unfurler fetches the link signed out, so by default
-nothing about the canvas leaves the instance. Its image is the instance's own `/og.png`
-on the base URL.
+nothing about the canvas leaves the instance. The card is titled with the canvas name
+from the link itself (`seenthisroadmap`, for example), which the sharer already pasted;
+it is read from the URL, never looked up, so an unknown name gets the same card. Its
+image is the instance's own `/og.png` on the base URL.
 
-The owner or an editor can opt a canvas in with **Settings → Cover image → Show in link
-previews** (MCP: `update_canvas` `linkPreview: true`). A live, published, unexpired canvas
-that has opted in unfurls with its **title, description and custom cover**. An automatic
+The owner or an editor can turn a canvas's preview on or off with **Settings → Cover
+image → Show in link previews** (MCP: `update_canvas` `linkPreview: true` or `false`;
+`null` follows the instance default again). An admin can also set an instance default
+for **whole-org canvases** under **Admin → Configuration → Access → Link previews for
+whole-org canvases** (`access.linkPreviewDefault`): `off` (the default), `title` (title
+and description, branded image) or `cover` (also the custom cover). It applies to
+whole-org canvases that have no choice of their own; restricted canvases and
+password-protected public links show a preview only when turned on per canvas. Anyone
+holding the link can see what the default allows, in any app, not just your own
+workspace's chat.
+
+A live, published, unexpired canvas whose preview is on unfurls with its **title,
+description and custom cover**. An automatic
 screenshot is never shown, because it can capture real content: without a custom cover
 the card uses the branded image. The canvas itself stays behind sign-in, and turning the
 setting on or off is audited as a `share_change`. This applies in `oidc` auth mode, where
