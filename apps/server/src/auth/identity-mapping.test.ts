@@ -8,6 +8,7 @@ import {
   isAdminEmail,
   isEmailDomainAllowed,
   mapIdentityToUser,
+  userStillAdmitted,
 } from "./identity-mapping.js";
 
 const config = loadConfig({
@@ -87,5 +88,40 @@ describe("mapIdentityToUser", () => {
     // second call reuses the same row
     const again = await mapIdentityToUser(repo, { sub: "s1", email: "Mark@Example.com" }, config);
     expect(again.id).toBe(user.id);
+  });
+});
+
+describe("userStillAdmitted (realtime liveness)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("drops a user whose individual sign-in permit was removed, or who is blocked", async () => {
+    client = await makeTestDb("sqlite");
+    const repo = usersRepository(client);
+    const outsider = await repo.upsert({
+      providerSub: "s-out",
+      email: "guest@outside.org",
+      name: "Guest",
+      isAdmin: false,
+    });
+    const member = await repo.upsert({
+      providerSub: "s-in",
+      email: "a@example.com",
+      name: "A",
+      isAdmin: false,
+    });
+    let permitted = true;
+    const live = userStillAdmitted(repo, { isAllowed: async () => permitted }, config);
+
+    expect(await live(outsider.id)).toBe(true);
+    permitted = false; // the admin removes the permit
+    expect(await live(outsider.id)).toBe(false);
+    // Domain-admitted members don't depend on the permit list.
+    expect(await live(member.id)).toBe(true);
+    await repo.setBlocked(member.id, true);
+    expect(await live(member.id)).toBe(false);
+    expect(await live("no-such-user")).toBe(false);
   });
 });

@@ -36,6 +36,10 @@ export interface DraftApiDeps {
  *  loaded for the path, or the literal `none` for a path it believes absent. */
 const FILE_HASH_HEADER = "If-Draft-File-Hash";
 
+/** CSP sandbox for draft previews: scripts, forms, dialogs and popups run, but never
+ *  `allow-same-origin` — matching the inline preview and on-page editor iframes. */
+const DRAFT_SANDBOX = "sandbox allow-scripts allow-forms allow-modals allow-popups";
+
 function previewNotFound(c: Context<AppEnv>): Response {
   return c.body(JSON.stringify({ error: "not_found" }), 404, {
     "Content-Type": "application/json",
@@ -126,6 +130,9 @@ export function draftApiRoutes(deps: DraftApiDeps) {
         "Content-Type": mimeFor(path).contentType,
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
+        // The editor reads these bytes with fetch(); opened directly they must not
+        // run on the dashboard origin.
+        "Content-Security-Policy": "sandbox",
       },
     });
   });
@@ -237,7 +244,10 @@ export function draftApiRoutes(deps: DraftApiDeps) {
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
           "Referrer-Policy": "same-origin",
-          "Content-Security-Policy": canvasFrameAncestors(deps.config),
+          // Draft bytes are editor-written and served from the dashboard origin, so
+          // the document always runs in an opaque origin — framed or top-level —
+          // and can never act with the viewer's dashboard session.
+          "Content-Security-Policy": `${canvasFrameAncestors(deps.config)}; ${DRAFT_SANDBOX}`,
         },
       });
     } catch (err) {

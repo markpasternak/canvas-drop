@@ -20,6 +20,7 @@ import { makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
+import { signConsent } from "./consent.js";
 import { type McpAuditSink, McpOAuthProvider } from "./provider.js";
 
 const silent = pino({ level: "silent" });
@@ -36,11 +37,15 @@ const PARAMS: AuthorizationParams = {
   scopes: [],
 };
 
-function fakeCtx(): Context<AppEnv> {
+function fakeCtx(url = "http://localhost:3000/authorize"): Context<AppEnv> {
   let res: Response | undefined;
   return {
     get: () => "127.0.0.1",
-    req: { header: () => "localhost:3000", url: "http://localhost:3000/authorize" },
+    req: {
+      header: () => "localhost:3000",
+      query: (k: string) => new URL(url).searchParams.get(k) ?? undefined,
+      url,
+    },
     redirect: (to: string) => new Response(null, { status: 302, headers: { location: to } }),
     get res() {
       return res;
@@ -72,7 +77,16 @@ describe("MCP OAuth lifecycle audit", () => {
       audit,
     });
 
-    const c = fakeCtx();
+    // First pass shows the consent page; the approved second pass issues the code.
+    await provider.authorize(CLIENT, PARAMS, fakeCtx());
+    const user = await usersRepository(client).findByEmail("o@example.com");
+    const consent = signConsent(config.sessionSecret, {
+      userId: user?.id ?? "",
+      clientId: CLIENT.client_id,
+      redirectUri: PARAMS.redirectUri,
+      codeChallenge: PARAMS.codeChallenge,
+    });
+    const c = fakeCtx(`http://localhost:3000/authorize?consent=${encodeURIComponent(consent)}`);
     await provider.authorize(CLIENT, PARAMS, c);
     const loc = c.res?.headers.get("location");
     if (!loc) throw new Error("no redirect");
@@ -85,6 +99,7 @@ describe("MCP OAuth lifecycle audit", () => {
     );
     await provider.revokeToken(CLIENT, { token: tokens.access_token });
 
+    expect(events).toContain("mcp_authorize_consent_prompt");
     expect(events).toContain("mcp_authorize_ok");
     expect(events).toContain("mcp_token_issue");
     expect(events).toContain("mcp_token_revoke");

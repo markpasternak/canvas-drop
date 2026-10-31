@@ -85,8 +85,8 @@ export function CreatePreview({
         </div>
       )}
       <p className="text-xs text-muted">
-        Layout only. Scripts, links, and external assets are off. Use the editor’s full preview
-        after creating your canvas.
+        Layout only. Scripts, links, and external assets are off. Use the editor’s preview after
+        creating your canvas.
       </p>
     </section>
   );

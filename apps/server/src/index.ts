@@ -6,6 +6,7 @@ import { adminSettingsService } from "./admin/settings-service.js";
 import { buildApp } from "./app.js";
 import { createAuditLog } from "./audit/audit-log.js";
 import { setupAuth } from "./auth/factory.js";
+import { userStillAdmitted } from "./auth/identity-mapping.js";
 import { makeOidc, makeOidcConfigLoader } from "./auth/oidc.js";
 import { makeOrgMembershipResolver } from "./auth/org-membership.js";
 import { canvasUrl } from "./canvas/url.js";
@@ -158,10 +159,9 @@ async function main() {
   const hub = createHub({
     config,
     resolveCanvas: (id) => canvases.findById(id),
-    isUserActive: async (id) => {
-      const u = await users.findById(id);
-      return !!u && !u.isBlocked;
-    },
+    // …and the account must still be admitted to sign in (block, delete, or a removed
+    // sign-in permit), the same check the gateway applies per request.
+    isUserActive: userStillAdmitted(users, allowedEmails, config),
     // Live re-auth of a specific_people canvas needs allowlist membership (U3).
     isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
     // …and a team canvas needs the live team re-join (plan 003 U4).

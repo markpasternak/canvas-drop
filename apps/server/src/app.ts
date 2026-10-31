@@ -61,6 +61,7 @@ import { noopMailer } from "./email/noop.js";
 import { checkHealth } from "./health.js";
 import { brandAssetRoutes } from "./http/brand-assets.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
+import { canvasHostGuard } from "./http/canvas-host-guard.js";
 import { resolveClientIp } from "./http/client-ip.js";
 import { errorPageMiddleware, errorResponse } from "./http/error-pages.js";
 import { landingGate, landingResponse } from "./http/landing-page.js";
@@ -332,6 +333,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     if (client) c.set("clientIp", client);
     await next();
   });
+
+  // Platform routes never answer on a canvas host — ahead of every pre-gateway router.
+  app.use("*", canvasHostGuard(deps.config));
 
   // Public health check.
   app.get("/healthz", async (c) => {
