@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { type Config, loadConfig } from "@canvas-drop/shared";
-import { sql } from "drizzle-orm";
 import { pino } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
@@ -496,6 +495,8 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
       isAdmin: false,
     });
     const canvas = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
+    /** The service's clock; a test moves it forward to let a finalize lease lapse. */
+    const clock = { now: Date.now() };
     const svc = uploadService({
       config,
       canvases,
@@ -504,6 +505,7 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
       storage,
       engine,
       log: silent,
+      now: () => clock.now,
     });
     /** An unrelated publication landing in between (an editor publish). */
     const publishElsewhere = async () => {
@@ -543,6 +545,7 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
       session,
       readyRows,
       hooks,
+      clock,
     };
   }
 
@@ -638,10 +641,11 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
     // Attempt A claims, then stalls on its storage checks past FINALIZE_LEASE_MS; the
     // client's retry (B) re-claims the stale lease, publishes with the captured token and
     // rotates it. A then loses its own activation and must NOT reopen B's consumed handle.
+    // The lease lapses by moving the service clock, as real time would: B's claim stamp
+    // is then strictly newer than A's. (Backdating the row instead let B re-claim in the
+    // same millisecond as A, giving both the same stamp, so A's fence matched B's lease.)
     t.hooks.onExists = async () => {
-      const q = sql`update upload_sessions set finalizing_at = finalizing_at - ${FINALIZE_LEASE_MS + 1000} where handle_hash = ${handle}`;
-      if (client.dialect === "sqlite") client.db.run(q);
-      else await client.db.execute(q);
+      t.clock.now += FINALIZE_LEASE_MS + 1000;
       newer = await t.svc.finalize(id, t.ownerId, t.canvas.id);
     };
     await expect(t.svc.finalize(id, t.ownerId, t.canvas.id)).rejects.toMatchObject({

@@ -90,11 +90,19 @@ export function uploadSessionsRepository(client: DbClient) {
      * row or null when another live finalize holds it or it's already consumed —
      * the caller re-reads to distinguish "in progress" from "already finalized".
      * The lease lets a legitimate retry resume after a crashed/transient attempt.
+     *
+     * `stamp` is the lease value written, from the same clock as `staleBefore`. A
+     * re-claim only succeeds once the old stamp is at or before `staleBefore`, so each
+     * successive stamp is strictly newer — the property `unconsume`'s fence relies on.
      */
-    async claimForFinalize(handleHash: string, staleBefore: number): Promise<UploadSession | null> {
+    async claimForFinalize(
+      handleHash: string,
+      staleBefore: number,
+      stamp: number = Date.now(),
+    ): Promise<UploadSession | null> {
       const rows = await db
         .update(t)
-        .set({ finalizingAt: Date.now() })
+        .set({ finalizingAt: stamp })
         .where(
           and(
             eq(t.handleHash, handleHash),

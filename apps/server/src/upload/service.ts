@@ -364,9 +364,11 @@ export function uploadService(deps: UploadServiceDeps) {
       const early = await deps.engine.precheck(canvasRow, coord);
       if (early) return deps.engine.toResult(canvasRow, early);
 
+      const claimedAt = now();
       const claimed = await deps.uploadSessions.claimForFinalize(
         handleHash,
-        now() - FINALIZE_LEASE_MS,
+        claimedAt - FINALIZE_LEASE_MS,
+        claimedAt,
       );
       if (!claimed) {
         const s = await deps.uploadSessions.findByHandleHash(handleHash);
