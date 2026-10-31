@@ -152,11 +152,12 @@ describe.each(DIALECTS)("uploadSessionsRepository (%s)", (dialect) => {
 
   it("unconsume is fenced on the lease: a stale claimant cannot reopen a handle a newer attempt consumed", async () => {
     const s = await sessions.create(base());
-    const stale = await sessions.claimForFinalize(s.handleHash, 0);
+    const t0 = Date.now();
+    const stale = await sessions.claimForFinalize(s.handleHash, t0 - 60_000, t0);
     expect(stale).not.toBeNull();
     // The first attempt outlives its lease; the retry re-claims with a newer stamp and consumes.
-    await new Promise((r) => setTimeout(r, 5));
-    const newer = await sessions.claimForFinalize(s.handleHash, Date.now() + 1);
+    const t1 = t0 + 61_000;
+    const newer = await sessions.claimForFinalize(s.handleHash, t1 - 60_000, t1);
     expect(newer).not.toBeNull();
     expect(newer?.finalizingAt).not.toBe(stale?.finalizingAt);
     await sessions.markConsumed(s.id);
