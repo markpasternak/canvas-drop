@@ -137,6 +137,17 @@ function publicationChanged(
  */
 export function deployEngine(deps: DeployEngineDeps) {
   return {
+    /**
+     * Schedule a fresh preview capture of the canvas's live version. Called when a
+     * canvas returns to `auto` (a custom cover removed, or auto turned back on) so it
+     * gets a current screenshot now instead of at the next publish. Gated and
+     * best-effort inside the trigger (auto mode + pipeline on); no-op when unpublished.
+     */
+    async recapture(canvas: Canvas): Promise<void> {
+      if (!canvas.currentVersionId) return;
+      await deps.screenshots?.enqueue(canvas, canvas.currentVersionId);
+    },
+
     async deploy(
       canvas: Canvas,
       source: DeploySource,

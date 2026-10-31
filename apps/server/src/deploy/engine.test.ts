@@ -382,6 +382,17 @@ describe("deployEngine", () => {
     await engine.deploy(cv, "api", folder({ "index.html": "v1" }), owner.id);
     const live = await canvases.findById(cv.id);
     expect(calls).toEqual([[cv.id, live?.currentVersionId]]);
+
+    // recapture schedules the live version again (a custom cover removed / auto back
+    // on), and is a no-op for a canvas with nothing published.
+    if (!live) throw new Error("canvas missing");
+    await engine.recapture(live);
+    expect(calls).toEqual([
+      [cv.id, live.currentVersionId],
+      [cv.id, live.currentVersionId],
+    ]);
+    await engine.recapture({ ...live, currentVersionId: null });
+    expect(calls).toHaveLength(2);
   });
 });
 
