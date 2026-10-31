@@ -1,6 +1,16 @@
-import { mcpAuthRouter, StreamableHTTPTransport } from "@hono/mcp";
+import { StreamableHTTPTransport } from "@hono/mcp";
+import {
+  authenticateClient,
+  authorizeHandler,
+  clientRegistrationHandler,
+  createOAuthMetadata,
+  revokeHandler,
+  tokenHandler,
+  wellKnownRouter,
+} from "@hono/mcp/auth";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import type { AuthStrategy } from "../auth/strategy.js";
@@ -86,21 +96,9 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   // The consent form's POST — ahead of the AS router (its `/authorize` POST takes JSON).
   app.post("/authorize/consent", smallFormLimit(), (c) => provider.handleConsent(c));
 
-  // OAuth AS endpoints + authorization-server / protected-resource metadata. Must
-  // mount at root so the `.well-known/*` discovery documents resolve (RFC 8414/9728).
-  app.route(
-    "/",
-    mcpAuthRouter({
-      provider,
-      issuerUrl: new URL(deps.config.baseUrl),
-      scopesSupported: ["canvas-drop"],
-      resourceName: "canvas-drop",
-      authorizationOptions: { rateLimit: false },
-      tokenOptions: { rateLimit: false },
-      clientRegistrationOptions: { rateLimit: false },
-      revocationOptions: { rateLimit: false },
-    }),
-  );
+  // OAuth AS endpoints + authorization-server / protected-resource metadata, at root so
+  // the `.well-known/*` discovery documents resolve (RFC 8414/9728).
+  app.route("/", oauthServerRouter(provider, new URL(deps.config.baseUrl)));
 
   // Built from the configured base URL (not the request origin) so the scheme is
   // correct behind a TLS-terminating proxy — the internal hop is plain http, which
@@ -239,4 +237,42 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   );
 
   return app;
+}
+
+/** The OAuth AS paths a browser-based MCP client may call cross-origin. */
+export const OAUTH_CORS_PATHS = [
+  "/authorize",
+  "/token",
+  "/register",
+  "/revoke",
+  "/.well-known/oauth-authorization-server",
+  "/.well-known/oauth-protected-resource",
+] as const;
+
+/**
+ * The routes `@hono/mcp`'s `mcpAuthRouter` builds, assembled from its exported
+ * handlers. That router opens with `use(cors())`, and mounted at root its wildcard
+ * CORS covered every route in the app, not just OAuth. Here CORS is scoped to
+ * {@link OAUTH_CORS_PATHS}. Rate limiting is ours (`oauthLimits` above), so the
+ * library's limiters are not wired in.
+ */
+function oauthServerRouter(provider: McpOAuthProvider, issuerUrl: URL): Hono {
+  const metadata = createOAuthMetadata({ provider, issuerUrl, scopesSupported: ["canvas-drop"] });
+  const router = new Hono();
+  for (const path of OAUTH_CORS_PATHS) router.use(path, cors());
+  const clientAuth = authenticateClient({ clientsStore: provider.clientsStore });
+  router.on(["GET", "POST"], "/authorize", authorizeHandler(provider));
+  router.post("/token", clientAuth, tokenHandler(provider));
+  router.post("/register", clientRegistrationHandler({ clientsStore: provider.clientsStore }));
+  router.post("/revoke", clientAuth, revokeHandler(provider));
+  router.route(
+    "/",
+    wellKnownRouter({
+      oauthMetadata: metadata,
+      resourceServerUrl: new URL(metadata.issuer),
+      scopesSupported: ["canvas-drop"],
+      resourceName: "canvas-drop",
+    }),
+  );
+  return router;
 }
