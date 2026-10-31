@@ -18,8 +18,16 @@ import type { ResolvedIdentity } from "./strategy.js";
  * shared cookie, a second sign-in started before the first finished (another tab, a
  * restored session's tabs, two shared links opened at once) replaced the first's
  * transaction, which then came back as `state_mismatch` with the wrong returnTo. The
- * bare name is the pre-split cookie, still read so a sign-in in flight across a
- * deploy completes.
+ * bare name is the pre-split cookie: deleted when seen, never read.
+ *
+ * The cookie is host-only on the base host and, in production, carries the `__Host-`
+ * prefix (audit run-1, #5). In subdomain mode a canvas page's script can create a
+ * cookie for the parent domain under any other name, and the browser would send it to
+ * the callback. A planted transaction (an attacker's own state, verifier and unused
+ * code) would sign the visitor in as the attacker. A browser refuses a `__Host-` cookie
+ * from any other host, so the callback only accepts a transaction the base host set
+ * in this browser. Sign-in always starts there: canvas hosts redirect `/auth/login` to
+ * it (canvas-host-guard.ts).
  */
 export const OIDC_TX_COOKIE = "__canvasdrop_oidc";
 
@@ -37,21 +45,28 @@ const MAX_TX_BYTES = 2048;
 /** Shape of a state we minted ({@link client.randomState}: base64url). */
 const STATE_RE = /^[A-Za-z0-9_-]{16,128}$/;
 
-const txCookieName = (state: string) => `${OIDC_TX_COOKIE}_${state}`;
+/** Per-sign-in cookie names start with this; `__Host-` needs `Secure`, so production only. */
+const txCookiePrefix = (config: Config) =>
+  `${config.isProduction ? "__Host-" : ""}${OIDC_TX_COOKIE}_`;
+const txCookieName = (config: Config, state: string) => `${txCookiePrefix(config)}${state}`;
 
 /**
- * Cookie options for the short-lived OIDC transaction cookie. In `subdomain` mode
- * login can begin on a canvas subdomain (`<slug>.{host}`) while the callback runs
- * on the apex (the `redirect_uri` is built from `baseUrl`), so the cookie MUST be
- * scoped to the parent domain — a host-only cookie set on the subdomain is invisible
- * at the apex callback, which surfaces as `missing_oidc_state` or (with a stale apex
- * cookie) `state_mismatch`. Mirrors the session/guest cookies (session.ts, guest.ts).
+ * Cookie options for the short-lived OIDC transaction cookie: host-only (no `Domain`)
+ * on the base host, where both `/auth/login` and the callback run. See
+ * {@link OIDC_TX_COOKIE} for why it must not be readable from a parent-domain cookie.
  */
 function txCookieOptions(config: Config) {
   return {
     httpOnly: true,
     secure: config.isProduction,
     sameSite: "Lax" as const,
+    path: "/",
+  };
+}
+
+/** How the pre-split and pre-host-only cookies were scoped, so they can be deleted. */
+function legacyTxCookieOptions(config: Config) {
+  return {
     path: "/",
     ...(config.urlMode === "subdomain" ? { domain: `.${new URL(config.baseUrl).hostname}` } : {}),
   };
@@ -197,11 +212,11 @@ export function makeOidc(deps: OidcDeps) {
       });
       // Keep at most MAX_PENDING_TX sign-ins in flight (abandoned ones would otherwise
       // pile up for their 10 minutes): drop the oldest before adding this one.
-      const pending = pendingTx(c).sort((a, b) => a.t - b.t);
+      const pending = pendingTx(c, deps.config).sort((a, b) => a.t - b.t);
       for (const stale of pending.slice(0, Math.max(0, pending.length - (MAX_PENDING_TX - 1)))) {
         deleteCookie(c, stale.name, txCookieOptions(deps.config));
       }
-      setCookie(c, txCookieName(state), txValue({ state, verifier, t: Date.now() }, returnTo), {
+      setCookie(c, txCookieName(deps.config, state), txValue({ state, verifier, t: Date.now() }, returnTo), {
         ...txCookieOptions(deps.config),
         maxAge: TX_MAX_AGE,
       });
@@ -212,15 +227,11 @@ export function makeOidc(deps: OidcDeps) {
     async callback(c: Context<AppEnv>) {
       const currentUrl = new URL(c.req.url);
       const stateParam = currentUrl.searchParams.get("state");
-      const tx = readTx(c, stateParam);
-      if (tx && tx.cookie !== OIDC_TX_COOKIE) {
-        deleteCookie(c, tx.cookie, txCookieOptions(deps.config));
-      }
+      const tx = readTx(c, deps.config, stateParam);
+      if (tx) deleteCookie(c, tx.cookie, txCookieOptions(deps.config));
       if (getCookie(c, OIDC_TX_COOKIE) !== undefined) {
-        deleteCookie(c, OIDC_TX_COOKIE, txCookieOptions(deps.config));
-        // Also reap any legacy host-only tx cookie left over from before the cookie
-        // was domain-scoped — the domain-scoped delete above won't match it, and a
-        // stale one coexisting on the apex could itself trigger a state_mismatch.
+        // The pre-split cookie is never read; reap it in both of its old scopes.
+        deleteCookie(c, OIDC_TX_COOKIE, legacyTxCookieOptions(deps.config));
         if (deps.config.urlMode === "subdomain") {
           deleteCookie(c, OIDC_TX_COOKIE, { path: "/" });
         }
@@ -354,8 +365,8 @@ export async function completeLogin(
     return c.json({ error: "forbidden" }, 403);
   }
   await deps.sessionSvc.issue(c, user.id);
-  // Re-validate at the seam: the tx cookie is httpOnly but unsigned, so never trust
-  // its returnTo without re-checking it can't escape this instance (defense in depth).
+  // Re-validate at the seam: never trust the tx cookie's returnTo without re-checking
+  // it can't escape this instance (defense in depth).
   return c.redirect(safeReturnTo(deps.config, returnTo) ?? "/");
 }
 
@@ -407,19 +418,16 @@ function txValue(base: { state: string; verifier: string; t: number }, returnTo?
   return JSON.stringify(base);
 }
 
-/** The transaction for the callback's `state`: its own cookie, else the pre-split one. */
-function readTx(c: Context<AppEnv>, state: string | null): Tx | null {
-  if (state && STATE_RE.test(state)) {
-    const name = txCookieName(state);
-    const own = parseTx(name, getCookie(c, name));
-    if (own) return own;
-  }
-  return parseTx(OIDC_TX_COOKIE, getCookie(c, OIDC_TX_COOKIE));
+/** The transaction for the callback's `state`: only its own cookie. */
+function readTx(c: Context<AppEnv>, config: Config, state: string | null): Tx | null {
+  if (!state || !STATE_RE.test(state)) return null;
+  const name = txCookieName(config, state);
+  return parseTx(name, getCookie(c, name));
 }
 
 /** Every per-sign-in transaction cookie this browser sent. */
-function pendingTx(c: Context<AppEnv>): Array<{ name: string; t: number }> {
-  const prefix = `${OIDC_TX_COOKIE}_`;
+function pendingTx(c: Context<AppEnv>, config: Config): Array<{ name: string; t: number }> {
+  const prefix = txCookiePrefix(config);
   return Object.entries(getCookie(c))
     .filter(([name]) => name.startsWith(prefix))
     .map(([name, raw]) => ({ name, t: parseTx(name, raw)?.t ?? 0 }));

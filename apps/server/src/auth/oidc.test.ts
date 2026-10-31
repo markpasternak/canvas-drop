@@ -35,6 +35,9 @@ const config: Config = loadConfig({
 });
 
 const OIDC_TX_COOKIE = "__canvasdrop_oidc";
+/** Two well-formed states (STATE_RE: 16+ base64url chars). */
+const S1 = "state-one-0123456789";
+const S2 = "state-two-0123456789";
 
 /** Capturing audit sink — the assertion surface for "every rejection is recorded". */
 function recordingAudit(): AuthEventSink & { events: AuthEvent[] } {
@@ -82,7 +85,7 @@ function buildApp(client: DbClient, audit?: AuthEventSink) {
 describe("oidc login — authorization request", () => {
   // A real openid-client Configuration built from static metadata — login()
   // does no network of its own, so buildAuthorizationUrl runs offline here.
-  function loginApp(signedInAs: string | null = null): Hono<AppEnv> {
+  function loginApp(signedInAs: string | null = null, appConfig: Config = config): Hono<AppEnv> {
     const cfg = new client.Configuration(
       {
         issuer: "https://idp.example.com",
@@ -94,7 +97,7 @@ describe("oidc login — authorization request", () => {
       "secret",
     );
     const oidc = makeOidc({
-      config,
+      config: appConfig,
       // biome-ignore lint/suspicious/noExplicitAny: repos unused by login()
       users: {} as any,
       allowedEmails: { isAllowed: async () => false },
@@ -130,15 +133,35 @@ describe("oidc login — authorization request", () => {
     expect(loc.searchParams.get("prompt")).toBe("login");
   });
 
-  it("scopes the transaction cookie to the parent domain in subdomain mode so the apex callback can read it", async () => {
-    // Regression: a host-only tx cookie set on a canvas subdomain is invisible at the
-    // apex /auth/callback (redirect_uri is built from baseUrl), causing state_mismatch.
+  it("keeps the transaction cookie host-only on the base host, __Host- in production (audit #5)", async () => {
+    // A parent-domain transaction cookie could be planted by a canvas page's script;
+    // sign-in always starts on the base host now, so the cookie never needs a Domain.
     const res = await loginApp().request("/auth/login");
     const txCookie = res.headers
       .getSetCookie()
       .find((c) => c.startsWith(`${OIDC_TX_COOKIE}_`)) as string;
     expect(txCookie).toBeTruthy();
-    expect(txCookie).toMatch(/Domain=\.?canvases\.example\.com/i);
+    expect(txCookie).not.toMatch(/Domain=/i);
+
+    const production = loadConfig({
+      NODE_ENV: "production",
+      CANVAS_DROP_AUTH_MODE: "oidc",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_OIDC_ISSUER: "https://idp.example.com",
+      CANVAS_DROP_OIDC_CLIENT_ID: "client",
+      CANVAS_DROP_OIDC_CLIENT_SECRET: "secret",
+    });
+    const prod = await loginApp(null, production).request("/auth/login");
+    const hostCookie = prod.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(`__Host-${OIDC_TX_COOKIE}_`)) as string;
+    expect(hostCookie).toBeTruthy();
+    expect(hostCookie).toMatch(/; Secure/i);
+    expect(hostCookie).toMatch(/; Path=\//i);
+    expect(hostCookie).not.toMatch(/Domain=/i);
   });
 
   it("captures and round-trips a validated returnTo through the tx cookie", async () => {
@@ -194,12 +217,24 @@ describe.each(DIALECTS)("oidc callback — pre-exchange guards [%s]", (dialect) 
 
   it("rejects a callback whose state does not match the transaction (CSRF defense)", async () => {
     client = await makeTestDb(dialect);
-    const tx = encodeURIComponent(JSON.stringify({ state: "s1", verifier: "v1" }));
-    const res = await buildApp(client).request("/auth/callback?state=s2&code=x", {
-      headers: { Cookie: `${OIDC_TX_COOKIE}=${tx}` },
+    // A cookie filed under the callback's state but carrying another state.
+    const tx = encodeURIComponent(JSON.stringify({ state: S1, verifier: "v1" }));
+    const res = await buildApp(client).request(`/auth/callback?state=${S2}&code=x`, {
+      headers: { Cookie: `${OIDC_TX_COOKIE}_${S2}=${tx}` },
     });
     expect(res.status).toBe(400);
     expect((await jsonOf<{ error: string }>(res)).error).toBe("state_mismatch");
+  });
+
+  it("ignores the legacy unsuffixed transaction cookie, even with a matching state (audit #5)", async () => {
+    client = await makeTestDb(dialect);
+    // A canvas script can plant this name for the parent domain; it is never read.
+    const tx = encodeURIComponent(JSON.stringify({ state: S1, verifier: "v1" }));
+    const res = await buildApp(client).request(`/auth/callback?state=${S1}&code=x`, {
+      headers: { Cookie: `${OIDC_TX_COOKIE}=${tx}` },
+    });
+    expect(res.status).toBe(400);
+    expect((await jsonOf<{ error: string }>(res)).error).toBe("missing_oidc_state");
   });
 });
 
@@ -361,9 +396,9 @@ describe.each(DIALECTS)("oidc denials are audited [%s]", (dialect) => {
     ]);
 
     const mismatch = recordingAudit();
-    const tx = encodeURIComponent(JSON.stringify({ state: "s1", verifier: "v1" }));
-    await buildApp(client, mismatch).request("/auth/callback?state=s2&code=x", {
-      headers: { Cookie: `${OIDC_TX_COOKIE}=${tx}` },
+    const tx = encodeURIComponent(JSON.stringify({ state: S1, verifier: "v1" }));
+    await buildApp(client, mismatch).request(`/auth/callback?state=${S2}&code=x`, {
+      headers: { Cookie: `${OIDC_TX_COOKIE}_${S2}=${tx}` },
     });
     expect(mismatch.events).toEqual([
       { action: "auth_denied", reason: "state_mismatch", ip: "127.0.0.1" },
