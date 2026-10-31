@@ -72,7 +72,7 @@ The **Upload files** source accepts files, a folder, or one ZIP. Selection stays
 
 The published result leads with your canvas link and audience. Open the canvas or manage sharing in a new tab while the result stays available. The deploy key is optional for dashboard use: expand **Save your deploy key (shown once)** to copy it, or explicitly continue without saving it. It is never stored in your browser.
 
-Pasted HTML gets a layout-only document preview, with scripts, navigation, and external assets disabled. Its document title is suggested until you edit the title yourself. Files and ZIPs show a summary; use the editor’s full preview after creation to check the complete site.
+Pasted HTML gets a layout-only document preview, with scripts, navigation, and external assets disabled. Its document title is suggested until you edit the title yourself. Files and ZIPs show a summary; use the editor’s full preview after creation to check the layout. The preview is sandboxed, so modules and signed-in features (`me()`, KV, files, AI, realtime) only run at the published canvas URL.
 
 ## Files or folder
 

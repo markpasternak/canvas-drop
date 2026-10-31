@@ -48,10 +48,23 @@ provider. A compliant client needs nothing but the URL:
    `oidc` mode a signed-out browser goes through the normal login and back; in `proxy`
    and `dev` mode identity is already present, and a request without it is denied. PKCE
    `S256` is required.
+
+   The first time you connect a client, a consent page asks **Allow *client name* to use
+   your canvas-drop account?** and shows where it will send you back. **Allow** issues
+   the code; **Cancel** returns `error=access_denied` to the client. The approval is
+   remembered while that client holds a live refresh token, so a re-authorization
+   (an expired access token, a reconnect) goes straight through. Revoking the client's
+   tokens brings the prompt back. The page cannot be framed, and its form only posts to
+   `{base}/authorize/consent` from the same origin.
 4. **Tokens.** `POST {base}/token` exchanges the single-use code (60 s lifetime; client
    id and redirect URI must match) for an access token (`token_type: "bearer"`,
    `expires_in: 3600`) and a refresh token. Refresh tokens rotate on every use.
    `POST {base}/revoke` revokes.
+
+These endpoints are rate-limited per client IP: `/register` 30 per hour, `/authorize`
+120, `/authorize/consent` 60, `/token` 300 and `/revoke` 120 per 15 minutes. Over the
+limit they answer `429 { "error": "rate_limited" }` with `Retry-After`. Like every
+limit, they are off when `CANVAS_DROP_RATELIMIT_ENABLED=false`.
 
 Every tool call carries `Authorization: Bearer <access_token>`. Tokens are stored
 hashed. On each call the server looks the token up and re-checks that the account is

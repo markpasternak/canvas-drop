@@ -326,8 +326,16 @@ master switch to disable limiting.
 | `CANVAS_DROP_RATELIMIT_AI_PER_MIN` | `10` | AI proxy calls. |
 | `CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN` | `10` | Deploy API, keyed per canvas, applied after key verification. |
 | `CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN` | `120` | Dashboard management routes. |
-| `CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN` | `10` | Keyed on the resolved client IP. |
+| `CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN` | `10` | Keyed on the resolved client IP. Applies to `/auth/login` and, as a separate bucket, `/auth/callback`. |
 | `CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN` | `5` | Password attempts on gated canvases. |
+
+The MCP OAuth endpoints have fixed per-IP budgets, which the master switch also turns
+off: `/register` 30 per hour; `/authorize`, `/authorize/consent`, `/token` and `/revoke`
+120, 60, 300 and 120 per 15 minutes. Two resource caps are always on: form posts
+reachable before sign-in (`/auth/*` and a canvas's password form) are capped at a
+16 KiB body (`413` above it), and at most four canvas-password checks run at once per
+process. When the queue behind them is full, the gate answers `503` with
+`Retry-After: 2`.
 
 ## AI (optional)
 
