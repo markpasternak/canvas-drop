@@ -22,6 +22,7 @@ export function RenameSlugDialog({
   onConfirm,
   me,
   shared,
+  canvasId,
   loading = false,
 }: {
   open: boolean;
@@ -30,6 +31,8 @@ export function RenameSlugDialog({
   me: Me | undefined;
   /** Whether the canvas is shared — adds the "link you've shared" clause. */
   shared: boolean;
+  /** The canvas being renamed (for the availability check). */
+  canvasId?: string;
   loading?: boolean;
 }) {
   const [resolved, setResolved] = useState<{ slug: string; status: SlugStatus }>({
@@ -55,6 +58,7 @@ export function RenameSlugDialog({
           instance={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
           onResolved={setResolved}
           idleHint="Leave empty to generate a new random slug."
+          canvasId={canvasId}
           autoFocus
         />
         <label className="flex items-start gap-2 text-sm text-fg">

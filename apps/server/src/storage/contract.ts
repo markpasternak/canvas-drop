@@ -24,8 +24,10 @@ export function storageContract(makeDriver: () => StorageDriver | Promise<Storag
     const d = await makeDriver();
     await d.put("x.txt", new Uint8Array([1, 2, 3]));
     expect(await d.exists("x.txt")).toBe(true);
+    expect(await d.size("x.txt")).toBe(3);
     await d.delete("x.txt");
     expect(await d.exists("x.txt")).toBe(false);
+    expect(await d.size("x.txt")).toBeNull();
     expect(await d.get("x.txt")).toBeNull();
   });
 

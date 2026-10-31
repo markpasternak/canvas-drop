@@ -18,6 +18,7 @@ import {
   type PreviewMode,
   pgSchema,
   RESTRICTED_RUNGS,
+  type ReleasedSlug,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
 import {
@@ -266,6 +267,19 @@ export type CanvasesSort = "updated" | "created" | "title" | "popular";
 /** Default trending window for the `popular` sort when the caller passes none (30d). */
 export const POPULAR_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
+/** How long a released slug stays reserved for its canvas and owner (audit run-1, #13). */
+export const SLUG_RESERVATION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Who is asking for a slug. A slug inside its reservation window is available only to
+ * the canvas that released it or another canvas of the same owner. Without a claimant
+ * (random slug generation) a reserved slug counts as taken.
+ */
+export interface SlugClaimant {
+  ownerId: string;
+  canvasId?: string;
+}
+
 /**
  * Options for the owner's own filtered/sorted/paginated list (plan 005). Every
  * filter ANDs onto the owner-scope base (`ownerId = me`, status not deleted/
@@ -389,6 +403,8 @@ export function canvasesRepository(client: DbClient) {
     client.dialect === "sqlite" ? sqliteSchema.canvasTeams : pgSchema.canvasTeams;
   const aliasesT =
     client.dialect === "sqlite" ? sqliteSchema.canvasSlugAliases : pgSchema.canvasSlugAliases;
+  const releasedT =
+    client.dialect === "sqlite" ? sqliteSchema.releasedSlugs : pgSchema.releasedSlugs;
   const teamMembersT =
     client.dialect === "sqlite" ? sqliteSchema.teamMembers : pgSchema.teamMembers;
   const teamsT = client.dialect === "sqlite" ? sqliteSchema.teams : pgSchema.teams;
@@ -584,6 +600,22 @@ export function canvasesRepository(client: DbClient) {
    */
   const inTransaction = <T>(fn: (exec: typeof db) => Promise<T>): Promise<T> =>
     client.dialect === "sqlite" ? fn(db) : db.transaction(fn);
+
+  /** Start (or restart) a slug's reservation for the canvas that just let go of it. */
+  async function releaseSlugs(
+    exec: typeof db,
+    slugs: readonly string[],
+    canvasId: string,
+    ownerId: string,
+  ): Promise<void> {
+    const releasedAt = Date.now();
+    for (const slug of slugs) {
+      await exec
+        .insert(releasedT)
+        .values({ slug, canvasId, ownerId, releasedAt })
+        .onConflictDoUpdate({ target: releasedT.slug, set: { canvasId, ownerId, releasedAt } });
+    }
+  }
 
   /** KTD3 — see the `activateVersion` method doc on the returned repository object. */
   async function activateVersion(
@@ -969,7 +1001,7 @@ export function canvasesRepository(client: DbClient) {
      * still blocks an insert. The availability check must agree with the index
      * (status-unaware), unlike `findBySlug` which hides deleted rows.
      */
-    async slugTaken(slug: string): Promise<boolean> {
+    async slugTaken(slug: string, claimant?: SlugClaimant): Promise<boolean> {
       const canonical = await db.select({ id: t.id }).from(t).where(eq(t.slug, slug)).limit(1);
       if (canonical.length > 0) return true;
       // Aliases share the one slug namespace (plan 2026-10-30-1815, KTD5), so every
@@ -979,7 +1011,21 @@ export function canvasesRepository(client: DbClient) {
         .from(aliasesT)
         .where(eq(aliasesT.slug, slug))
         .limit(1);
-      return aliases.length > 0;
+      if (aliases.length > 0) return true;
+      // A recently released slug is held for the canvas and owner that let it go.
+      const held = (await db
+        .select()
+        .from(releasedT)
+        .where(
+          and(eq(releasedT.slug, slug), gt(releasedT.releasedAt, Date.now() - SLUG_RESERVATION_MS)),
+        )
+        .limit(1)) as ReleasedSlug[];
+      const row = held[0];
+      if (!row) return false;
+      return !(
+        claimant &&
+        (row.canvasId === claimant.canvasId || row.ownerId === claimant.ownerId)
+      );
     },
 
     /** Is this slug some canvas's CANONICAL slug (any status)? Ignores aliases. */
@@ -1027,11 +1073,20 @@ export function canvasesRepository(client: DbClient) {
 
     /** Remove one alias of this canvas; false when it isn't one. */
     async removeAlias(canvasId: string, slug: string): Promise<boolean> {
-      const rows = await db
-        .delete(aliasesT)
-        .where(and(eq(aliasesT.canvasId, canvasId), eq(aliasesT.slug, slug)))
-        .returning({ id: aliasesT.id });
-      return rows.length > 0;
+      return inTransaction(async (exec) => {
+        const rows = await exec
+          .delete(aliasesT)
+          .where(and(eq(aliasesT.canvasId, canvasId), eq(aliasesT.slug, slug)))
+          .returning({ id: aliasesT.id });
+        if (rows.length === 0) return false;
+        const owner = (await exec
+          .select({ ownerId: t.ownerId })
+          .from(t)
+          .where(eq(t.id, canvasId))
+          .limit(1)) as Array<{ ownerId: string }>;
+        if (owner[0]) await releaseSlugs(exec, [slug], canvasId, owner[0].ownerId);
+        return true;
+      });
     },
 
     async findById(id: string): Promise<Canvas | null> {
@@ -1281,6 +1336,11 @@ export function canvasesRepository(client: DbClient) {
             .where(and(eq(t.id, input.canvasId), eq(t.ownerId, input.fromUserId)))
             .returning({ id: t.id })) as Array<{ id: string }>;
           if (swapped.length === 0) throw new TransferConflict();
+          // Names this canvas released now belong to its new owner's reservation.
+          await q
+            .update(releasedT)
+            .set({ ownerId: input.toUserId })
+            .where(eq(releasedT.canvasId, input.canvasId));
           if (input.previousOwnerEditor) {
             await q
               .insert(allowlistT)
@@ -1660,7 +1720,17 @@ export function canvasesRepository(client: DbClient) {
         }
         const current = await searchTextInputs(id, exec);
         if (current) set.searchText = mergedSearchText(current, { slug: newSlug });
+        const before = (await exec
+          .select({ slug: t.slug, ownerId: t.ownerId })
+          .from(t)
+          .where(eq(t.id, id))
+          .limit(1)) as Array<{ slug: string; ownerId: string }>;
         const rows = (await exec.update(t).set(set).where(eq(t.id, id)).returning()) as Canvas[];
+        // The outgoing slug is released unless it stays on as an alias.
+        const old = before[0];
+        if (old && old.slug !== newSlug && !aliasChange.keepOld) {
+          await releaseSlugs(exec, [old.slug], id, old.ownerId);
+        }
         if (aliasChange.keepOld) {
           await exec.insert(aliasesT).values({
             id: uuidv7(),
@@ -1989,6 +2059,20 @@ export function canvasesRepository(client: DbClient) {
      * identity and administrative history. Repeated cleanup is safe after failure. */
     async finishPurge(id: string, now: number): Promise<void> {
       const schema = client.dialect === "sqlite" ? sqliteSchema : pgSchema;
+      // Purge frees the canvas's aliases (below); hold them for its owner first.
+      const freed = (await db
+        .select({ slug: aliasesT.slug, ownerId: t.ownerId })
+        .from(aliasesT)
+        .innerJoin(t, eq(t.id, aliasesT.canvasId))
+        .where(eq(aliasesT.canvasId, id))) as Array<{ slug: string; ownerId: string }>;
+      if (freed.length > 0) {
+        await releaseSlugs(
+          db,
+          freed.map((f) => f.slug),
+          id,
+          freed[0]?.ownerId ?? "",
+        );
+      }
       for (const table of [
         schema.guestSessions,
         schema.guestInvites,

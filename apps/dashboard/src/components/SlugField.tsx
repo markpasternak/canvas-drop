@@ -34,6 +34,8 @@ export interface SlugFieldProps {
   disabled?: boolean;
   /** Show the "optional" marker (default). An alias name is required, so it hides it. */
   optional?: boolean;
+  /** The canvas being renamed or aliased: a slug it released recently counts as available. */
+  canvasId?: string;
 }
 
 /**
@@ -50,12 +52,13 @@ export function SlugField({
   autoFocus,
   disabled,
   optional = true,
+  canvasId,
 }: SlugFieldProps) {
   const id = useId();
   const statusId = useId();
   const [raw, setRaw] = useState("");
   const slug = cosmeticSlug(raw);
-  const status = useSlugAvailability(slug);
+  const status = useSlugAvailability(slug, canvasId);
 
   useEffect(() => {
     onResolved({ slug, status });

@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CaptureContext } from "./capture.js";
 import { captureCanvas, RENDITION_SIZES } from "./capture.js";
+import { captureLaunchArgs } from "./capture-network.js";
 import { launchChromiumWithChromeFallback } from "./playwright-browser.js";
 
 /**
@@ -105,5 +106,86 @@ describe.skipIf(!RUN)("captureCanvas — real Chromium (opt-in)", () => {
     } finally {
       await mapped.close();
     }
+  });
+});
+
+describe.skipIf(!RUN)("capture browser network fence — real Chromium (opt-in, audit #8)", () => {
+  let instance: Server;
+  let probe: Server;
+  let instancePort = 0;
+  let probePort = 0;
+  const probeHits: string[] = [];
+
+  /** A page that reaches for another local service every way it can. */
+  const egressPage = (target: string) =>
+    "<!doctype html><html><body><script>" +
+    `fetch('http://${target}/fetch',{mode:'no-cors'}).catch(()=>{});` +
+    `new Image().src='http://${target}/img';` +
+    `try{new WebSocket('ws://${target}/ws')}catch(e){}` +
+    `navigator.sendBeacon&&navigator.sendBeacon('http://${target}/beacon','x');` +
+    "</script><h1>egress</h1></body></html>";
+
+  beforeAll(async () => {
+    probe = createServer((req, res) => {
+      probeHits.push(req.url ?? "");
+      res.end("hit");
+    });
+    probe.on("upgrade", (req, socket) => {
+      probeHits.push(req.url ?? "");
+      socket.destroy();
+    });
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+    probePort = (probe.address() as AddressInfo).port;
+    instance = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(egressPage(`127.0.0.1:${probePort}`));
+    });
+    await new Promise<void>((r) => instance.listen(0, "127.0.0.1", r));
+    instancePort = (instance.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => instance.close(() => r()));
+    await new Promise<void>((r) => probe.close(() => r()));
+  });
+
+  async function visit(args: string[], url = `http://127.0.0.1:${instancePort}/`) {
+    const { chromium } = await import("playwright");
+    const browser = await launchChromiumWithChromeFallback(chromium, { args });
+    try {
+      const page = await browser.newPage();
+      await page.goto(url, { waitUntil: "load" });
+      expect(await page.textContent("h1")).toBe("egress");
+      await page.waitForTimeout(1500);
+    } finally {
+      await browser.close();
+    }
+  }
+
+  it("control: without the fence the page reaches the other local service", async () => {
+    probeHits.length = 0;
+    await visit([]);
+    expect(probeHits.length).toBeGreaterThan(0);
+  });
+
+  it("with the launch fence the instance page loads but nothing reaches the other service", async () => {
+    probeHits.length = 0;
+    await visit(
+      captureLaunchArgs({ urlMode: "path", baseUrl: "http://x.test", port: instancePort }),
+    );
+    expect(probeHits).toEqual([]);
+  });
+
+  it("subdomain mode: a canvas host resolves to the instance; other services stay fenced", async () => {
+    probeHits.length = 0;
+    await visit(
+      captureLaunchArgs({
+        urlMode: "subdomain",
+        baseUrl: "http://canvases.test",
+        port: instancePort,
+      }),
+      "http://demo.canvases.test/",
+    );
+    expect(probeHits).toEqual([]);
   });
 });

@@ -35,6 +35,9 @@ export function memStorage(failOnPut?: number): StorageDriver {
     async exists(key) {
       return store.has(key);
     },
+    async size(key) {
+      return store.get(key)?.byteLength ?? null;
+    },
     async list(prefix) {
       return [...store.keys()].filter((k) => k.startsWith(prefix)).sort();
     },

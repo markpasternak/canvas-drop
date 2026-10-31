@@ -1,5 +1,15 @@
 import type { Dirent } from "node:fs";
-import { access, copyFile, mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  rmdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { type PutOptions, type StorageDriver, StorageError } from "./driver.js";
 
@@ -86,6 +96,15 @@ export class LocalDriver implements StorageDriver {
       // failures a caller must not mistake for absence (which would drive a wrong
       // fork decision). Aligns with get()/copy()'s isNotFound handling.
       if (isNotFound(err)) return false;
+      throw err;
+    }
+  }
+
+  async size(key: string): Promise<number | null> {
+    try {
+      return (await stat(this.pathFor(key))).size;
+    } catch (err) {
+      if (isNotFound(err)) return null;
       throw err;
     }
   }

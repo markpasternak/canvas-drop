@@ -1,14 +1,14 @@
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
+import { CanvasCover, coverCrossOrigin, previewCoverUrl } from "../components/CanvasCover.js";
 
 describe("previewCoverUrl (plan 004 / U8)", () => {
   it("builds the access-gated preview route URL for a rendition", () => {
     expect(previewCoverUrl("https://app.canvas-drop.com/c/s/")).toBe(
-      "https://app.canvas-drop.com/c/s/__canvasdrop_preview?rendition=card",
+      "https://app.canvas-drop.com/c/s/__canvasdrop_preview?rendition=card&cors=1",
     );
     expect(previewCoverUrl("https://s.canvas-drop.com", "og")).toBe(
-      "https://s.canvas-drop.com/__canvasdrop_preview?rendition=og",
+      "https://s.canvas-drop.com/__canvasdrop_preview?rendition=og&cors=1",
     );
   });
 });
@@ -70,5 +70,25 @@ describe("CanvasCover (plan 004 / U8)", () => {
     expect(getByText("My Live Dashboard")).toBeTruthy();
     expect(container.querySelector("[data-cover-type='templates']")).not.toBeNull();
     expect(container.querySelector("[data-cover-status='published']")).not.toBeNull();
+  });
+});
+
+// vitest's jsdom page is http://localhost:3000/ by default.
+describe("coverCrossOrigin (audit #24)", () => {
+  it("requests a cover on another host with credentials (subdomain mode)", () => {
+    expect(coverCrossOrigin("https://my-canvas.canvases.example.com/__canvasdrop_preview")).toBe(
+      "use-credentials",
+    );
+    const { container } = render(
+      <CanvasCover seed="cv1" previewUrl="https://my-canvas.canvases.example.com/p" />,
+    );
+    expect(container.querySelector("img")?.getAttribute("crossorigin")).toBe("use-credentials");
+  });
+
+  it("leaves same-host covers alone, including another port (path mode, dev proxy)", () => {
+    const host = window.location.hostname;
+    expect(coverCrossOrigin(`http://${host}:3000/c/x/__canvasdrop_preview`)).toBeUndefined();
+    expect(coverCrossOrigin(`http://${host}:5173/c/x/__canvasdrop_preview`)).toBeUndefined();
+    expect(coverCrossOrigin("/c/x/__canvasdrop_preview")).toBeUndefined();
   });
 });

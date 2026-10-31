@@ -127,6 +127,37 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
     expect(r2.version).toBe(2);
   });
 
+  it("a reused blob must be declared at its stored size: under-declaring cannot slip the byte cap (audit #22)", async () => {
+    const { svc, versions, canvas, ownerId } = await setup();
+    const content = "0123456789abcdef"; // 16 bytes
+    const first = await svc.begin(canvas, ownerId, manifestFor({ "index.html": content }));
+    await stageAll(svc, first.uploadId, ownerId, canvas.id, { "index.html": content });
+    await svc.finalize(first.uploadId, ownerId, canvas.id);
+
+    // Three paths reference the already-present blob, each declared at size 0.
+    const lying = ["a.html", "b.html", "c.html"].map((path) => ({
+      path,
+      hash: sha(content),
+      size: 0,
+    }));
+    const second = await svc.begin(canvas, ownerId, lying);
+    expect(second.missingHashes).toEqual([]);
+    await expect(svc.finalize(second.uploadId, ownerId, canvas.id)).rejects.toMatchObject({
+      code: "BLOB_HASH_MISMATCH",
+    });
+    expect(await versions.listByCanvas(canvas.id)).toHaveLength(1);
+
+    // Declared honestly, the same reuse publishes with the real total.
+    const honest = ["a.html", "b.html", "c.html"].map((path) => ({
+      path,
+      hash: sha(content),
+      size: 16,
+    }));
+    const third = await svc.begin(canvas, ownerId, honest);
+    const r = await svc.finalize(third.uploadId, ownerId, canvas.id);
+    expect((await versions.findById(r.versionId))?.totalBytes).toBe(48);
+  });
+
   it("rejects a non-owner caller (no existence leak)", async () => {
     const { svc, canvas, ownerId, otherId } = await setup();
     const { uploadId } = await svc.begin(canvas, ownerId, manifestFor({ "index.html": "a" }));
@@ -466,17 +497,17 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
     const drafts = draftsRepository(client);
     const uploadSessions = uploadSessionsRepository(client);
     const base = memStorage();
-    /** A one-shot hook fired on the next storage existence check (finalize's slow phase). */
-    const hooks: { onExists?: () => Promise<void> } = {};
+    /** A one-shot hook fired on the next blob size check (finalize's slow phase). */
+    const hooks: { onBlobCheck?: () => Promise<void> } = {};
     const storage: StorageDriver = {
       ...base,
-      async exists(key) {
-        const fire = hooks.onExists;
+      async size(key) {
+        const fire = hooks.onBlobCheck;
         if (fire) {
-          hooks.onExists = undefined;
+          hooks.onBlobCheck = undefined;
           await fire();
         }
-        return base.exists(key);
+        return base.size(key);
       },
     };
     const engine = deployEngine({
@@ -644,7 +675,7 @@ describe.each(DIALECTS)("uploadService — deployment coordination (%s)", (diale
     // The lease lapses by moving the service clock, as real time would: B's claim stamp
     // is then strictly newer than A's. (Backdating the row instead let B re-claim in the
     // same millisecond as A, giving both the same stamp, so A's fence matched B's lease.)
-    t.hooks.onExists = async () => {
+    t.hooks.onBlobCheck = async () => {
       t.clock.now += FINALIZE_LEASE_MS + 1000;
       newer = await t.svc.finalize(id, t.ownerId, t.canvas.id);
     };

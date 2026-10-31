@@ -34,6 +34,7 @@ import { createLogger } from "./log/logger.js";
 import { runOpsCli } from "./ops/cli.js";
 import { createHub } from "./realtime/hub.js";
 import { CAPTURE_VIEWPORT, type CaptureContext } from "./screenshots/capture.js";
+import { captureLaunchArgs } from "./screenshots/capture-network.js";
 import { launchChromiumWithChromeFallback } from "./screenshots/playwright-browser.js";
 import { screenshotTrigger } from "./screenshots/trigger.js";
 import { startScreenshotWorker } from "./screenshots/worker.js";
@@ -266,14 +267,11 @@ async function main() {
         : `http://127.0.0.1:${config.port}/c/${canvas.slug}/`,
     launchBrowser: async () => {
       const { chromium } = await import("playwright");
-      // Subdomain mode: map every `*.{baseHost}` to the loopback server so the worker
-      // can hit a canvas's real subdomain URL internally (correct Host, no external hop).
-      const args: string[] = [];
-      if (config.urlMode === "subdomain") {
-        const baseHost = new URL(config.baseUrl).hostname;
-        args.push(`--host-resolver-rules=MAP *.${baseHost} 127.0.0.1:${config.port}`);
-      }
-      const browser = await launchChromiumWithChromeFallback(chromium, { args });
+      // Confine the browser to this instance; in subdomain mode `*.{baseHost}` maps to
+      // the loopback server (correct Host, no external hop). See capture-network.ts.
+      const browser = await launchChromiumWithChromeFallback(chromium, {
+        args: captureLaunchArgs(config),
+      });
       return {
         // deviceScaleFactor: 2 → retina-resolution master (2× pixel density), so the
         // downscaled WebP renditions have crisp text/edges instead of looking soft.
@@ -281,6 +279,8 @@ async function main() {
           (await browser.newContext({
             viewport: { width: CAPTURE_VIEWPORT.width, height: CAPTURE_VIEWPORT.height },
             deviceScaleFactor: 2,
+            // A service worker's fetches bypass the capture page's request gate.
+            serviceWorkers: "block",
           })) as unknown as CaptureContext & { close(): Promise<void> },
         close: () => browser.close(),
       };

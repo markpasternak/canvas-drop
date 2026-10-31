@@ -547,7 +547,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // the SAME resolveHomeOrg the dashboard/management create uses — never trusts the client.
       const home = resolveHomeOrg(orgId, caller.orgIds);
       if ("error" in home) return fail("ORG_FORBIDDEN: you are not a member of that org");
-      const resolved = await resolveCreateSlug(requestedSlug, (s) => deps.canvases.slugTaken(s));
+      const resolved = await resolveCreateSlug(requestedSlug, (s) =>
+        deps.canvases.slugTaken(s, { ownerId: caller.userId }),
+      );
       if ("error" in resolved) return slugFailure(resolved.error);
       const apiKey = generateApiKey();
       let cv: Awaited<ReturnType<typeof deps.canvases.create>>;
@@ -1211,7 +1213,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "Change a canvas's URL slug (same as Settings → Change slug). Pass `slug` for a custom one, " +
         "or omit it for a fresh readable-random slug. Passing one of the canvas's own aliases " +
         "promotes it to the main slug. The OLD URL stops working immediately unless " +
-        "`keepOldAsAlias` is true, in which case it keeps redirecting to the new URL. Returns " +
+        "`keepOldAsAlias` is true, in which case it keeps redirecting to the new URL; a dropped " +
+        "slug stays reserved for this canvas and its owner for 30 days. Returns " +
         "the updated canvas (with its new url + deploy endpoints).",
       inputSchema: {
         id: z.string().describe("The canvas id."),
@@ -1266,8 +1269,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "remove_canvas_alias",
     {
       description:
-        "Remove one of a canvas's aliases. Its URL stops working immediately and the name is " +
-        "free for anyone. Returns the remaining aliases.",
+        "Remove one of a canvas's aliases. Its URL stops working immediately; the name stays " +
+        "reserved for this canvas and its owner for 30 days. Returns the remaining aliases.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         slug: z.string().describe("The alias slug to remove."),

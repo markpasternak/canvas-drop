@@ -194,8 +194,14 @@ adding another account). Google doesn't support `prompt=login`, so with Google a
 signed-out visitor may be signed in with whichever Google account is active there
 without being asked; **Use another account** on the canvas page recovers from that.
 Each sign-in keeps its PKCE verifier, `state` and return
-address in its own short-lived HttpOnly cookie (`__canvasdrop_oidc_<state>`, ten minutes,
-at most five at once), so sign-ins started in several tabs each finish where they began.
+address in its own short-lived HttpOnly cookie (`__Host-__canvasdrop_oidc_<state>` in
+production, ten minutes, at most five at once), so sign-ins started in several tabs each
+finish where they began. The cookie is host-only on the base host, and sign-in always
+starts there (a canvas host redirects `/auth/login` to it). In subdomain mode a canvas
+page's script can create a cookie for the parent domain, and a planted transaction would
+sign the visitor in as whoever started it. A browser refuses a `__Host-` cookie from any
+other host, so the callback only completes a sign-in this browser began on the base host.
+Outside production (no `Secure`, so no `__Host-` prefix) that protection is not there.
 Only a top-level page load is sent to sign-in; background requests get a `401` and never
 start one. A callback the browser can't match while it is already signed in (the Back
 button onto a used callback) goes to the dashboard. The callback rejects a
@@ -452,6 +458,29 @@ request: `Sec-Fetch-Site: same-origin` (or `none`), else an `Origin` whose host 
 Subdomain mode adds the browser's origin boundary on top. If you do not run an
 identity-aware proxy, run subdomain mode with `oidc` so you keep that boundary without
 standing up a proxy.
+
+Canvases in subdomain mode are same-site with each other and with the dashboard, so the
+session cookie rides along when one canvas embeds another's files. A few rules keep a
+canvas from learning anything through that:
+
+- A canvas host answers only canvas content. The platform API, `/auth`, the runtime API
+  and the MCP/OAuth endpoints answer on the base host (sign-in links are redirected
+  there); on a canvas host they return `404`.
+- A **Restricted** canvas's responses carry `Cross-Origin-Resource-Policy: same-origin`,
+  so another canvas can't load its files or preview as an image, script or stylesheet and
+  learn from the result whether the visitor can open it. Whole-org and public-link
+  canvases don't, so org canvases can still share assets. The dashboard loads covers in
+  CORS mode, which the preview route allows for the dashboard's own origin only.
+- Only the MCP OAuth endpoints and the bearer-only `/mcp` endpoint answer with open
+  (`*`) CORS; no cookie-authenticated route does.
+- Known limit: whole-org and public-link canvases don't send that header, so on an
+  instance with several orgs a canvas can still tell whether its visitor may open another
+  org's whole-org canvas (that is, whether the visitor belongs to that org).
+- A slug a canvas lets go of (a rename that drops it, a removed alias, aliases freed by a
+  purge) stays reserved for 30 days: only that canvas, or another canvas with the same
+  owner, can take it. The slug is the browser origin, so a stranger's canvas on it would
+  inherit what visitors' browsers keep for that origin (storage, service workers,
+  permissions).
 
 ## Lifecycle changes land on the next request (invariant 5)
 

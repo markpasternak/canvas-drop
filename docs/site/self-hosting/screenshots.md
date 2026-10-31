@@ -30,6 +30,11 @@ same image can back additional surfaces (e.g. dashboard thumbnails) without re-c
 - **Capture is sandboxed.** While a canvas is being captured, its backend primitives
   (AI, realtime, network) are neutered — a capture makes no AI spend and no outbound
   network calls. Dialogs are dismissed and a hard timeout bounds a slow/looping canvas.
+  The capture browser itself can only reach this instance: it runs behind a proxy that
+  cannot be reached, with only the instance's own loopback address (and, in subdomain
+  mode, `*.{baseHost}`, mapped to loopback) exempted. WebRTC may not send UDP around the
+  proxy, and service workers are blocked. So a canvas's WebSocket, popup or worker
+  can't reach an internal service or the internet either.
 
 ## Enablement — two org-wide layers
 

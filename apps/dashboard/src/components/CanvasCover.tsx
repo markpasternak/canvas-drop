@@ -28,7 +28,26 @@ export function previewCoverUrl(
   canvasUrl: string,
   rendition: "card" | "thumb" | "og" = "card",
 ): string {
-  return `${canvasUrl.replace(/\/$/, "")}/${PREVIEW_PATH}?rendition=${rendition}`;
+  // `cors=1` keys the CORS-mode request apart from cached no-cors responses of the same
+  // URL, which carry no Access-Control-Allow-Origin and would fail the check.
+  return `${canvasUrl.replace(/\/$/, "")}/${PREVIEW_PATH}?rendition=${rendition}&cors=1`;
+}
+
+/**
+ * A cover on another host (subdomain mode) is requested in CORS mode with credentials.
+ * A restricted canvas answers plain cross-origin embeds with
+ * `Cross-Origin-Resource-Policy: same-origin`, so other canvases can't probe access
+ * through it; its preview route allows the dashboard's origin instead. Same-host covers
+ * (path mode, and dev's :5173 → :3000) load as before.
+ */
+export function coverCrossOrigin(previewUrl: string): "use-credentials" | undefined {
+  try {
+    return new URL(previewUrl, window.location.href).hostname === window.location.hostname
+      ? undefined
+      : "use-credentials";
+  } catch {
+    return undefined;
+  }
 }
 
 export function CanvasCover({
@@ -62,6 +81,7 @@ export function CanvasCover({
     // Decorative — the card's title is the labelled affordance, so the cover is aria-hidden.
     <img
       src={previewUrl}
+      crossOrigin={coverCrossOrigin(previewUrl)}
       alt=""
       aria-hidden
       loading="lazy"

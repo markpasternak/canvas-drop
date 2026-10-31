@@ -32,6 +32,8 @@ export interface StorageDriver {
   copy(srcKey: string, dstKey: string): Promise<void>;
   /** Whether an object exists at `key`. */
   exists(key: string): Promise<boolean>;
+  /** Byte length of the object at `key`, or `null` if it does not exist. */
+  size(key: string): Promise<number | null>;
   /** Keys beginning with `prefix`. */
   list(prefix: string): Promise<string[]>;
 }

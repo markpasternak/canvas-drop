@@ -41,7 +41,7 @@ function fakeS3Client(): S3Client {
         if (!store.has(key as string)) {
           throw Object.assign(new Error("NotFound"), { name: "NotFound" });
         }
-        return {};
+        return { ContentLength: (store.get(key as string) as Uint8Array).byteLength };
       case "DeleteObjectCommand":
         store.delete(key as string);
         return {};

@@ -515,7 +515,9 @@ export function managementRoutes(deps: ManagementDeps) {
     // server-resolved membership; default to their org when they have exactly one.
     const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
     if ("error" in home) return c.json({ error: home.error }, 403);
-    const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
+    const resolved = await resolveCreateSlug(body.data.slug, (s) =>
+      deps.canvases.slugTaken(s, { ownerId: user.id }),
+    );
     if ("error" in resolved) {
       return c.json({ error: resolved.error }, resolved.error === "slug_taken" ? 409 : 400);
     }
@@ -713,7 +715,12 @@ export function managementRoutes(deps: ManagementDeps) {
     const raw = (c.req.query("slug") ?? "").trim();
     const check = validateSlug(raw);
     if (!check.ok) return c.json({ available: false, reason: check.reason });
-    const taken = await deps.canvases.slugTaken(raw);
+    // Advisory for the dashboard's create, rename and alias fields: a slug the signed-in
+    // user released, or (`canvasId`) the canvas being renamed released, is theirs to take
+    // back. The id only widens the answer to that canvas's own released names, and the
+    // rename itself re-checks with the server-resolved canvas.
+    const canvasId = c.req.query("canvasId") || undefined;
+    const taken = await deps.canvases.slugTaken(raw, { ownerId: c.get("user").id, canvasId });
     return c.json(taken ? { available: false, reason: "taken" } : { available: true });
   });
 
@@ -1603,7 +1610,9 @@ export function managementRoutes(deps: ManagementDeps) {
     // the management create, so the paste create path can't bypass it.
     const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
     if ("error" in home) return c.json({ error: home.error }, 403);
-    const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
+    const resolved = await resolveCreateSlug(body.data.slug, (s) =>
+      deps.canvases.slugTaken(s, { ownerId: user.id }),
+    );
     if ("error" in resolved) {
       return c.json({ error: resolved.error }, resolved.error === "slug_taken" ? 409 : 400);
     }
