@@ -100,9 +100,7 @@ export class S3Driver implements StorageDriver {
 
   async size(key: string): Promise<number | null> {
     try {
-      const head = await this.client.send(
-        new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
-      );
+      const head = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
       // S3 always reports a length; a missing one must not read as an empty blob.
       if (head.ContentLength === undefined) throw new Error(`no ContentLength for ${key}`);
       return head.ContentLength;
