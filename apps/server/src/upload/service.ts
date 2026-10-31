@@ -412,13 +412,23 @@ export function uploadService(deps: UploadServiceDeps) {
           throw new DeployError("CANVAS_TOO_LARGE", "upload exceeds 100 MB total");
         }
 
-        // Assert every referenced blob is present (trust existence for skip-unchanged
-        // blobs — matches putBlobIfAbsent semantics; content re-verification is out
-        // of scope, plan 003 KTD4/A4).
-        const uniqueHashes = new Set(Object.values(manifest).map((m) => m.hash));
-        for (const hash of uniqueHashes) {
-          if (!(await deps.storage.exists(blobKey(canvasId, hash)))) {
+        // Assert every referenced blob is present AND its stored size is the declared
+        // one. A skip-unchanged blob is never staged in this session, so its declared
+        // size was otherwise taken on trust: declaring 0 for a reused hash let a manifest
+        // under-report totalBytes and slip the aggregate cap (and the version ZIP export
+        // that sizes from it). Content re-verification stays out of scope (plan 003
+        // KTD4/A4); the stored bytes are content-addressed, so size is the check.
+        const sizeByHash = new Map(Object.values(manifest).map((m) => [m.hash, m.size]));
+        for (const [hash, declared] of sizeByHash) {
+          const stored = await deps.storage.size(blobKey(canvasId, hash));
+          if (stored === null) {
             throw new DeployError("UPLOAD_MISSING_BLOB", `blob ${hash} was not staged`);
+          }
+          if (stored !== declared) {
+            throw new DeployError(
+              "BLOB_HASH_MISMATCH",
+              `declared size ${declared} != stored ${stored} for ${hash}`,
+            );
           }
         }
 
