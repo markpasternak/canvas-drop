@@ -81,7 +81,7 @@ import type { Logger } from "../log/logger.js";
 import { searchPersonSuggestions } from "../people/search.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
-import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
+import { deletePreviewRenditions, keepScreenshotAsCover } from "../screenshots/custom-preview.js";
 import {
   type PreviewHintDeps,
   previewVisible,
@@ -1617,13 +1617,42 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           // grossly oversized payload is rejected before it's even decoded.
           .max(40 * 1024 * 1024)
           .optional()
-          .describe("Base64-encoded image (png/jpeg/webp). Omit to clear the custom preview."),
+          .describe(
+            "Base64-encoded image (png/jpeg/webp). Omit (and omit keepScreenshot) to clear the custom preview.",
+          ),
+        keepScreenshot: z
+          .boolean()
+          .optional()
+          .describe(
+            "true: keep the canvas's current automatic screenshot as its custom cover, exactly " +
+              "as if it had been uploaded (publishes stop re-capturing; link previews may show " +
+              "it). Needs previewMode 'auto' with a captured preview (hasPreview), else " +
+              "NO_SCREENSHOT. Do not combine with image.",
+          ),
       },
     },
-    async ({ id, image }) => {
+    async ({ id, image, keepScreenshot }) => {
       const gate = await requireMutable("set_canvas_preview", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
+      if (keepScreenshot) {
+        if (image !== undefined)
+          return fail("INVALID_INPUT: pass image or keepScreenshot, not both");
+        const kept = await keepScreenshotAsCover(
+          { storage: deps.storage, canvases: deps.canvases, previewIds },
+          cv,
+        );
+        if (!kept.ok) return fail(`${kept.code}: ${kept.message}`);
+        if (kept.changed) {
+          deps.audit.recordAudit({
+            action: "settings_update",
+            actorId: caller.userId,
+            targetId: cv.id,
+            meta: { previewMode: "custom", source: "screenshot" },
+          });
+        }
+        return ok(await viewWithIdentity(kept.canvas, gate.role, true));
+      }
       if (image === undefined) {
         // Clear is custom-only — never delete a legitimately auto-captured screenshot.
         if (cv.previewMode !== "custom") return ok(await viewWithIdentity(cv, gate.role));

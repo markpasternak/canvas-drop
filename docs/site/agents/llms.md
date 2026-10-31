@@ -180,8 +180,8 @@ Working notes:
   `access`, `discoverability` (`link_only` by default; `listed` shows a Team or
   Whole-org canvas in Shared and makes a Whole-org canvas gallery-eligible),
   `teamIds`, `password` (or `null` to clear), `sharedExpiresAt` (unix ms, or `null`),
-  `spaFallback`, `previewMode` (`auto` or `off`; `set_canvas_preview` with an image
-  sets `custom`), `linkPreview` (`true`: a non-public canvas unfurls with its title,
+  `spaFallback`, `previewMode` (`auto` or `off`; `set_canvas_preview` with an image,
+  or `keepScreenshot: true` to keep the current screenshot, sets `custom`), `linkPreview` (`true`: a non-public canvas unfurls with its title,
   description and custom cover instead of the sign-in card; `false`: always the sign-in
   card; `null`: follow the admin default `whoami.linkPreviewDefault`, whole-org canvases
   only; `get_canvas` reports the outcome as `linkPreviewShows`), `galleryListed`, `galleryTemplatable`, and the owner-only

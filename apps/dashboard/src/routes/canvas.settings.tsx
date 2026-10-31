@@ -25,6 +25,7 @@ import {
   useArchiveCanvas,
   useClearPreview,
   useDeleteCanvas,
+  useKeepScreenshotCover,
   useRegenerateKey,
   useRegenerateSlug,
   useUnarchiveCanvas,
@@ -59,6 +60,7 @@ export default function Settings() {
   const update = useUpdateSettings(id);
   const uploadPreview = useUploadPreview(id);
   const clearPreview = useClearPreview(id);
+  const keepScreenshot = useKeepScreenshotCover(id);
   const regenSlug = useRegenerateSlug(id);
   const regenKey = useRegenerateKey(id);
   const archive = useArchiveCanvas(id);
@@ -105,7 +107,7 @@ export default function Settings() {
     }
   };
 
-  const previewBusy = uploadPreview.isPending || clearPreview.isPending;
+  const previewBusy = uploadPreview.isPending || clearPreview.isPending || keepScreenshot.isPending;
   // Compute the deploy snippet once and reuse it for both the copy button and the
   // visible <pre> — building it twice risks the two surfaces drifting.
   const curlSnippet = deployCurl({ url: canvas.url, id: canvas.id, apiKey: "$CANVAS_DROP_KEY" });
@@ -177,7 +179,7 @@ export default function Settings() {
             <div className="min-w-0 flex-1 space-y-3">
               {canvas.previewMode === "custom" ? (
                 <>
-                  <p className="text-sm text-fg">Using a custom image you uploaded.</p>
+                  <p className="text-sm text-fg">Using a custom cover image.</p>
                   <p className="text-xs text-muted">
                     It stays put — publishing new versions won't overwrite it.
                   </p>
@@ -220,15 +222,38 @@ export default function Settings() {
                     checked={canvas.previewMode === "auto"}
                     onChange={(on) => save({ previewMode: on ? "auto" : "off" })}
                   />
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    loading={uploadPreview.isPending}
-                    disabled={previewBusy}
-                    onClick={() => previewFileRef.current?.click()}
-                  >
-                    Upload custom image
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    {canvas.previewMode === "auto" && canvas.hasPreview && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={keepScreenshot.isPending}
+                        disabled={previewBusy}
+                        onClick={async () => {
+                          try {
+                            await keepScreenshot.mutateAsync();
+                            toast("Screenshot kept as the cover");
+                          } catch (err) {
+                            toast(
+                              err instanceof ApiError ? err.hint : "Couldn't keep the screenshot",
+                              "error",
+                            );
+                          }
+                        }}
+                      >
+                        Use as custom cover
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={uploadPreview.isPending}
+                      disabled={previewBusy}
+                      onClick={() => previewFileRef.current?.click()}
+                    >
+                      Upload custom image
+                    </Button>
+                  </div>
                 </>
               )}
             </div>

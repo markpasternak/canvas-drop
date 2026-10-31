@@ -539,6 +539,105 @@ describe("managementRoutes", () => {
     }
   });
 
+  it("POST /:id/preview/keep keeps the auto screenshot as the custom cover, as if uploaded", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const storage = memStorage();
+    const appOn = () =>
+      buildApp(client, { id: owner.id, isAdmin: false }, storage, undefined, true, true);
+    const created = await jsonOf<{ id: string }>(
+      await appOn().request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const keep = () =>
+      appOn().request(`/api/canvases/${created.id}/preview/keep`, {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin" },
+      });
+
+    // No captured screenshot yet → refused, nothing changes.
+    const none = await keep();
+    expect(none.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(none)).code).toBe("NO_SCREENSHOT");
+
+    // An auto capture: a done job plus the renditions on disk.
+    const jobs = screenshotsRepository(client);
+    await jobs.enqueue(created.id, "v-1");
+    const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
+    if (claimed) await jobs.markDone(claimed.id, claimed.leasedAt as number);
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      await storage.put(screenshotKey(created.id, rendition), new Uint8Array([7]), {
+        contentType: "image/webp",
+      });
+    }
+
+    const kept = await keep();
+    expect(kept.status).toBe(200);
+    const view = await jsonOf<{ previewMode: string; hasPreview: boolean }>(kept);
+    expect(view.previewMode).toBe("custom");
+    expect(view.hasPreview).toBe(true);
+    // Nothing was copied or re-encoded: the screenshot bytes ARE the cover now.
+    expect(await storage.get(screenshotKey(created.id, "og"))).toEqual(new Uint8Array([7]));
+    await vi.waitFor(async () => {
+      const rows = await auditRepository(client).recent(20);
+      const row = rows.find(
+        (r) =>
+          r.action === "settings_update" &&
+          r.targetId === created.id &&
+          (r.meta as { source?: string } | null)?.source === "screenshot",
+      );
+      expect(row).toBeDefined();
+    });
+    // Idempotent once custom.
+    expect((await keep()).status).toBe(200);
+  });
+
+  it("POST /:id/preview/keep refuses when the screenshot isn't visible (pipeline off, mode off)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const storage = memStorage();
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }, storage).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const jobs = screenshotsRepository(client);
+    await jobs.enqueue(created.id, "v-1");
+    const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
+    if (claimed) await jobs.markDone(claimed.id, claimed.leasedAt as number);
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      await storage.put(screenshotKey(created.id, rendition), new Uint8Array([7]), {
+        contentType: "image/webp",
+      });
+    }
+    // Pipeline off: the owner can't see the screenshot, so it can't be kept.
+    const off = await buildApp(client, { id: owner.id, isAdmin: false }, storage).request(
+      `/api/canvases/${created.id}/preview/keep`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(off.status).toBe(409);
+    // A non-owner reads not found.
+    const stranger = await seedUser(client, "stranger");
+    const other = await buildApp(
+      client,
+      { id: stranger.id, isAdmin: false },
+      storage,
+      undefined,
+      true,
+      true,
+    ).request(`/api/canvases/${created.id}/preview/keep`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(other.status).toBe(404);
+    expect((await canvasesRepository(client).findById(created.id))?.previewMode).toBe("auto");
+  });
+
   it("PATCH /:id/settings previewMode:auto from custom drops the orphaned custom renditions", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
@@ -697,6 +796,7 @@ describe("managementRoutes", () => {
         ["POST", `/api/canvases/${id}/regenerate-key`, {}],
         ["POST", `/api/canvases/${id}/allowlist`, { email: "guest@example.com" }],
         ["DELETE", `/api/canvases/${id}/preview`, undefined],
+        ["POST", `/api/canvases/${id}/preview/keep`, undefined],
         ["POST", `/api/canvases/${id}/archive`, {}],
         ["POST", `/api/canvases/${id}/unarchive`, {}],
         ["POST", `/api/canvases/${id}/unpublish`, {}],

@@ -111,6 +111,18 @@ export function useUploadPreview(id: string) {
   });
 }
 
+export function useKeepScreenshotCover(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.keepScreenshotCover(id),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
 export function useClearPreview(id: string) {
   const qc = useQueryClient();
   return useMutation({

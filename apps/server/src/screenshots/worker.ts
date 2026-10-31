@@ -151,6 +151,14 @@ export function screenshotWorker(deps: ScreenshotWorkerDeps): ScreenshotWorker {
           token,
           timeoutMs: s.timeoutMs,
         });
+        // Re-check after the (seconds-long) capture: the owner may have uploaded a cover
+        // or kept the previous screenshot as the cover meanwhile. Writing now would
+        // replace that pinned image, so retire the job without storing anything.
+        const latest = await deps.canvases.findById(job.canvasId);
+        if (latest?.previewMode !== "auto") {
+          await deps.jobs.markDone(job.id, job.leasedAt as number);
+          return true;
+        }
         for (const rendition of SCREENSHOT_RENDITIONS) {
           await deps.storage.put(screenshotKey(job.canvasId, rendition), renditions[rendition], {
             contentType: "image/webp",

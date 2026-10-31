@@ -1825,6 +1825,45 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(isError(bad)).toBe(true);
   });
 
+  it("set_canvas_preview keepScreenshot keeps the auto screenshot as the custom cover", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const storage = memStorage();
+    const mcp = await connect(client, { userId }, true, config, storage);
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const keep = () =>
+      mcp.callTool({
+        name: "set_canvas_preview",
+        arguments: { id: made.id, keepScreenshot: true },
+      });
+
+    // Nothing captured yet → NO_SCREENSHOT, still auto.
+    const none = await keep();
+    expect(isError(none)).toBe(true);
+    expect(JSON.stringify(none)).toContain("NO_SCREENSHOT");
+
+    const jobs = screenshotsRepository(client);
+    await jobs.enqueue(made.id, "v-1");
+    const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
+    if (claimed) await jobs.markDone(claimed.id, claimed.leasedAt as number);
+    for (const r of ["og", "card", "thumb"] as const) {
+      await storage.put(`screenshots/${made.id}/${r}.webp`, new Uint8Array([9]), {
+        contentType: "image/webp",
+      });
+    }
+    const kept = payload(await keep());
+    expect(kept.previewMode).toBe("custom");
+    expect(kept.hasPreview).toBe(true);
+    expect(await storage.get(`screenshots/${made.id}/og.webp`)).toEqual(new Uint8Array([9]));
+
+    // image + keepScreenshot together is refused.
+    const both = await mcp.callTool({
+      name: "set_canvas_preview",
+      arguments: { id: made.id, keepScreenshot: true, image: await pngBase64() },
+    });
+    expect(isError(both)).toBe(true);
+  });
+
   it("update_canvas response reflects a changed access (read-your-writes)", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");

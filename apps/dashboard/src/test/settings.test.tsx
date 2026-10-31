@@ -320,6 +320,29 @@ describe("settings route", () => {
     expect(screen.queryByText(/on by your organization's default/i)).toBeNull();
   });
 
+  it("keeps the automatic screenshot as the custom cover", async () => {
+    const shot = { ...CANVAS, previewMode: "auto", hasPreview: true };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(shot),
+      "POST /api/canvases/c1/preview/keep": () => json({ ...shot, previewMode: "custom" }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(await screen.findByRole("button", { name: "Use as custom cover" }));
+    await vi.waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/preview/keep"),
+      ).toBe(true),
+    );
+  });
+
+  it("offers no keep button when there is no screenshot", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, hasPreview: false }) });
+    renderSettings();
+    await screen.findByRole("button", { name: "Upload custom image" });
+    expect(screen.queryByRole("button", { name: "Use as custom cover" })).toBeNull();
+  });
+
   it("hides the link-preview toggle on an open public link (it already unfurls)", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, access: "public_link" }) });
     renderSettings();
