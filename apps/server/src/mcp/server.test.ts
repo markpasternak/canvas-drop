@@ -91,6 +91,7 @@ async function connect(
     orgIds?: Set<string>;
     tenancyActive?: boolean;
     publicLinksEnabled?: boolean;
+    linkPreviewDefault?: "off" | "title" | "cover";
   },
   screenshotsEnabled = false,
   // Config the MCP server runs under. Defaults to the org-less config; team-grant tests
@@ -181,6 +182,7 @@ async function connect(
       screenshots: screenshotsRepository(client),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
       publicLinksEnabled: () => Promise.resolve(caller.publicLinksEnabled ?? true),
+      linkPreviewDefault: () => Promise.resolve(caller.linkPreviewDefault ?? "off"),
     },
     {
       userId: caller.userId,
@@ -370,7 +372,8 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const userId = await seedUser(client, "owner@example.com");
     const mcp = await connect(client, { userId });
     const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
-    expect(created.linkPreview).toBe(false);
+    // No choice yet: follows the admin default.
+    expect(created.linkPreview).toBeNull();
 
     const updated = payload(
       await mcp.callTool({
@@ -381,6 +384,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(updated.linkPreview).toBe(true);
     const read = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: created.id } }));
     expect(read.linkPreview).toBe(true);
+    expect(read.linkPreviewShows).toBe("cover");
 
     await vi.waitFor(async () => {
       const rows = await auditRepository(client).recent(20);
@@ -396,6 +400,46 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       });
       expect(audit?.targetId).toBe(created.id);
     });
+  });
+
+  it("update_canvas: a whole-org canvas follows the admin link-preview default until set", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId, linkPreviewDefault: "title" });
+    expect(payload(await mcp.callTool({ name: "whoami", arguments: {} })).linkPreviewDefault).toBe(
+      "title",
+    );
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const read = async () =>
+      payload(await mcp.callTool({ name: "get_canvas", arguments: { id: created.id } }));
+    // Restricted: the default does not apply.
+    expect((await read()).linkPreviewShows).toBe("none");
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: created.id, zipBase64: zip({ "index.html": "<h1>x</h1>" }) },
+    });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: created.id, access: "whole_org" },
+    });
+    expect((await read()).linkPreviewShows).toBe("title");
+    // An explicit off wins; null goes back to the default.
+    const off = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, linkPreview: false },
+      }),
+    );
+    expect(off.linkPreview).toBe(false);
+    expect(off.linkPreviewShows).toBe("none");
+    const reset = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, linkPreview: null },
+      }),
+    );
+    expect(reset.linkPreview).toBeNull();
+    expect(reset.linkPreviewShows).toBe("title");
   });
 
   it("update_canvas sets the unified tags under the owner check and refreshes searchText (U4)", async () => {

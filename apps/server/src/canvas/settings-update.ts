@@ -19,8 +19,9 @@ export interface CanvasSettingsInput {
   spaFallback?: boolean;
   /** Preview policy via settings — only `auto`/`off` here; `custom` is set by uploading. */
   previewMode?: "auto" | "off";
-  /** Unfurl a non-public canvas with its title, description and custom cover. */
-  linkPreview?: boolean;
+  /** Unfurl a non-public canvas with its title, description and custom cover: true = on,
+   *  false = off, null = follow the instance default (whole-org canvases only). */
+  linkPreview?: boolean | null;
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   tags?: string[];

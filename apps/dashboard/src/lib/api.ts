@@ -27,6 +27,8 @@ export type AuthMode = "proxy" | "oidc" | "dev";
  * is added. */
 export type DesignSkin = "editorial" | "studio" | "workshop" | "canvas";
 
+export type LinkPreviewDefault = "off" | "title" | "cover";
+
 export interface Me {
   id: string;
   email: string;
@@ -43,6 +45,10 @@ export interface Me {
   /** Active instance-wide design skin (presentation only). Optional on the wire for
    *  resilience; absent ⇒ the default `editorial`. The SPA applies it to <html data-skin>. */
   designSkin?: DesignSkin;
+  /** The admin's link-preview default for whole-org canvases without their own choice:
+   *  off, title (title + description) or cover (also the custom cover). Optional on the
+   *  wire for resilience; absent ⇒ off. Presentation only. */
+  linkPreviewDefault?: LinkPreviewDefault;
   /** The caller's orgs (plan 002 U6) for the Personal/Org workspace switcher. Server-
    *  resolved; empty ⇒ the caller has no org (Personal only). UX state — the server
    *  re-derives membership on every request, so the active workspace can never widen a
@@ -165,9 +171,11 @@ export interface Canvas {
   /** Preview policy (plan 004): "auto" screenshots on publish, "off" uses a generative
    *  cover, "custom" is an owner-uploaded image that survives publishes. */
   previewMode: PreviewMode;
-  /** Link preview opt-in: a non-public canvas unfurls with its title, description and
-   *  custom cover instead of the generic sign-in card. */
-  linkPreview: boolean;
+  /** Link preview choice for a non-public canvas: true = unfurl with its title,
+   *  description and custom cover instead of the generic sign-in card; false = always
+   *  the generic card; null = follow the admin default (`Me.linkPreviewDefault`, which
+   *  applies to whole-org canvases only). */
+  linkPreview: boolean | null;
   galleryListed: boolean;
   /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
   galleryTemplatable: boolean;
@@ -353,7 +361,8 @@ export interface CanvasSettings {
   /** Preview policy (plan 004). Only "auto"/"off" are settable here; "custom" is set
    *  by uploading an image via `uploadPreview`, never through settings. */
   previewMode?: "auto" | "off";
-  linkPreview?: boolean;
+  /** true / false, or null to follow the admin default again. */
+  linkPreview?: boolean | null;
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   tags?: string[];

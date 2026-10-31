@@ -316,6 +316,33 @@ describe("adminSettingsService — public links gate", () => {
   });
 });
 
+describe("adminSettingsService — link preview default", () => {
+  it("defaults off, honors a valid override and rejects unknown levels", async () => {
+    const s = configSvc();
+    expect(await s.effectiveLinkPreviewDefault()).toBe("off");
+    await s.setConfigOverride("access.linkPreviewDefault", "title");
+    expect(await s.effectiveLinkPreviewDefault()).toBe("title");
+    await expect(s.setConfigOverride("access.linkPreviewDefault", "everything")).rejects.toThrow();
+    expect(await s.effectiveLinkPreviewDefault()).toBe("title");
+    await s.clearConfigOverride("access.linkPreviewDefault");
+    expect(await s.effectiveLinkPreviewDefault()).toBe("off");
+  });
+
+  it("exposes it as an editable Access enum", async () => {
+    const row = (await configSvc().describeConfig()).find(
+      (r) => r.key === "access.linkPreviewDefault",
+    );
+    expect(row).toMatchObject({
+      group: "Access",
+      editable: true,
+      type: "enum",
+      enumValues: ["off", "title", "cover"],
+      value: "off",
+      source: "default",
+    });
+  });
+});
+
 describe("adminSettingsService — instance display name", () => {
   it("falls back to the base host, not the org name, and honors an admin override", async () => {
     const store = fakeSettings();

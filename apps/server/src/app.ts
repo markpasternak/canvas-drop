@@ -507,6 +507,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         connections,
         audit: deps.audit,
         publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
+        linkPreviewDefault: () => settingsSvc.effectiveLinkPreviewDefault(),
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
         oauthAudit: {
           record: (e) =>
@@ -582,8 +583,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         if (!bytes) return null;
         return new TextDecoder().decode(bytes.subarray(0, 64 * 1024));
       },
-      // The custom cover a link-preview opted-in canvas unfurls with.
+      // The custom cover a gated canvas unfurls with when its link preview is `cover`.
       (canvas) => deps.storage.get(screenshotKey(canvas.id, "og")),
+      // The admin's link-preview default for whole-org canvases.
+      () => settingsSvc.effectiveLinkPreviewDefault(),
     ),
   );
 
@@ -679,6 +682,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // runtime flip in Admin → Configuration reaches the SPA without a restart.
       designSkin: () => settingsSvc.effectiveDesignSkin(),
       publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
+      linkPreviewDefault: () => settingsSvc.effectiveLinkPreviewDefault(),
       orgs,
       tenancyActive: !!deps.config.org.name,
       otherAccounts: accountsDeps ? (c) => otherAccountSummaries(accountsDeps, c) : undefined,

@@ -17,6 +17,11 @@ import { memberPrincipal, resolvePublicLinkEnabled } from "../canvas/authorizati
 import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
+import {
+  configuredLinkPreview,
+  type LinkPreviewDefault,
+  linkPreviewChoice,
+} from "../canvas/link-preview.js";
 import { liveManifest, manifestFiles } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
 import {
@@ -117,6 +122,8 @@ export interface McpToolDeps extends PreviewHintDeps {
   canvases: CanvasesRepository;
   /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
   publicLinksEnabled?: () => Promise<boolean>;
+  /** The admin's link-preview default for whole-org canvases. Omitted in focused tests: off. */
+  linkPreviewDefault?: () => Promise<LinkPreviewDefault>;
   versions: VersionsRepository;
   engine: DeployEngine;
   /** Shared complete-export + historical-deletion behavior (dashboard parity). */
@@ -198,7 +205,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         role,
       }),
       publicLinkEnabled: await resolvePublicLinkEnabled(deps.canvases, cv, deps.publicLinksEnabled),
+      // What a link unfurl of this canvas shows once it is live: its own choice, or for a
+      // whole-org canvas without one, the admin default (dashboard toggle parity).
+      linkPreviewShows: configuredLinkPreview(cv, await linkPreviewDefault()),
     };
+  }
+
+  async function linkPreviewDefault(): Promise<LinkPreviewDefault> {
+    return (await deps.linkPreviewDefault?.()) ?? "off";
   }
 
   /** The caller as a member principal — identity from the verified token, org
@@ -323,6 +337,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         orgs: orgRows.map((o) => ({ id: o.id, name: o.name })),
         teams: teamRows.map((t) => ({ id: t.id, name: t.name, slug: t.slug, orgId: t.orgId })),
         isGuest: caller.tenancyActive && caller.orgIds.size === 0,
+        // The admin's link-preview default for whole-org canvases (mirrors /api/me).
+        linkPreviewDefault: await linkPreviewDefault(),
       });
     },
   );
@@ -1461,11 +1477,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           ),
         linkPreview: z
           .boolean()
+          .nullable()
           .optional()
           .describe(
-            "Link preview opt-in for a canvas that is not a public link: when true, a shared link " +
+            "Link preview for a canvas that is not an open public link: true = a shared link " +
               "unfurls (Slack, iMessage, …) with the canvas title, description and custom cover " +
-              "instead of the generic sign-in card. Never exposes an auto screenshot. Default false.",
+              "instead of the generic sign-in card; false = always the generic card; null = follow " +
+              "the admin default (whoami.linkPreviewDefault), which applies to whole-org canvases " +
+              "only. Never exposes an auto screenshot. Default null.",
           ),
         guestAiEnabled: z.boolean().optional(),
         guestAiCap: z.number().min(0).optional(),
@@ -1547,7 +1566,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
       // The link-preview opt-in decides what a gated canvas reveals to link unfurlers.
       const linkPreviewChanged =
-        patch.linkPreview !== undefined && patch.linkPreview !== cv.linkPreview;
+        patch.linkPreview !== undefined && patch.linkPreview !== linkPreviewChoice(cv);
       // Audit a rung/discoverability change OR a grant-only change to the team set
       // (parity with the route).
       if (

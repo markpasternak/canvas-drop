@@ -37,5 +37,31 @@ from `socialPreview`, since the regular preview route sits behind the access gat
 automatic screenshot is never exposed, because it can show content. Changes are
 audited as `share_change` with `meta.linkPreview`.
 
+## The admin default and the tri-state choice (31 October 2026)
+
+Every gated link unfurled as the same "canvas-drop" card, so links in an org's Slack
+were indistinguishable, and nobody had flipped the per-canvas switch. Google Docs,
+Notion and Figma do the same for private links unless their Slack app is installed;
+those apps post a rich unfurl with the sharer's credentials, which everyone in the
+channel then sees. We chose a server-side default over a Slack app:
+
+- `access.linkPreviewDefault` (`off` | `title` | `cover`, default `off`) applies to
+  **whole-org** canvases only. Restricted canvases and password-protected public links
+  still need the per-canvas switch. The unfurler is Slack's server, not a member, so the
+  default reveals the title to anyone holding the URL in any app; that is the trade the
+  admin makes, which is why it is admin-only and off by default.
+- The per-canvas choice is now `link_preview_mode` (`on` | `off` | NULL = follow the
+  default). A boolean cannot express "follow", and an explicit off must survive the admin
+  turning the default on. `link_preview` is still written (= `on`) so a rollback keeps
+  opt-ins; migration 0048 backfills `on` from it. API: `linkPreview: true | false | null`.
+- One resolver, `canvas/link-preview.ts`, backs the middleware, the MCP
+  `linkPreviewShows` field, and (mirrored) the dashboard toggle. Liveness is checked
+  only at unfurl time.
+- A settings read failure resolves to `off`. Every fallback in this path must reveal
+  less, not more.
+- The generic card is titled with the slug parsed from the request URL, never from a
+  lookup: the sharer already pasted that text, and a nonexistent slug gets the same card,
+  so the card is not an existence oracle.
+
 Debugging tip: `curl -A "Slackbot-LinkExpanding 1.0" <url>` shows the card Slack gets,
 and the same UA against the `og:image` URL must return `image/*`.

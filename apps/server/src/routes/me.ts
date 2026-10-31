@@ -2,6 +2,7 @@ import type { AuthMode, SkinName } from "@canvas-drop/shared";
 import { type Context, Hono } from "hono";
 import type { AccountSummary } from "../auth/accounts.js";
 import { MAX_OTHER_ACCOUNTS } from "../auth/session.js";
+import type { LinkPreviewDefault } from "../canvas/link-preview.js";
 import type { OrgsRepository } from "../db/repositories/orgs.js";
 import type { AppEnv } from "../http/types.js";
 
@@ -24,6 +25,8 @@ export interface MeRoutesDeps {
   designSkin: () => Promise<SkinName>;
   /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
   publicLinksEnabled?: () => Promise<boolean>;
+  /** The admin's link-preview default for whole-org canvases (presentation only). */
+  linkPreviewDefault?: () => Promise<LinkPreviewDefault>;
   /** Tenancy org store (plan 002 U6) — resolves the caller's org ids to {id,name}. */
   orgs: Pick<OrgsRepository, "findById">;
   /** Whether tenancy is active (an org is configured). Drives `isGuest`: only meaningful
@@ -82,6 +85,9 @@ export function meRoutes(deps: MeRoutesDeps) {
       // Active design skin (presentation only) — the EFFECTIVE value (admin override
       // over env/default), resolved per-request. The SPA applies it to <html data-skin>.
       designSkin: await deps.designSkin(),
+      // The admin's link-preview default for whole-org canvases, so the canvas settings
+      // toggle can show what a canvas without its own choice does. Presentation only.
+      linkPreviewDefault: (await deps.linkPreviewDefault?.()) ?? "off",
     });
   });
 

@@ -255,6 +255,11 @@ export const canvases = sqliteTable(
     // custom cover (never an auto screenshot) for a signed-out link unfurler. Off by
     // default, so a gated canvas reveals nothing until its owner or an editor opts in.
     linkPreview: c.bool("link_preview").notNull().default(false),
+    // The per-canvas link-preview choice: `on`, `off`, or NULL = follow the instance
+    // default (`access.linkPreviewDefault`, which applies to whole-org canvases only).
+    // Supersedes `linkPreview`, which is still written (= mode `on`) so a rollback keeps
+    // every explicit opt-in. Migration 0048 backfills `on` from `link_preview`.
+    linkPreviewMode: c.text("link_preview_mode"),
     // Capability foundation (plan 006). `backendEnabled` is the Backend-group master
     // switch (off by default — static-first); the cap_* flags default ON so flipping
     // backend on yields all-features-live with no extra writes. Per-feature flags

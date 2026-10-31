@@ -1,6 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import { accessModeOf, parseRuntimePolicy } from "@canvas-drop/shared";
 import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
+import { linkPreviewChoice } from "../canvas/link-preview.js";
 import { canvasUrl } from "../canvas/url.js";
 import { conflictDetail, DeployError, PublicationConflictError } from "../deploy/errors.js";
 import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
@@ -72,7 +73,7 @@ export function canvasView(
     passwordHash?: string | null;
     sharedExpiresAt?: number | null;
     spaFallback?: boolean;
-    linkPreview?: boolean;
+    linkPreviewMode?: string | null;
     backendEnabled?: boolean;
     aiAudience?: string;
     runtimePolicy?: string | null;
@@ -139,8 +140,9 @@ export function canvasView(
     // Preview policy (plan 004): auto/off/custom — so an agent can read the current
     // setting before changing it (parity with the dashboard Preview control).
     previewMode: cv.previewMode,
-    // Link preview opt-in (parity with the dashboard Preview control).
-    linkPreview: cv.linkPreview ?? false,
+    // Link preview choice (parity with the dashboard Preview control): true = on,
+    // false = off, null = follow the admin default for whole-org canvases.
+    linkPreview: linkPreviewChoice({ linkPreviewMode: cv.linkPreviewMode ?? null }),
     // Denormalized view rollups (plan 004): lifetime deduped views + last-viewed stamp,
     // so an agent reads the same popularity signal the dashboard shows. Trending
     // (recent-window) counts ride `list_canvases` as `recentViews`.

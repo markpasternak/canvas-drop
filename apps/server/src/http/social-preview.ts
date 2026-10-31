@@ -5,6 +5,11 @@ import { createMiddleware } from "hono/factory";
 import { loginUrl, publicOrigin, requestReturnTo } from "../auth/return-to.js";
 import { SESSION_COOKIE } from "../auth/session.js";
 import { isAnonymouslyPublic } from "../canvas/authorization.js";
+import {
+  type LinkPreviewDefault,
+  type LinkPreviewLevel,
+  linkPreviewLevel,
+} from "../canvas/link-preview.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { resolveRequest } from "../routing/resolve-request.js";
@@ -33,8 +38,14 @@ import type { AppEnv } from "./types.js";
  *     never reach the anonymous branch at all. Served ONLY to crawler user-agents;
  *     a real human visitor falls through to the canvas (or its gate) itself.
  *  2. **Generic card** for any other signed-out top-level HTML navigation in `oidc`
- *     mode — one card for every gated link, leaking nothing about the target. Real
- *     humans are redirected straight on to `/auth/login` (parity with the gateway).
+ *     mode, leaking nothing about the target. On a canvas link it is titled with the
+ *     slug read from the URL itself (never from a lookup, so it is the same for a
+ *     canvas that does not exist): the sharer already pasted that text. Real humans
+ *     are redirected straight on to `/auth/login` (parity with the gateway).
+ *
+ * A gated canvas can also unfurl with its own title (and custom cover) when its link
+ * preview resolves above `none`: the per-canvas choice, or for a whole-org canvas the
+ * admin's instance default (see `canvas/link-preview.ts`).
  *
  * The generic signed-out card is only active in `oidc` mode. The per-canvas card
  * keys off an already-resolved `anonymous` principal, which the public-link
@@ -46,6 +57,8 @@ import type { AppEnv } from "./types.js";
 const PREVIEW_TITLE = "canvas-drop";
 const PREVIEW_DESC =
   "A shared canvas on canvas-drop. Sign in with your organization account to open it.";
+const PRIVATE_CANVAS_DESC =
+  "A private canvas on canvas-drop. Sign in with your organization account to open it.";
 
 // Crawlers that send a wildcard Accept (not text/html) but a recognizable UA.
 const CRAWLER_UA =
@@ -72,24 +85,6 @@ const IMAGE_PATH = new RegExp(
 
 const isPreviewPath = (path: string): boolean => path.endsWith(`/${PREVIEW_ASSET_PATH}`);
 
-/**
- * A canvas that is not an ungated public link but whose owner (or an editor) opted in
- * to link previews (`linkPreview`). Only a live canvas qualifies: active, published,
- * and not past its share expiry. The opt-in reveals the title, description and the
- * CUSTOM cover only — an auto screenshot can show real content, so it never leaves.
- */
-export function linkPreviewEligible(
-  canvas: Pick<Canvas, "linkPreview" | "status" | "currentVersionId" | "sharedExpiresAt">,
-  now: number,
-): boolean {
-  return (
-    canvas.linkPreview &&
-    canvas.status === "active" &&
-    canvas.currentVersionId !== null &&
-    (canvas.sharedExpiresAt === null || canvas.sharedExpiresAt > now)
-  );
-}
-
 /** Does this request look like a top-level document fetch (vs an asset/API call)? */
 function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua: string): boolean {
   if (accept.includes("text/html")) return true;
@@ -115,16 +110,24 @@ export function socialPreview(
    *  only for a link-preview opted-in canvas with a CUSTOM cover, which the regular
    *  (access-gated) preview route would refuse. */
   coverBytes?: (canvas: Canvas) => Promise<Uint8Array | null>,
+  /** The admin's link-preview default for whole-org canvases (`off` when absent).
+   *  Read only for a crawler or cover request on a gated canvas. */
+  linkPreviewDefault?: () => Promise<LinkPreviewDefault>,
 ) {
   // The branded card image lives on the instance origin only. On a canvas subdomain
   // `/og.png` is the canvas's own (gated) path, so an unfurler fetching it there got
   // this HTML card back instead of an image and showed an empty preview.
   const brandImage = `${config.baseUrl.replace(/\/$/, "")}/og.png`;
 
+  /** The canvas slug as written in the request URL (an alias stays the alias). */
+  function requestSlug(host: string, path: string): string | null {
+    return resolveRequest({ host, pathname: path }, config).canvasSlug ?? null;
+  }
+
   /** The canvas this request targets, or null (apex, unknown slug, lookup failure). */
   async function targetCanvas(host: string, path: string): Promise<Canvas | null> {
     if (!canvases) return null;
-    const { canvasSlug } = resolveRequest({ host, pathname: path }, config);
+    const canvasSlug = requestSlug(host, path);
     if (!canvasSlug) return null;
     try {
       // An alias unfurls as its canvas (plan 2026-10-30-1815); the same gating applies.
@@ -148,18 +151,33 @@ export function socialPreview(
     );
   }
 
+  /** The canvas's effective link-preview level. Best-effort: a settings read failure
+   *  falls back to the instance default `off`, so it can only ever reveal less. */
+  async function previewLevel(canvas: Canvas): Promise<LinkPreviewLevel> {
+    let instanceDefault: LinkPreviewDefault = "off";
+    try {
+      instanceDefault = (await linkPreviewDefault?.()) ?? "off";
+    } catch {
+      instanceDefault = "off";
+    }
+    return linkPreviewLevel(canvas, instanceDefault, Date.now());
+  }
+
   /**
-   * The opted-in link preview for a gated canvas, or null to fall through. The cover
-   * request gets the custom `og` bytes; a crawler's page fetch gets the canvas card.
-   * Everything else (other images, human visitors) is left to the normal chain.
+   * The link preview for a gated canvas, or null to fall through. The cover request
+   * gets the custom `og` bytes (level `cover` only); a crawler's page fetch gets the
+   * canvas card. Everything else (other images, human visitors) is left to the normal
+   * chain.
    */
-  async function optedInPreview(
+  async function gatedPreview(
     path: string,
     host: string,
     ua: string,
     canvas: Canvas,
   ): Promise<Response | null> {
-    const custom = canvas.previewMode === "custom";
+    const level = await previewLevel(canvas);
+    if (level === "none") return null;
+    const custom = level === "cover" && canvas.previewMode === "custom";
     if (isPreviewPath(path)) {
       if (!custom || !coverBytes) return null;
       let bytes: Uint8Array | null = null;
@@ -234,11 +252,8 @@ export function socialPreview(
         }
         return canvasCard(publicOrigin(config, host), path, canvas, image ?? brandImage);
       }
-      if (linkPreviewEligible(canvas, Date.now())) {
-        const res = await optedInPreview(path, host, ua, canvas);
-        if (res) return res;
-      }
-      return next();
+      const res = await gatedPreview(path, host, ua, canvas);
+      return res ?? next();
     }
 
     // (2) A guest/org principal is a real visitor → serve the real content.
@@ -249,12 +264,13 @@ export function socialPreview(
     if (!isGetDoc) return next();
     // A session cookie means a (possibly signed-in) human — let the gateway decide.
     if (getCookie(c, SESSION_COOKIE)) return next();
-    // A gated canvas whose owner opted in to link previews unfurls with its own card
-    // and custom cover. Looked up only for a crawler or the cover request itself.
+    // A gated canvas whose link preview is on (its own choice, or the admin default
+    // for a whole-org canvas) unfurls with its own card and, at level `cover`, its
+    // custom cover. Looked up only for a crawler or the cover request itself.
     if (isPreviewPath(path) || CRAWLER_UA.test(ua)) {
       const canvas = await targetCanvas(host, path);
-      if (canvas && linkPreviewEligible(canvas, Date.now())) {
-        const res = await optedInPreview(path, host, ua, canvas);
+      if (canvas) {
+        const res = await gatedPreview(path, host, ua, canvas);
         if (res) return res;
       }
     }
@@ -271,7 +287,16 @@ export function socialPreview(
     // Forward where the visitor was headed so they return to the shared canvas after
     // sign-in, not the apex welcome page.
     const loginHref = loginUrl(config, requestReturnTo(config, host, c.req.url));
-    return htmlResponse(renderPreviewShell(origin, path, { loginHref, image: brandImage }));
+    // On a canvas link, name the card after the slug in the URL: text the sharer already
+    // pasted, read without a lookup so an unknown slug gets the same card (no oracle).
+    const slug = requestSlug(host, path);
+    return htmlResponse(
+      renderPreviewShell(origin, path, {
+        loginHref,
+        image: brandImage,
+        ...(slug ? { title: slug, description: PRIVATE_CANVAS_DESC } : {}),
+      }),
+    );
   });
 }
 
