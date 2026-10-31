@@ -172,8 +172,15 @@ HTML, CSS, and images render faithfully there. ES modules, signed-in SDK calls
 (`canvasdrop.me()`, `kv`, `files`, `ai`, `realtime`), and self-hosted fonts do not work
 inside the sandbox, so a draft that contains JavaScript files starts on the notice
 **This canvas runs JavaScript** with two options: **Run preview** (load it in the
-sandbox anyway; plain inline scripts run) or **Open full preview** (a top-level tab
-where everything runs as it ships).
+sandbox anyway; plain inline scripts run) or **Open full preview** (the same draft in
+its own tab at full size).
+
+**Open full preview** is sandboxed too: the response carries a
+`Content-Security-Policy: sandbox` header, so the tab runs as an opaque origin with no
+access to your dashboard session. The same limits apply there: classic scripts run, but
+ES modules and signed-in SDK calls do not. To check those, publish and open the canvas
+URL; a version you are unsure of can be rolled back from **Versions** with **Make
+current**. Raw draft files opened on their own are sandboxed the same way.
 
 The preview is served from the dashboard origin at `/api/canvases/{id}/preview/` and
 only to the owner and editors; anyone else, admins included, gets 404. The public
