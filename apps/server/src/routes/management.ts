@@ -82,7 +82,7 @@ import type { AppEnv } from "../http/types.js";
 import type { InviteService } from "../invites/service.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
-import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
+import { deletePreviewRenditions, keepScreenshotAsCover } from "../screenshots/custom-preview.js";
 import {
   type PreviewHintDeps,
   previewVisible,
@@ -1269,6 +1269,27 @@ export function managementRoutes(deps: ManagementDeps) {
       meta: { previewMode: "custom" },
     });
     return c.json(await canvasView(updated, roleOf(c)));
+  });
+
+  // Keep the current automatic screenshot as the custom cover — behaves exactly as if
+  // the owner had uploaded it (shared with MCP set_canvas_preview keepScreenshot).
+  app.post("/:id/preview/keep", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const kept = await keepScreenshotAsCover(
+      { storage: deps.storage, canvases: deps.canvases, previewIds },
+      cv,
+    );
+    if (!kept.ok) return c.json({ code: kept.code, message: kept.message }, 409);
+    if (kept.changed) {
+      deps.audit.recordAudit({
+        action: "settings_update",
+        actorId: c.get("user").id,
+        targetId: cv.id,
+        meta: { previewMode: "custom", source: "screenshot" },
+      });
+    }
+    return c.json(await canvasView(kept.canvas, roleOf(c)));
   });
 
   // Remove the custom preview → revert to `auto` (next publish re-captures) and delete

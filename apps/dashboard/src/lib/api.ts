@@ -1518,6 +1518,9 @@ export const api = {
     }),
   clearPreview: (id: string) =>
     request<Canvas>(`/api/canvases/${id}/preview`, { method: "DELETE" }),
+  // Keep the current automatic screenshot as the custom cover, as if it were uploaded.
+  keepScreenshotCover: (id: string) =>
+    request<Canvas>(`/api/canvases/${id}/preview/keep`, { method: "POST" }),
 
   // Access list (D4 `specific_people`, U4).
   listAllowlist: (id: string) => request<AllowlistView>(`/api/canvases/${id}/allowlist`),

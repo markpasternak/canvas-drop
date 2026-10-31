@@ -81,7 +81,10 @@ workspace's chat.
 A live, published, unexpired canvas whose preview is on unfurls with its **title,
 description and custom cover**. An automatic
 screenshot is never shown, because it can capture real content: without a custom cover
-the card uses the branded image. The canvas itself stays behind sign-in, and turning the
+the card uses the branded image. If the screenshot looks right, the owner or an editor
+can press **Settings → Cover image → Use as custom cover** (MCP: `set_canvas_preview`
+`keepScreenshot: true`). That keeps the current screenshot as the custom cover, exactly
+as if it had been uploaded: publishes stop replacing it and link previews may show it. The canvas itself stays behind sign-in, and turning the
 setting on or off is audited as a `share_change`. This applies in `oidc` auth mode, where
 signed-out unfurls are answered at all.
 

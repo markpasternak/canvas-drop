@@ -63,5 +63,14 @@ channel then sees. We chose a server-side default over a Slack app:
   lookup: the sharer already pasted that text, and a nonexistent slug gets the same card,
   so the card is not an existence oracle.
 
+## Keeping a screenshot as the cover
+
+Screenshots and uploaded covers share the same rendition keys, so "use this screenshot
+as my cover" is only a `previewMode` flip to `custom` (`keepScreenshotAsCover`,
+`POST /:id/preview/keep`, MCP `set_canvas_preview keepScreenshot`). It is allowed only
+for a screenshot the owner can see (`auto` + `previewVisible` + the `og` blob exists).
+The capture worker now re-reads `previewMode` after capturing and before writing, since
+a capture takes seconds and an upload or keep in that window used to be overwritten.
+
 Debugging tip: `curl -A "Slackbot-LinkExpanding 1.0" <url>` shows the card Slack gets,
 and the same UA against the `og:image` URL must return `image/*`.

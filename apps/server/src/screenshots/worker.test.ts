@@ -121,6 +121,40 @@ describe("screenshotWorker (plan 004 / U5)", () => {
     expect((await jobs.findByCanvas(canvasId))?.status).toBe("done");
   });
 
+  it("drops a capture whose canvas left auto WHILE it ran — a kept or uploaded cover wins", async () => {
+    client = await makeTestDb("sqlite");
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const jobs = screenshotsRepository(client);
+    const user = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const canvas = await canvases.create({ ownerId: user.id, slug: "s", apiKeyHash: "k" });
+    const puts: string[] = [];
+    const worker = screenshotWorker({
+      config: cfg(),
+      enabled: async () => true,
+      jobs,
+      canvases,
+      storage: { put: async (key) => void puts.push(key) },
+      captureUrlFor: () => "http://127.0.0.1:9999/c/s/",
+      launchBrowser: fakeBrowser().launch,
+      // The owner pins a cover mid-capture.
+      capture: async () => {
+        await canvases.updateSettings(canvas.id, { previewMode: "custom" });
+        return fakeRenditions();
+      },
+      log: silent,
+    });
+    await jobs.enqueue(canvas.id, VERSION);
+    await worker.tick();
+    expect(puts).toEqual([]);
+    expect((await jobs.findByCanvas(canvas.id))?.status).toBe("done");
+  });
+
   it("when the admin toggle is OFF: runs bookkeeping but launches no browser and claims nothing", async () => {
     const { jobs, canvasId, browser, worker, setEnabled } = await setup(cfg());
     await jobs.enqueue(canvasId, VERSION);
