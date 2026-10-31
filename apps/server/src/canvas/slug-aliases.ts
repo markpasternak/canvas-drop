@@ -54,7 +54,9 @@ export async function renameCanvasSlug(
     // Renaming to the current slug is a no-op write (today's behaviour), never "taken".
     target = { slug: canvas.slug, custom: true };
   } else {
-    const resolved = await resolveCreateSlug(requested, (s) => deps.canvases.slugTaken(s));
+    const resolved = await resolveCreateSlug(requested, (s) =>
+      deps.canvases.slugTaken(s, { ownerId: canvas.ownerId, canvasId: canvas.id }),
+    );
     if ("error" in resolved) return { error: resolved.error };
     target = resolved;
   }
@@ -101,7 +103,9 @@ export async function addCanvasAlias(
     return { error: "slug_taken" };
   }
   if (aliases.length >= MAX_SLUG_ALIASES) return { error: "alias_limit" };
-  if (await deps.canvases.slugTaken(slug)) return { error: "slug_taken" };
+  if (await deps.canvases.slugTaken(slug, { ownerId: canvas.ownerId, canvasId: canvas.id })) {
+    return { error: "slug_taken" };
+  }
 
   let alias: CanvasSlugAlias;
   try {
@@ -126,7 +130,7 @@ export async function addCanvasAlias(
   return { alias };
 }
 
-/** Remove an alias; the name is free for anyone immediately (matches rename today). */
+/** Remove an alias; the name stays reserved for this canvas and its owner for a while. */
 export async function removeCanvasAlias(
   deps: SlugAliasDeps,
   canvas: Canvas,

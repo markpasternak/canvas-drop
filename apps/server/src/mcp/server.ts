@@ -547,7 +547,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // the SAME resolveHomeOrg the dashboard/management create uses — never trusts the client.
       const home = resolveHomeOrg(orgId, caller.orgIds);
       if ("error" in home) return fail("ORG_FORBIDDEN: you are not a member of that org");
-      const resolved = await resolveCreateSlug(requestedSlug, (s) => deps.canvases.slugTaken(s));
+      const resolved = await resolveCreateSlug(requestedSlug, (s) =>
+        deps.canvases.slugTaken(s, { ownerId: caller.userId }),
+      );
       if ("error" in resolved) return slugFailure(resolved.error);
       const apiKey = generateApiKey();
       let cv: Awaited<ReturnType<typeof deps.canvases.create>>;

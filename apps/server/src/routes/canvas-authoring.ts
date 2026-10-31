@@ -453,7 +453,9 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     });
     if (!quota.ok) return c.json({ code: "QUOTA_EXCEEDED", scope: quota.scope }, 429);
 
-    const resolved = await resolveCreateSlug(meta.slug, (s) => deps.canvases.slugTaken(s));
+    const resolved = await resolveCreateSlug(meta.slug, (s) =>
+      deps.canvases.slugTaken(s, { ownerId: viewer.id }),
+    );
     if ("error" in resolved) {
       if (resolved.error === "slug_taken") {
         return c.json({ code: "SLUG_TAKEN", message: "That slug is already taken." }, 409);

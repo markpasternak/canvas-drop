@@ -424,6 +424,27 @@ export const canvasSlugAliases = sqliteTable(
   ],
 );
 
+/**
+ * Slugs a canvas let go of (a rename that dropped the old name, a removed alias, aliases
+ * freed by a purge). For a while only the canvas it came from, or another canvas of the
+ * same owner, may take one again (audit run-1, #13): in subdomain mode the slug is the
+ * browser origin, and storage, service workers and permissions a visitor's browser holds
+ * for it would otherwise carry over to a stranger's canvas. The window is code
+ * (`SLUG_RESERVATION_MS`); a row past it reserves nothing.
+ */
+export const releasedSlugs = sqliteTable("released_slugs", {
+  slug: c.text("slug").primaryKey(),
+  canvasId: c
+    .text("canvas_id")
+    .notNull()
+    .references(() => canvases.id),
+  ownerId: c
+    .text("owner_id")
+    .notNull()
+    .references(() => users.id),
+  releasedAt: c.epochMs("released_at").notNull(),
+});
+
 export const canvasAllowlist = sqliteTable(
   "canvas_allowlist",
   {
