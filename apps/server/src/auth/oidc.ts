@@ -216,10 +216,15 @@ export function makeOidc(deps: OidcDeps) {
       for (const stale of pending.slice(0, Math.max(0, pending.length - (MAX_PENDING_TX - 1)))) {
         deleteCookie(c, stale.name, txCookieOptions(deps.config));
       }
-      setCookie(c, txCookieName(deps.config, state), txValue({ state, verifier, t: Date.now() }, returnTo), {
-        ...txCookieOptions(deps.config),
-        maxAge: TX_MAX_AGE,
-      });
+      setCookie(
+        c,
+        txCookieName(deps.config, state),
+        txValue({ state, verifier, t: Date.now() }, returnTo),
+        {
+          ...txCookieOptions(deps.config),
+          maxAge: TX_MAX_AGE,
+        },
+      );
       return c.redirect(url.href);
     },
 
