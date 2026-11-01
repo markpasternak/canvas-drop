@@ -46,7 +46,8 @@ flowchart TD
     Paste --> Draft
     API --> Pub{Publish}
     Ed --> Draft
-    Draft -->|keep editing| Draft
+    Draft --> Edit[Keep editing]
+    Edit --> Draft
     Draft -->|Publish when ready| Pub
     Pub --> V[Immutable version N, content-addressed]
     V --> Live([Served at the canvas URL])
