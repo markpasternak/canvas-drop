@@ -2,7 +2,7 @@
 
 Date: 2026-11-01 · Issue: [#152](https://github.com/markpasternak/canvas-drop/issues/152)
 
-Status: authorized by Mark as a separate autonomous PR after maintenance PR #151. One maintenance unit with sequential implementation phases and parallel research/review. Branch `feat/major-upgrades-2026-11`, based on `e3c7959` in an isolated worktree. Merge only after local gates, independent reviews and all required CI pass. No production deployment or global host-tool updates.
+Status: authorized by Mark as a separate autonomous PR after maintenance PR #151. One maintenance unit with sequential implementation phases and parallel research/review. Branch `feat/major-upgrades-2026-11`, based on `e3c7959` in an isolated worktree. Merge only after local gates, independent reviews and all required CI pass. Mark subsequently explicitly authorized upgrading Node on his Mac and the droplet. Include that runtime rollout after the PR is green, with a production backup, prior-runtime rollback path and verified service health; preserve unrelated workstation changes.
 
 ## Scope and compatibility contract
 
@@ -19,7 +19,7 @@ Update the previously deferred stable major lines, verified against npm registry
 | react-dropzone | 17.0.0 | 20.1.4 |
 | Mermaid | 11.17.2 | 12.2.0 |
 
-Keep Node 24 as the CI/container baseline. Express its actual development minimum (24.15.0, required by jsdom) and align Node types with the supported 24 line (24.19.2), rather than exposing newer runtime APIs. Add explicit required peers: Vite 8.3.5 at the root for Vitest 5, and Testing Library DOM 10.x in the dashboard for jest-dom 7. Preserve native build approvals and bounded advisory overrides; inspect whether newly obsolete entries/comments can be removed safely.
+Use the verified current LTS Node **26.13.0 (Lithium)** for CI, containers, the Mac mise default and the droplet. Pin `.nvmrc`, use engine range `^26.13.0`, and update Node types to **26.6.6**. Node 26 does not bundle Corepack, so bootstrap the pinned pnpm explicitly. Retain the existing runtime until compatibility checks and a rollback path are ready. Add explicit required peers: Vite 8.3.5 at the root for Vitest 5, and Testing Library DOM 10.x in the dashboard for jest-dom 7. Preserve native build approvals and bounded advisory overrides; inspect whether newly obsolete entries/comments can be removed safely.
 
 Geist Mono 5.2.8 remains a deliberate separate font/cache migration: it is not a major upgrade, and its 5.3.0 bytes cannot silently replace an immutable font URL. Do not recapture the product screenshots unless an actual rendering difference requires it.
 
@@ -45,3 +45,7 @@ Use the supervised test runner, never mix dashboard/server paths in a targeted i
 Record final package versions, peer/engine decisions, native-driver/container evidence, browser findings, test counts and any remaining intentional holds in `docs/solutions/2026-11-01-major-dependency-upgrades.md`. The tracking issue and linked PR are authoritative for final CI and merge state.
 
 Primary references: [better-sqlite3 13 release](https://github.com/WiseLibs/better-sqlite3/releases/tag/v13.0.0), [pnpm 12 release](https://github.com/pnpm/pnpm/releases/tag/v12.0.0), [Vitest migration guide](https://vitest.dev/guide/migration.html), [jsdom releases](https://github.com/jsdom/jsdom/releases), [jest-dom releases](https://github.com/testing-library/jest-dom/releases), [react-dropzone releases](https://github.com/react-dropzone/react-dropzone/releases), [Mermaid 12 release](https://github.com/mermaid-js/mermaid/releases/tag/mermaid@12.0.0). Registry manifests remain the version/engine/peer source of truth for the installed targets.
+
+## Authorized Node rollout
+
+Official source: [Node release index](https://nodejs.org/dist/index.json), verified Node26.13.0 is LTS Lithium released 28 October 2026. Mac Node24.22.1 is managed by mise with its config symlinked into `~/dotfiles`; update only the Node tool selection and preserve unrelated dirty files. The droplet uses the bare compiled server under systemd, not the repository Docker image. Inspect its installed NodeSource package, application revision and environment paths without printing secrets. Stage dependencies/build before stopping the service, take a consistent backup, retain the previous application/runtime for rollback, upgrade the actual service interpreter and package-manager path, start and verify public/authenticated boundary health and data preservation. Record actual outcomes privately without publishing server addresses or credentials in the open-source repository.

@@ -6,7 +6,7 @@ For contributors: how to run the suite, how to write a test that proves a change
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
-`pnpm test` runs the root suite on **both** database dialects in one process (in-memory SQLite and in-process pglite), then the dashboard suite, and stops at the first failing phase. CI re-runs the same matrix in a clean environment; that green is what authorizes a merge. Requires Node `>=24` and `pnpm@11.0.9` (pinned in `package.json`; `corepack enable` picks it up).
+`pnpm test` runs the root suite on **both** database dialects in one process (in-memory SQLite and in-process pglite), then the dashboard suite, and stops at the first failing phase. CI re-runs the same matrix in a clean environment; that green is what authorizes a merge. Requires Node `^26.13.0` and `pnpm@12.16.1` (pinned in `package.json`; install it with `npm install --global pnpm@12.16.1`).
 
 ## Commands
 
@@ -128,15 +128,16 @@ Screenshot capture for the docs site (`pnpm docs:screenshots`) is a manual scrip
 
 ## CI matrix (`.github/workflows/ci.yml`)
 
-Runs on every push to `main` and every pull request, on Node 24 with `pnpm@11.0.9`.
+Runs on every push to `main` and every pull request, on Node 26.13.0 with `pnpm@12.16.1`.
 
 | Job | What it proves |
 |-----|----------------|
 | `lint` (Lint & typecheck) | `pnpm lint` (Biome) and `pnpm typecheck`; also re-runs `pnpm docs:build` and `pnpm docs:mermaid` and fails on any diff in `apps/server/src/docs/generated-content.ts` or `docs/site/assets/mermaid.js` |
 | `test-sqlite` (Test (sqlite)) | `pnpm test:sqlite`: root suite on the SQLite dialect only |
 | `test-dashboard` (Test (dashboard)) | `pnpm test:dashboard`: the jsdom suite, run once because it is dialect-agnostic |
-| `test-postgres` (Test (postgres + real infra)) | `pnpm test:pg`: root suite on pglite, plus the real `postgres:16` service and a MinIO container (started as a step, with the bucket created up front) with the `CANVAS_DROP_TEST_*` env set |
+| `test-postgres` (Test (postgres + real infra)) | `pnpm test:pg`: root suite on pglite, plus the real `postgres:16` service and a SeaweedFS S3-compatible container (started as a step, with the bucket created up front) with the `CANVAS_DROP_TEST_*` env set |
 | `build` (Build) | `pnpm build` (`pnpm -r build`: shared, sdk, dashboard, server) |
+| `container-smoke` (Container upgrade smoke) | Fresh non-root Node 26 image opens a Node 24/SQLite 12-created database, serves compiled dashboard/docs assets, and preserves all tables/blobs through the real backup/restore CLI |
 | `dependency-audit` (Dependency audit (advisory)) | `pnpm audit --audit-level high \|\| true`; logs findings, never fails the run |
 
 A change that passes on SQLite but breaks Postgres fails `test-postgres`. CI is the explicit, authoritative gate, and server-side branch protection on `main` is enabled: the CI matrix is a required status check, so every change lands through a green PR, never a direct push. A separate `Security` workflow (`.github/workflows/security.yml`) runs a blocking gitleaks scan of the working tree on the same triggers, then plants a fake token outside the allowlist and asserts the scan still catches it.

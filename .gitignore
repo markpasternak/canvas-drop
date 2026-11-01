@@ -52,3 +52,6 @@ id_ed25519
 id_ed25519.pub
 *.pem
 .worktrees
+
+# Vitest 5 generated reports/artifacts
+.vitest/

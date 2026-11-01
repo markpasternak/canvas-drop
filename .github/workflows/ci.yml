@@ -81,7 +81,7 @@ jobs:
       - run: pnpm test:dashboard
 
   # Postgres leg: same suite, plus real-infrastructure smoke tests against a live
-  # postgres:16 (node-postgres driver) and MinIO (real S3Driver) — coverage the
+  # postgres:16 (node-postgres driver) and SeaweedFS (real S3Driver) — coverage the
   # in-process drivers can't give.
   test-postgres:
     name: Test (postgres + real infra)
@@ -189,6 +189,4 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Advisory only — surfaces findings in the log without blocking the run.
-      # (Current finding: esbuild, a dev-only transitive of drizzle-kit; the
-      # advisory is Deno-specific and does not affect our Node usage.)
       - run: pnpm audit --audit-level high || true

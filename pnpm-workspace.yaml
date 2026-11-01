@@ -39,8 +39,7 @@ allowBuilds:
 # 2.x alternative to avoid GHSA-rmxm-3fg6-px4f (no fixed 1.x release); leave
 # other parents on their declared major rather than globally forcing 1.x to 2.x.
 #
-# Not overridden: katex <0.18.2 (low; via mermaid, which pins ^0.16 — the fix is a
-# 0.x minor and would cross a breaking line inside the bundled docs renderer).
+# Mermaid 12 resolves the patched KaTeX 0.18 line within its supported range.
 # @hono/node-server GHSA-frvp-7c67-39w9 (1.x <1.19.15, via the MCP SDK; our own
 #           direct dependency is on the 2.x line, raised in apps/server/package.json)
 #

@@ -18,8 +18,16 @@ whose linked PR records the authoritative CI/merge state. Its implementation upd
 52 direct packages and pnpm, reduces 32 advisories to one low KaTeX advisory, and
 passes 4,501 local tests plus independent reviews and browser verification.
 The [maintenance evidence](solutions/2026-11-01-dependency-maintenance.md) records
-the deliberate major-version deferrals. Merging its green PR completes this round;
-no production deployment is included.
+the deliberate major-version deferrals. PR #151 merged with green CI; issue #150
+is closed. That round did not include production deployment.
+
+The subsequent [major-upgrade round](plans/2026-11-01-003-chore-major-dependency-upgrades-plan.md),
+tracked in [issue #152](https://github.com/markpasternak/canvas-drop/issues/152),
+moves the deferred major packages and supported runtime to Node 26.13.0, with
+4,505 local tests, six additional real-Chromium capture checks, independent review
+and a zero-advisory dependency audit. Its [evidence](solutions/2026-11-01-major-dependency-upgrades.md)
+records the compatibility work and remaining font hold. The tracking issue and PR
+record final CI, merge and the separately authorized Mac/droplet runtime rollout.
 
 **v1 is feature-complete**, built unit by unit from [`BUILD_BRIEF.md`](../BUILD_BRIEF.md) with CI green on both dialects at every merge. Milestones M1 through M9 are shipped: foundation, hosting and deploy, the dashboard, canvas management, the editor and draft/publish model, the original five primitives and the SDK, admin and hardening, the gallery, and AI and realtime.
 

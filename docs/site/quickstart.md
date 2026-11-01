@@ -8,8 +8,8 @@ URL mode, and `dev` auth that signs you in automatically.
 
 ## Run an instance locally
 
-You need Node 24 or newer (`.nvmrc` says `24`) and pnpm; the repo pins
-`pnpm@11.28.9` in `package.json`.
+You need Node 26.13 or newer in the 26.x LTS line (`.nvmrc` pins `26.13.0`) and pnpm; the repo pins
+`pnpm@12.16.1` in `package.json`. Node 26 does not bundle Corepack; install pnpm with `npm install --global pnpm@12.16.1`.
 
 ```sh
 git clone https://github.com/markpasternak/canvas-drop.git
