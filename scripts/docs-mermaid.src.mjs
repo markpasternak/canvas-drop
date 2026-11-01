@@ -113,7 +113,15 @@ function configure() {
     // while the live theme variables below continue to supply the design colors.
     layout: "dagre",
     look: "classic",
-    flowchart: { curve: "basis", useMaxWidth: true },
+    flowchart: {
+      curve: "basis",
+      useMaxWidth: true,
+      // v12 also narrows labels and imposes a uniform minimum node width.
+      // Restore v11's content-sized shapes so adjacent self-loop/edge labels
+      // retain their space in the create/publish and access-flow diagrams.
+      wrappingWidth: 200,
+      minNodeWidth: 0,
+    },
     sequence: { useMaxWidth: true },
   };
   // Theming must never blank a diagram: if a token can't be turned into a color
