@@ -19,11 +19,11 @@ import { CAPTURE_TOKEN_HEADER } from "./capture-token.js";
  * Dialogs are auto-dismissed; a hard wall-clock timeout bounds a slow/looping canvas.
  */
 
-/** Render viewport for the master screenshot — a full 3:2 desktop view. 3:2 (taller than
- *  a 16:9 strip) frames the hero fuller, the way good app galleries show site previews,
- *  and downscales cleanly into the 3:2 card/thumb renditions; the `og` rendition
- *  cover-crops to its 1.91:1 link-unfurl shape. */
-export const CAPTURE_VIEWPORT = { width: 1440, height: 960 } as const;
+/** A compact 3:2 desktop view makes small tools legible in a cover. The worker's
+ *  existing 2x density keeps the master larger than the card rendition. Fixed-width
+ *  layouts (or an unreadable layout) fall back to the original desktop viewport. */
+export const CAPTURE_VIEWPORT = { width: 900, height: 600 } as const;
+export const CAPTURE_FALLBACK_VIEWPORT = { width: 1440, height: 960 } as const;
 
 /** Target pixel size per rendition (sharp `cover` crop from the master). `card`/`thumb`
  *  are 3:2 to match the dashboard/gallery cover regions (no off-aspect cropping); `og`
@@ -38,20 +38,24 @@ const WEBP_QUALITY = 80;
 
 /** Node-side ceiling on the in-page settle (its own ~3 s budget plus headroom). */
 export const SETTLE_DEADLINE_MS = 5_000;
+/** The page can replace its own timers or hang, so layout probing is bounded in Node. */
+export const LAYOUT_PROBE_DEADLINE_MS = 1_000;
+/** A renderer that did not answer the probe may also fail to acknowledge a resize. */
+export const FALLBACK_RESIZE_DEADLINE_MS = 1_000;
 
-/** Wait for `p` (ignoring its outcome) or `ms`, whichever comes first. */
-async function withDeadline(p: Promise<unknown>, ms: number): Promise<void> {
+/** Return `p`'s value, or undefined on failure/deadline. */
+async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([
-    p.then(
-      () => {},
-      () => {},
-    ),
-    new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, ms);
-    }),
-  ]);
-  clearTimeout(timer);
+  try {
+    return await Promise.race([
+      p.catch(() => undefined),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ── Minimal structural types (real Playwright Page/Context satisfy these) ──────
@@ -101,14 +105,39 @@ type CaptureImg = {
   addEventListener: (type: string, cb: () => void, opts: { once: boolean }) => void;
 };
 type CaptureWindow = {
+  innerWidth?: number;
   innerHeight?: number;
   scrollTo?: (opts: { top: number; left: number; behavior: "instant" }) => void;
   document?: {
-    body?: { scrollHeight?: number };
+    documentElement?: { scrollWidth?: number };
+    body?: { scrollHeight?: number; scrollWidth?: number };
     fonts?: { ready?: Promise<unknown> };
     images?: ArrayLike<CaptureImg>;
   };
 };
+
+/** Runs in the page. Only a verified fit keeps the compact viewport; >=2px of
+ *  horizontal overflow, missing metrics, or invalid values use the wider fallback.
+ *  This deliberately does not guess which DOM content is safe to crop. */
+function compactLayoutFits(): boolean {
+  const w = globalThis as unknown as CaptureWindow;
+  const width = w.innerWidth;
+  const rootWidth = w.document?.documentElement?.scrollWidth;
+  const bodyWidth = w.document?.body?.scrollWidth;
+  if (
+    typeof width !== "number" ||
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    typeof rootWidth !== "number" ||
+    !Number.isFinite(rootWidth) ||
+    rootWidth <= 0 ||
+    typeof bodyWidth !== "number" ||
+    !Number.isFinite(bodyWidth) ||
+    bodyWidth <= 0
+  )
+    return false;
+  return Math.max(rootWidth, bodyWidth) < width + 2;
+}
 
 /**
  * Runs IN THE BROWSER (serialized by page.evaluate): scroll the page in viewport-sized
@@ -205,6 +234,22 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
     // so a Node-side deadline bounds it too: past it we capture as-is (page.close in the
     // finally block ends the still-pending evaluate).
     await withDeadline(page.evaluate(settleForCapture), SETTLE_DEADLINE_MS);
+    const compactFits = await withDeadline(
+      Promise.resolve().then(() => page.evaluate(compactLayoutFits)),
+      LAYOUT_PROBE_DEADLINE_MS,
+    );
+    if (compactFits !== true) {
+      const resized = await withDeadline(
+        Promise.resolve()
+          .then(() => page.setViewportSize({ ...CAPTURE_FALLBACK_VIEWPORT }))
+          .then(() => true),
+        FALLBACK_RESIZE_DEADLINE_MS,
+      );
+      if (resized !== true) throw new Error("Capture fallback resize failed or timed out");
+      // Resizing can change responsive layout and reveal different lazy content.
+      // Repeat the same bounded settle and return to the top before the shot.
+      await withDeadline(page.evaluate(settleForCapture), SETTLE_DEADLINE_MS);
+    }
     // A short paint settle after returning to the top.
     await page.waitForTimeout(150).catch(() => {});
     // `animations: "disabled"` fast-forwards finite animations to completion, so
@@ -221,7 +266,7 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
   }
 }
 
-/** Max input pixels sharp will decode (~40 MP). Our own capture master is ~1.4 MP, so
+/** Max input pixels sharp will decode (~40 MP). Our 2x capture masters are <=5.6 MP, so
  *  this only bites the custom-preview upload path, where the bytes are owner-supplied:
  *  it caps decode-time memory (a decompression-bomb image throws instead of allocating
  *  hundreds of MB of raw bitmap on a small VPS). The caller turns the throw into a 400. */
