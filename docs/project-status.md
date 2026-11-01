@@ -13,9 +13,13 @@ and all required CI checks passed; issue #148 is closed.
 This round does not deploy to production or close the deferred M10 pilot/load test.
 
 The separate [dependency maintenance round](plans/2026-11-01-002-chore-dependency-maintenance-plan.md)
-is active under [issue #150](https://github.com/markpasternak/canvas-drop/issues/150).
-It addresses package advisories and compatible upgrades, with disruptive major
-migrations deferred and no production deployment.
+is tracked under [issue #150](https://github.com/markpasternak/canvas-drop/issues/150),
+whose linked PR records the authoritative CI/merge state. Its implementation updates
+52 direct packages and pnpm, reduces 32 advisories to one low KaTeX advisory, and
+passes 4,501 local tests plus independent reviews and browser verification.
+The [maintenance evidence](solutions/2026-11-01-dependency-maintenance.md) records
+the deliberate major-version deferrals. Merging its green PR completes this round;
+no production deployment is included.
 
 **v1 is feature-complete**, built unit by unit from [`BUILD_BRIEF.md`](../BUILD_BRIEF.md) with CI green on both dialects at every merge. Milestones M1 through M9 are shipped: foundation, hosting and deploy, the dashboard, canvas management, the editor and draft/publish model, the original five primitives and the SDK, admin and hardening, the gallery, and AI and realtime.
 

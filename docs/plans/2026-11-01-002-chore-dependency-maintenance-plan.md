@@ -2,7 +2,7 @@
 
 Date: 2026-11-01 · Issue: [#150](https://github.com/markpasternak/canvas-drop/issues/150)
 
-Status: approved by Mark for separate autonomous implementation and green-CI merge. UX PR [#149](https://github.com/markpasternak/canvas-drop/pull/149) merged as `4b8fc645bc942e6e6a4805c21fb27e4187eb10c5` after all CI checks passed. The shared checkout was pulled clean and this worktree branches from that merge.
+Status: implementation, local gates, independent reviews and browser verification completed. The release gate is the separate PR linked from issue #150: required CI must pass before the authorized squash merge. See the [implementation evidence](../solutions/2026-11-01-dependency-maintenance.md) for exact results and retained major versions. UX PR [#149](https://github.com/markpasternak/canvas-drop/pull/149) merged as `4b8fc645bc942e6e6a4805c21fb27e4187eb10c5` after all CI checks passed. The shared checkout was pulled clean and this worktree branches from that merge.
 
 Branch: `feat/dependency-maintenance-2026-11`.
 
