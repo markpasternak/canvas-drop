@@ -17,10 +17,11 @@ allowBuilds:
 # undici    GHSA-4cwx-7wf7-3272, GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5,
 #           GHSA-jr45-8vmc-qm54, GHSA-v3r7-h72x-cjcm, plus the 2026-10 batch
 #           (WebSocket/decompression DoS, BalancedPool TLS bypass, Set-Cookie
-#           caching) (<7.29.1, via jsdom)
+#           caching), plus the parser/TLS/cache/interceptor 2026-10 advisories
+#           (<7.30.1, via jsdom)
 # dompurify GHSA-55q2-fjhq-7xh7 and the IN_PLACE advisories (<=3.4.15, via mermaid)
 # fast-uri  GHSA-7p8r-x3mc-p8w7, GHSA-v2hh-gcrm-f6hx, plus host-confusion / SSRF /
-#           authority-injection fixes (<3.1.8, via ajv <- MCP SDK)
+#           authority-injection / scheme-decoding fixes (<3.1.9, via ajv <- MCP SDK)
 # ip-address GHSA-mwp4-54f8-5fhr, GHSA-4xrf-jv44-h6hh, GHSA-22jq-vg5j-6vgg, plus
 #           link-local / NAT64 / cross-family subnet fixes (<10.7.1, via
 #           express-rate-limit <- MCP SDK)
@@ -32,6 +33,11 @@ allowBuilds:
 # qs        arrayLimit bypass + isBuffer DoS (<6.16.0, via express <- MCP SDK)
 # source-map-js event-loop DoS via indexed section offsets (<1.2.2, via postcss)
 # fast-copy stack exhaustion on deep values (<4.1.0, via pino-pretty)
+# body-parser GHSA-27r3-jxmh-p828 (<2.4.0, via Express <- MCP SDK)
+# seroval GHSA-f86p-h4j2-7qgj / GHSA-9wx9-5pv9-3349 (<1.6.11, via Router)
+# MCP SDK 1.32.2 accepts node-server ^1.19.9 || ^2.0.5. Select its supported
+# 2.x alternative to avoid GHSA-rmxm-3fg6-px4f (no fixed 1.x release); leave
+# other parents on their declared major rather than globally forcing 1.x to 2.x.
 #
 # Not overridden: katex <0.18.2 (low; via mermaid, which pins ^0.16 — the fix is a
 # 0.x minor and would cross a breaking line inside the bundled docs renderer).
@@ -47,9 +53,9 @@ overrides:
   "esbuild@>=0.27.3 <0.28.1": "^0.28.1"
   "postcss@>=8.0.0 <8.5.23": "^8.5.23"
   "nanoid@>=3.0.0 <3.3.17": "^3.3.17"
-  "undici@>=7.0.0 <7.29.1": "^7.29.1"
+  "undici@>=7.0.0 <7.30.1": "^7.30.1"
   "dompurify@>=3.0.0 <3.4.16": "^3.4.16"
-  "fast-uri@>=3.0.0 <3.1.8": "^3.1.8"
+  "fast-uri@>=3.0.0 <3.1.9": "^3.1.9"
   "ip-address@>=10.0.0 <10.7.1": "^10.7.1"
   "hono@>=4.0.0 <4.13.13": "^4.13.13"
   "@hono/node-server@>=1.0.0 <1.19.15": "^1.19.15"
@@ -57,3 +63,6 @@ overrides:
   "qs@>=6.0.0 <6.16.0": "^6.16.0"
   "source-map-js@>=1.0.0 <1.2.2": "^1.2.2"
   "fast-copy@>=4.0.0 <4.1.0": "^4.1.0"
+  "body-parser@>=2.0.0 <2.4.0": "^2.4.0"
+  "seroval@>=1.0.0 <1.6.11": "^1.6.11"
+  "@modelcontextprotocol/sdk@>=1.32.2 <2>@hono/node-server": "^2.1.5"

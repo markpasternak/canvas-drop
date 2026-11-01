@@ -257,7 +257,7 @@ in the repo; the [Deploy](/docs/self-hosting/deploy) page summarises it under
 ## Run from source
 
 For developing canvas-drop, or for a zero-config local instance. Requires Node 24
-or newer and pnpm 11 (`package.json` pins `pnpm@11.0.9`; `corepack enable` selects
+or newer and pnpm 11 (`package.json` pins `pnpm@11.28.9`; `corepack enable` selects
 it).
 
 ```bash

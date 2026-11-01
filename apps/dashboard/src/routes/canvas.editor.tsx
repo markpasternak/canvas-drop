@@ -403,7 +403,7 @@ function EditorWorkspace({ id }: { id: string }) {
   }
 
   /** Resolve a conflict by adopting the other editor's version: the buffer becomes theirs. */
-  function useTheirVersion() {
+  function adoptTheirVersion() {
     if (!conflict) return;
     const theirs = conflict.theirs ?? "";
     hashesRef.current.set(conflict.path, conflict.currentHash);
@@ -1149,7 +1149,7 @@ function EditorWorkspace({ id }: { id: string }) {
                 size="sm"
                 variant="secondary"
                 disabled={conflict.theirs === null}
-                onClick={useTheirVersion}
+                onClick={adoptTheirVersion}
               >
                 Use their version
               </Button>
