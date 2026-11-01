@@ -1,5 +1,6 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import {
   AdminConnectionDiagnostics,
   AdminConnectionHealthSummary,
@@ -10,7 +11,9 @@ import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Field } from "../components/Field.js";
+import { PendingChangesGuard } from "../components/PendingChangesGuard.js";
 import { PublicConnectionGrant } from "../components/PublicConnectionGrant.js";
+import { ReadError } from "../components/ReadError.js";
 import { InlineNotice, MetaGrid, MetaItem, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import {
@@ -67,11 +70,13 @@ function ProfileFields({
   onChange,
   keyLocked = false,
   showHeaders = true,
+  disabled = false,
 }: {
   draft: ProfileDraft;
   onChange: (draft: ProfileDraft) => void;
   keyLocked?: boolean;
   showHeaders?: boolean;
+  disabled?: boolean;
 }) {
   const toggleMethod = (method: ConnectionMethod) => {
     const selected = draft.allowedMethods.includes(method);
@@ -83,7 +88,7 @@ function ProfileFields({
     });
   };
   return (
-    <div className="space-y-4">
+    <fieldset disabled={disabled} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Profile key"
@@ -182,13 +187,19 @@ function ProfileFields({
           )}
         </fieldset>
       ) : null}
-    </div>
+    </fieldset>
   );
 }
 
-function CreateProfile() {
+function CreateProfile({
+  onDirtyChange,
+}: {
+  onDirtyChange: (key: string, dirty: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(EMPTY_DRAFT);
+  useEffect(() => onDirtyChange("new", dirty), [dirty, onDirtyChange]);
   const create = useCreateConnection();
   const toast = useToast();
 
@@ -228,9 +239,16 @@ function CreateProfile() {
           Approve one exact upstream origin for selected canvases.
         </p>
       </div>
-      <ProfileFields draft={draft} onChange={setDraft} />
+      <ProfileFields draft={draft} onChange={setDraft} disabled={create.isPending} />
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={() => setOpen(false)} disabled={create.isPending}>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setOpen(false);
+            setDraft(EMPTY_DRAFT);
+          }}
+          disabled={create.isPending}
+        >
           Cancel
         </Button>
         <Button onClick={submit} loading={create.isPending}>
@@ -243,8 +261,10 @@ function CreateProfile() {
 
 function GrantEditor({ profile }: { profile: AdminConnection }) {
   const [search, setSearch] = useState("");
-  const { data: page, isLoading } = useAdminCanvases({ q: search || undefined, limit: 10 });
-  const { data: attached = [] } = useAdminConnectionCanvases(profile.id);
+  const candidates = useAdminCanvases({ q: search || undefined, limit: 10 });
+  const { data: page, isLoading } = candidates;
+  const grants = useAdminConnectionCanvases(profile.id);
+  const attached = grants.data ?? [];
   const attach = useAttachConnection();
   const detach = useDetachConnection();
   const toast = useToast();
@@ -253,7 +273,21 @@ function GrantEditor({ profile }: { profile: AdminConnection }) {
   return (
     <div className="space-y-3 border-t border-border pt-4">
       <h3 className="text-sm font-semibold text-fg">Granted canvases</h3>
-      {attached.length === 0 ? (
+      {grants.isLoading && (
+        <p role="status" className="text-sm text-muted">
+          Loading granted canvases…
+        </p>
+      )}
+      {grants.isError && (
+        <ReadError
+          title="Couldn't load granted canvases"
+          onRetry={() => void grants.refetch()}
+          retrying={grants.isFetching}
+        >
+          The current grants are unverified. Try again before changing access.
+        </ReadError>
+      )}
+      {!grants.isLoading && !grants.isError && attached.length === 0 ? (
         <p className="text-xs text-muted">No canvases can use this connection.</p>
       ) : (
         <ul className="space-y-2">
@@ -267,6 +301,7 @@ function GrantEditor({ profile }: { profile: AdminConnection }) {
                 <Button
                   size="sm"
                   variant="ghost"
+                  disabled={grants.isError || grants.isFetching}
                   loading={detach.isPending && detach.variables?.canvasId === canvas.id}
                   onClick={async () => {
                     try {
@@ -295,7 +330,21 @@ function GrantEditor({ profile }: { profile: AdminConnection }) {
         placeholder="Search title, slug, or owner"
         onChange={(event) => setSearch(event.target.value)}
       />
-      {isLoading ? <p className="text-xs text-muted">Finding canvases…</p> : null}
+      {isLoading ? (
+        <p role="status" className="text-xs text-muted">
+          Finding canvases…
+        </p>
+      ) : null}
+      {candidates.isError && (
+        <ReadError
+          title="Couldn't find canvases"
+          onRetry={() => void candidates.refetch()}
+          retrying={candidates.isFetching}
+        />
+      )}
+      {page && !candidates.isError && page.canvases.length === 0 && (
+        <p className="text-sm text-muted">No canvases match this search.</p>
+      )}
       <ul className="divide-y divide-border rounded-lg border border-border">
         {(page?.canvases ?? []).map((canvas) => {
           const granted = attachedIds.has(canvas.id);
@@ -306,11 +355,14 @@ function GrantEditor({ profile }: { profile: AdminConnection }) {
             >
               <span className="min-w-0 truncate">
                 {canvas.title} <span className="font-mono text-xs text-muted">/{canvas.slug}</span>
+                <span className="block text-xs text-muted">
+                  {canvas.owner?.email ?? "Owner unavailable"} · {canvas.status}
+                </span>
               </span>
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={granted}
+                disabled={granted || grants.isLoading || grants.isError || candidates.isError}
                 loading={attach.isPending && attach.variables?.canvasId === canvas.id}
                 onClick={async () => {
                   try {
@@ -420,7 +472,13 @@ function RecentEvents({ profileId }: { profileId: string }) {
   );
 }
 
-function ProfileCard({ profile }: { profile: AdminConnection }) {
+function ProfileCard({
+  profile,
+  onDirtyChange,
+}: {
+  profile: AdminConnection;
+  onDirtyChange: (key: string, dirty: boolean) => void;
+}) {
   const hash = useLocation({ select: (location) => location.hash });
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
@@ -445,6 +503,28 @@ function ProfileCard({ profile }: { profile: AdminConnection }) {
   const update = useUpdateConnection();
   const remove = useDeleteConnection();
   const toast = useToast();
+
+  const resetDraft = () => {
+    setDraft({
+      key: profile.key,
+      label: profile.label,
+      origin: profile.origin,
+      allowedMethods: profile.allowedMethods,
+      headers: [],
+    });
+    setReplaceHeaders(false);
+    setPendingUpdate(null);
+  };
+  const dirty =
+    editing &&
+    (draft.label !== profile.label ||
+      draft.origin !== profile.origin ||
+      JSON.stringify(draft.allowedMethods) !== JSON.stringify(profile.allowedMethods) ||
+      replaceHeaders);
+  useEffect(() => {
+    onDirtyChange(profile.id, dirty);
+    return () => onDirtyChange(profile.id, false);
+  }, [profile.id, dirty, onDirtyChange]);
 
   const save = () => {
     if (draft.allowedMethods.length === 0) {
@@ -507,18 +587,52 @@ function ProfileCard({ profile }: { profile: AdminConnection }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+          >
             {expanded ? "Hide details" : "Manage"}
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => setEditing(!editing)}>
-            {editing ? "Cancel edit" : "Edit"}
-          </Button>
-          <Button size="sm" variant="secondary" onClick={toggleEnabled}>
-            {profile.enabled ? "Disable" : "Enable"}
-          </Button>
-          <Button size="sm" variant="danger" onClick={() => setDeleting(true)}>
-            Delete
-          </Button>
+          {editing ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={update.isPending || remove.isPending}
+              onClick={() => {
+                resetDraft();
+                setEditing(false);
+              }}
+            >
+              Cancel edit
+            </Button>
+          ) : (
+            <ActionMenu label={`Actions for ${profile.label}`}>
+              <ActionMenuItem
+                disabled={update.isPending || remove.isPending}
+                onSelect={() => {
+                  resetDraft();
+                  setEditing(true);
+                }}
+              >
+                Edit
+              </ActionMenuItem>
+              <ActionMenuItem
+                disabled={update.isPending || remove.isPending}
+                onSelect={toggleEnabled}
+              >
+                {profile.enabled ? "Disable" : "Enable"}
+              </ActionMenuItem>
+              <ActionMenuItem
+                danger
+                disabled={update.isPending || remove.isPending}
+                onSelect={() => setDeleting(true)}
+              >
+                Delete
+              </ActionMenuItem>
+            </ActionMenu>
+          )}
         </div>
       </div>
       <MetaGrid>
@@ -544,13 +658,29 @@ function ProfileCard({ profile }: { profile: AdminConnection }) {
       ) : null}
       {editing ? (
         <div className="space-y-4 border-t border-border pt-4">
-          <ProfileFields draft={draft} onChange={setDraft} keyLocked showHeaders={replaceHeaders} />
+          {dirty && (
+            <p role="status" className="text-sm text-warning">
+              Unsaved profile changes
+            </p>
+          )}
+          <ProfileFields
+            draft={draft}
+            onChange={setDraft}
+            keyLocked
+            showHeaders={replaceHeaders}
+            disabled={update.isPending || remove.isPending}
+          />
           {!replaceHeaders ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted">
                 Protected values are preserved because they are not loaded into this form.
               </p>
-              <Button size="sm" variant="secondary" onClick={() => setReplaceHeaders(true)}>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={update.isPending || remove.isPending}
+                onClick={() => setReplaceHeaders(true)}
+              >
                 Replace or clear protected headers
               </Button>
             </div>
@@ -624,11 +754,10 @@ function CanvasAuthorityInspector() {
   const [selected, setSelected] = useState<{ id: string; title: string; slug: string } | null>(
     null,
   );
-  const { data: page } = useAdminCanvases({ q: search || undefined, limit: 10 });
-  const { data: connections = [], isLoading } = useAdminCanvasConnections(
-    selected?.id ?? "",
-    !!selected,
-  );
+  const candidates = useAdminCanvases({ q: search || undefined, limit: 10 });
+  const page = candidates.data;
+  const authority = useAdminCanvasConnections(selected?.id ?? "", !!selected);
+  const { data: connections = [], isLoading } = authority;
   return (
     <Panel className="space-y-4">
       <div>
@@ -643,6 +772,21 @@ function CanvasAuthorityInspector() {
         placeholder="Search title, slug, or owner"
         onChange={(event) => setSearch(event.target.value)}
       />
+      {candidates.isLoading && (
+        <p role="status" className="text-sm text-muted">
+          Finding canvases…
+        </p>
+      )}
+      {candidates.isError && (
+        <ReadError
+          title="Couldn't find canvases"
+          onRetry={() => void candidates.refetch()}
+          retrying={candidates.isFetching}
+        />
+      )}
+      {page && !candidates.isError && page.canvases.length === 0 && (
+        <p className="text-sm text-muted">No canvases match this search.</p>
+      )}
       <div className="flex flex-wrap gap-2">
         {(page?.canvases ?? []).map((canvas) => (
           <Button
@@ -651,13 +795,21 @@ function CanvasAuthorityInspector() {
             variant={selected?.id === canvas.id ? "primary" : "secondary"}
             onClick={() => setSelected(canvas)}
           >
-            {canvas.title} /{canvas.slug}
+            {canvas.title} /{canvas.slug} · {canvas.owner?.email ?? "Owner unavailable"}
           </Button>
         ))}
       </div>
       {selected ? (
         isLoading ? (
           <p className="text-sm text-muted">Loading authority…</p>
+        ) : authority.isError ? (
+          <ReadError
+            title={`Couldn't load authority for ${selected.title}`}
+            onRetry={() => void authority.refetch()}
+            retrying={authority.isFetching}
+          >
+            Connection grants are unverified until this read succeeds.
+          </ReadError>
         ) : connections.length === 0 ? (
           <p className="text-sm text-muted">{selected.title} has no connection grants.</p>
         ) : (
@@ -683,7 +835,13 @@ function CanvasAuthorityInspector() {
 }
 
 export default function AdminConnections() {
-  const { data: profiles, isLoading, isError } = useAdminConnections();
+  const [dirtyForms, setDirtyForms] = useState<Record<string, boolean>>({});
+  const markDirty = useCallback(
+    (key: string, dirty: boolean) =>
+      setDirtyForms((current) => (current[key] === dirty ? current : { ...current, [key]: dirty })),
+    [],
+  );
+  const { data: profiles, isLoading, isError, refetch, isFetching } = useAdminConnections();
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <AdminHeader
@@ -695,13 +853,19 @@ export default function AdminConnections() {
         upstream is trusted: it can reflect a protected value in its own response. Use the narrowest
         upstream credential and methods possible.
       </InlineNotice>
-      <CreateProfile />
+      <CreateProfile onDirtyChange={markDirty} />
       {isLoading ? (
         <Panel>
           <p className="text-sm text-muted">Loading connections…</p>
         </Panel>
       ) : null}
-      {isError ? <InlineNotice tone="danger">Connections could not be loaded.</InlineNotice> : null}
+      {isError ? (
+        <ReadError
+          title="Connections could not be loaded"
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      ) : null}
       {!isLoading && !isError && profiles?.length === 0 ? (
         <EmptyState
           title="No connections"
@@ -710,10 +874,11 @@ export default function AdminConnections() {
       ) : null}
       <div className="space-y-4">
         {profiles?.map((profile) => (
-          <ProfileCard key={profile.id} profile={profile} />
+          <ProfileCard key={profile.id} profile={profile} onDirtyChange={markDirty} />
         ))}
       </div>
       <CanvasAuthorityInspector />
+      <PendingChangesGuard dirty={Object.values(dirtyForms).some(Boolean)} />
     </div>
   );
 }

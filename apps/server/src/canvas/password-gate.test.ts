@@ -2,13 +2,14 @@ import { BRAND_TOKENS, type Config, LOGO_VIEWBOX, loadConfig } from "@canvas-dro
 import type { Canvas } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { pino } from "pino";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AuditLog, createAuditLog } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { makeTestDb } from "../db/testing.js";
 import { inProcessRateLimitStore } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
+import * as passwords from "./password.js";
 import { hashPassword } from "./password.js";
 import { GATE_COOKIE, gatePage, passwordGate, signGrant, verifyGrant } from "./password-gate.js";
 
@@ -97,6 +98,7 @@ describe("passwordGate", () => {
   let client: DbClient;
   let audit: AuditLog;
   afterEach(async () => {
+    vi.restoreAllMocks();
     await client?.close();
   });
   async function mkAudit() {
@@ -154,7 +156,7 @@ describe("passwordGate", () => {
   });
 
   it("gate page wears the shared branded system-page chrome (logo + tokens)", () => {
-    const html = gatePage("My Canvas", false);
+    const html = gatePage("My Canvas");
     // Same brand header and design tokens as the 4xx/5xx error pages — the gate
     // must not regress to a one-off look (§14.5).
     expect(html).toContain("canvas-drop");
@@ -166,7 +168,7 @@ describe("passwordGate", () => {
   });
 
   it("escapes HTML in the canvas title on the gate page (no injection)", () => {
-    const html = gatePage("<script>alert(1)</script> Canvas", false);
+    const html = gatePage("<script>alert(1)</script> Canvas");
     // The title is interpolated through escapeHtml — the raw tag must never reach
     // the rendered page, only its escaped form.
     expect(html).toContain("&lt;script&gt;");
@@ -234,5 +236,39 @@ describe("passwordGate", () => {
     const limited = await attempt(); // 3rd attempt exceeds the 2/min gate limit
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).toBeTruthy();
+    const html = await limited.text();
+    expect(html).toContain("Too many attempts");
+    expect(html).toContain(`Try again in ${limited.headers.get("retry-after")} seconds`);
+    expect(html).not.toContain("Incorrect password");
+    expect(gateCookieFrom(limited)).toBeUndefined();
+  });
+
+  it("busy verification returns 503 with an honest retry message and no grant", async () => {
+    vi.spyOn(passwords, "verifyPassword").mockRejectedValueOnce(new passwords.PasswordCheckBusy());
+    const res = await buildApp(canvas({ passwordHash: "hash" }), await mkAudit()).request("/c/s/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "password=right",
+    });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("2");
+    const html = await res.text();
+    expect(html).toContain("Password verification is busy. Try again in 2 seconds.");
+    expect(html).not.toContain("Incorrect password");
+    expect(gateCookieFrom(res)).toBeUndefined();
+    await audit.flush();
+    expect(await auditRepository(client).recent()).toEqual([]);
+  });
+
+  it("labels the password, associates errors, and progressively offers show password", () => {
+    const html = gatePage("Secret", { kind: "incorrect" });
+    expect(html).toContain('<label for="password">Password</label>');
+    expect(html).toContain('aria-describedby="password-help password-error"');
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('id="password-error" role="alert"');
+    expect(html).toContain('id="show-password" type="checkbox"');
+    expect(gatePage("Secret", { kind: "busy", retryAfterSec: 2 })).not.toContain(
+      'aria-invalid="true"',
+    );
   });
 });

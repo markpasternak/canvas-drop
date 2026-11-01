@@ -19,6 +19,55 @@ import { blobKey } from "./storage-keys.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
+describe("authorized empty-canvas recovery", () => {
+  it.each(["owner", "viewer", "admin"])(
+    "offers editor recovery only to a known owner (%s)",
+    async (identity) => {
+      const app = new Hono<AppEnv>();
+      const cfg = loadConfig({
+        CANVAS_DROP_AUTH_MODE: "dev",
+        CANVAS_DROP_BASE_URL: "https://app.example.com",
+      });
+      app.use("*", async (c, next) => {
+        c.set("config", cfg);
+        c.set("canvas", {
+          id: "canvas-id",
+          slug: "s",
+          ownerId: "owner",
+          currentVersionId: null,
+        } as Canvas);
+        c.set("user", {
+          id: identity,
+          email: `${identity}@example.com`,
+          isAdmin: identity === "admin",
+        } as never);
+        await next();
+      });
+      app.all(
+        "*",
+        serveCanvas({
+          config: cfg,
+          versions: {} as never,
+          storage: {} as never,
+          usage: {} as never,
+        }),
+      );
+      const res = await app.request("/c/s/", { headers: { Accept: "text/html" } });
+      expect(res.status).toBe(404);
+      const html = await res.text();
+      expect(html).toContain("Not published yet");
+      if (identity === "owner") {
+        expect(html).toContain('href="https://app.example.com/canvases/canvas-id/editor"');
+        expect(html).toContain("Open editor");
+      } else {
+        expect(html).not.toContain("/canvases/canvas-id");
+        expect(html).not.toContain("Open the editor");
+        expect(html).toContain("ask the person who shared this canvas");
+      }
+    },
+  );
+});
+
 describe("serveCanvas (integration)", () => {
   let client: DbClient;
   let dir: string;

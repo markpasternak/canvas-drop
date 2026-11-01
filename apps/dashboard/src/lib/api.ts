@@ -1157,6 +1157,8 @@ export interface AdminPendingGrant {
   id: string;
   targetType: "canvas" | "team";
   targetId: string;
+  targetName?: string | null;
+  role?: string | null;
   createdAt: number;
   invitedBy: string;
 }

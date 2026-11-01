@@ -742,7 +742,12 @@ export default function CanvasList() {
       // Yield to any higher-level overlay that already handled Escape (e.g. the
       // account menu calls preventDefault on its own Escape) so closing a popover
       // doesn't also clear the rail selection underneath.
-      if (e.key === "Escape" && !e.defaultPrevented) setFocused(undefined);
+      if (
+        e.key === "Escape" &&
+        !e.defaultPrevented &&
+        !document.querySelector('[aria-modal="true"]:not([data-state="closed"])')
+      )
+        setFocused(undefined);
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);

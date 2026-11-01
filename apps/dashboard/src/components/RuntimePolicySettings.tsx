@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Canvas, CanvasCapabilitiesPatch } from "../lib/api.js";
 import {
   type Audience,
@@ -114,17 +114,20 @@ export function RuntimePolicySettings({
   save,
   pending,
   connectionKeys,
+  onDirtyChange,
 }: {
   canvas: Canvas;
   save: (patch: CanvasCapabilitiesPatch) => Promise<unknown>;
   pending: boolean;
   connectionKeys: string[];
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [edit, setEdit] = useState<{ policy: RuntimePolicy; revision: string | null } | null>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"collections" | "fileGroups" | "channels">("collections");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  useEffect(() => onDirtyChange?.(edit !== null), [edit, onDirtyChange]);
   const policy = edit?.policy ?? canvas.runtimePolicy ?? emptyPolicy();
   const change = (next: RuntimePolicy) => {
     setEdit({
@@ -196,6 +199,45 @@ export function RuntimePolicySettings({
         disabled={pending || !canvas.backendEnabled || canvas.status === "disabled"}
         className="min-w-0 space-y-4"
       >
+        <section aria-label="Configured resources" className="space-y-2">
+          <h3 className="font-medium">Configured resources</h3>
+          {(["collections", "fileGroups", "channels"] as const).every(
+            (type) => Object.keys(policy[type]).length === 0,
+          ) ? (
+            <p className="text-sm text-muted">
+              No named resources yet. Add one below using the same name as your canvas code.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border text-sm">
+              {(["collections", "fileGroups"] as const).flatMap((type) =>
+                Object.entries(policy[type]).map(([key, value]) => (
+                  <li key={`${type}:${key}`} className="py-2">
+                    <p className="break-all font-medium">
+                      {type === "collections" ? "Collection" : "File group"}: {key}
+                    </p>
+                    <p className="text-muted">
+                      {!canvas.effective?.[type === "collections" ? "kv" : "files"]
+                        ? "Feature currently off. Saved permissions: "
+                        : ""}
+                      {value.overrides
+                        ? "Custom permissions; inspect operations below."
+                        : PRESETS[value.preset].summary}
+                    </p>
+                  </li>
+                )),
+              )}
+              {Object.entries(policy.channels).map(([key, value]) => (
+                <li key={`channel:${key}`} className="py-2">
+                  <p className="break-all font-medium">Channel: {key}</p>
+                  <p className="text-muted">
+                    Receive: {RIGHT_LABELS[value.subscribe]}. Publish: {RIGHT_LABELS[value.publish]}
+                    . Presence: {RIGHT_LABELS[value.participatePresence]}.
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
         <label className="grid gap-1 text-sm font-medium">
           Default for new resources
           <select
@@ -369,57 +411,59 @@ export function RuntimePolicySettings({
             </p>
           </div>
         </details>
-        {edit && (
-          <div className="space-y-2 rounded-lg border border-border p-3" aria-live="polite">
-            <p className="font-medium">Review permission changes</p>
-            <p className="text-sm text-muted">
-              {policy.defaultMode !== baseline.defaultMode
-                ? "The default changes for new resources only. "
-                : ""}
-              {changedResources.length
-                ? "These resources will use the settings shown above, including existing items:"
-                : "No existing resource permissions change."}
-            </p>
-            {changedResources.length > 0 && (
-              <ul className="list-inside list-disc break-all text-sm">
-                {changedResources.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                loading={pending}
-                onClick={async () => {
-                  try {
-                    await save({
-                      runtimePolicy: edit.policy,
-                      expectedRuntimePolicy: edit.revision,
-                    });
-                    setEdit(null);
-                    setSaved(true);
-                  } catch {
-                    setError(
-                      "Couldn't save permissions. Reload the latest settings before trying again; your proposed changes are still shown.",
-                    );
-                  }
-                }}
-              >
-                Save permissions
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setEdit(null);
-                  setError("");
-                }}
-              >
-                Discard changes
-              </Button>
-            </div>
-          </div>
-        )}
       </fieldset>
+      {edit && (
+        <div className="space-y-2 rounded-lg border border-border p-3" aria-live="polite">
+          <p className="font-medium">Review permission changes</p>
+          <p className="text-sm text-muted">
+            {policy.defaultMode !== baseline.defaultMode
+              ? "The default changes for new resources only. "
+              : ""}
+            {changedResources.length
+              ? "These resources will use the settings shown above, including existing items:"
+              : "No existing resource permissions change."}
+          </p>
+          {changedResources.length > 0 && (
+            <ul className="list-inside list-disc break-all text-sm">
+              {changedResources.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              loading={pending}
+              disabled={!canvas.backendEnabled || canvas.status === "disabled"}
+              onClick={async () => {
+                try {
+                  await save({
+                    runtimePolicy: edit.policy,
+                    expectedRuntimePolicy: edit.revision,
+                  });
+                  setEdit(null);
+                  setSaved(true);
+                } catch {
+                  setError(
+                    "Couldn't save permissions. Reload the latest settings before trying again; your proposed changes are still shown.",
+                  );
+                }
+              }}
+            >
+              Save permissions
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={pending}
+              onClick={() => {
+                setEdit(null);
+                setError("");
+              }}
+            >
+              Discard changes
+            </Button>
+          </div>
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}

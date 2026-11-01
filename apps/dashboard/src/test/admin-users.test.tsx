@@ -248,8 +248,10 @@ describe("admin users", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByText("Admin")).toBeInTheDocument(); // the "Me" admin row
     expect(within(table).getAllByText("Active").length).toBeGreaterThanOrEqual(1);
-    // Per-user owned-canvas count column.
-    expect(within(table).getAllByText("3").length).toBeGreaterThanOrEqual(1);
+    // The count is an explicit owner-filter action, separate from Review access.
+    expect(
+      within(table).getByRole("button", { name: "View 3 canvases owned by me@x" }),
+    ).toHaveTextContent("3 · View");
   });
 
   it("blocks a user via the row action", async () => {
@@ -302,7 +304,7 @@ describe("admin users", () => {
     );
   });
 
-  it("cancels pending access from an email-only row", async () => {
+  it("confirms the exact pending grant from an email-only row, using the target ID when its name is unavailable", async () => {
     mockFetch({
       "GET /api/me": () => json(ME),
       "GET /api/admin/people": () =>
@@ -332,6 +334,17 @@ describe("admin users", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Actions for pending@partner.io" }));
     await user.click(await screen.findByRole("menuitem", { name: "Cancel pending access" }));
+    const chooser = await screen.findByRole("dialog", {
+      name: "Pending access for pending@partner.io",
+    });
+    expect(calls.filter((call) => call.method === "DELETE")).toHaveLength(0);
+    await user.click(within(chooser).getByRole("button", { name: "Cancel access to c1" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Cancel access to c1?" });
+    expect(
+      within(confirmation).getByText(/pending@partner.io will no longer receive this canvas grant/),
+    ).toBeInTheDocument();
+    expect(calls.filter((call) => call.method === "DELETE")).toHaveLength(0);
+    await user.click(within(confirmation).getByRole("button", { name: "Cancel this grant" }));
     await waitFor(() =>
       expect(
         calls.some(

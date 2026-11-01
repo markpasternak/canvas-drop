@@ -1,9 +1,13 @@
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { Field } from "../components/Field.js";
 import { PeopleEmailCombobox } from "../components/PeopleEmailCombobox.js";
+import { ReadError } from "../components/ReadError.js";
+import { SearchInput } from "../components/SearchInput.js";
 import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, PageHeader } from "../components/Surface.js";
@@ -30,7 +34,7 @@ import { useMe, usePeopleSearch, useTeamMembers, useTeams } from "../lib/queries
  */
 export default function Teams() {
   const { data: me } = useMe();
-  const { data: teams, isLoading } = useTeams();
+  const { data: teams, isLoading, isError, refetch, isFetching } = useTeams();
   const orgs = me?.orgs ?? [];
 
   return (
@@ -45,7 +49,18 @@ export default function Teams() {
         title="Your teams"
         description="Create a personal team and add people by email, or attach a team to an org you belong to."
       >
-        {isLoading ? <Skeleton className="h-24" /> : <YourTeams teams={teams ?? []} orgs={orgs} />}
+        {isError && (
+          <ReadError
+            title="Couldn't load your teams"
+            onRetry={() => void refetch()}
+            retrying={isFetching}
+          />
+        )}
+        {isLoading ? (
+          <Skeleton className="h-24" label="Loading teams" />
+        ) : (
+          (teams || !isError) && <YourTeams teams={teams ?? []} orgs={orgs} />
+        )}
       </Section>
     </div>
   );
@@ -59,6 +74,10 @@ function YourTeams({ teams, orgs }: { teams: Team[]; orgs: Array<{ id: string; n
   const [name, setName] = useState("");
   // "" = a personal team (no org); otherwise the chosen org id. Default to Personal.
   const [orgId, setOrgId] = useState("");
+  const [search, setSearch] = useState("");
+  const visible = teams.filter((team) =>
+    team.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+  );
 
   async function submit() {
     const value = name.trim();
@@ -116,14 +135,33 @@ function YourTeams({ teams, orgs }: { teams: Team[]; orgs: Array<{ id: string; n
         </Button>
       </div>
 
+      {teams.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SearchInput
+            aria-label="Find a team"
+            placeholder="Find a team"
+            value={search}
+            onChange={setSearch}
+          />
+          <Link to="/shared" className="text-sm text-accent hover:underline">
+            Open Shared canvases
+          </Link>
+          <p className="w-full text-xs text-muted">
+            Shared includes canvases opened to you through your teams and direct grants.
+          </p>
+        </div>
+      )}
       {teams.length === 0 ? (
         <p className="text-sm text-muted">No teams yet. Create the first one above.</p>
       ) : (
         <ul className="space-y-2">
-          {teams.map((team) => (
+          {visible.map((team) => (
             <TeamRow key={team.id} team={team} />
           ))}
         </ul>
+      )}
+      {teams.length > 0 && visible.length === 0 && (
+        <p className="text-sm text-muted">No teams match. Try another name.</p>
       )}
     </div>
   );
@@ -212,25 +250,31 @@ function TeamRow({ team }: { team: Team }) {
             </>
           ) : (
             <>
-              <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={open}
+                aria-controls={`roster-${team.id}`}
+                onClick={() => setOpen((v) => !v)}
+              >
                 {open ? "Hide members" : "Members"}
               </Button>
               {team.canManage && (
-                <>
-                  <Button size="sm" variant="ghost" onClick={() => setRenaming(true)}>
-                    Rename
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
+                <ActionMenu label={`Manage ${team.name}`}>
+                  <ActionMenuItem onSelect={() => setRenaming(true)}>Rename</ActionMenuItem>
+                  <ActionMenuItem danger onSelect={() => setConfirmDelete(true)}>
                     Delete
-                  </Button>
-                </>
+                  </ActionMenuItem>
+                </ActionMenu>
               )}
             </>
           )}
         </div>
       </div>
 
-      {open && <TeamRoster team={team} />}
+      <div id={`roster-${team.id}`} hidden={!open}>
+        {open && <TeamRoster team={team} />}
+      </div>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -253,7 +297,7 @@ function TeamRow({ team }: { team: Team }) {
 function TeamRoster({ team }: { team: Team }) {
   const toast = useToast();
   const { data: me } = useMe();
-  const { data: roster, isLoading } = useTeamMembers(team.id);
+  const { data: roster, isLoading, isError, refetch, isFetching } = useTeamMembers(team.id);
   const add = useAddTeamMember(team.id);
   const removeMember = useRemoveTeamMember(team.id);
   const cancelInvite = useCancelTeamInvite(team.id);
@@ -261,6 +305,7 @@ function TeamRoster({ team }: { team: Team }) {
   // Leaving confirms first: you can't re-add yourself to a team you don't manage,
   // so a stray click on your own row would lock you out until someone re-invites you.
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [removing, setRemoving] = useState<{ userId: string; name: string } | null>(null);
   const members = roster?.members ?? [];
   const pending = roster?.pending ?? [];
   const personal = team.orgId === null;
@@ -292,6 +337,7 @@ function TeamRoster({ team }: { team: Team }) {
       toast(err instanceof ApiError ? err.hint : "Couldn't remove that member", "error");
     } finally {
       setConfirmLeave(false);
+      setRemoving(null);
     }
   }
 
@@ -306,6 +352,12 @@ function TeamRoster({ team }: { team: Team }) {
 
   return (
     <div className="space-y-3 border-t border-border p-3">
+      {roster && !isError && (
+        <p className="text-sm text-muted">
+          {members.length} member{members.length === 1 ? "" : "s"} · {pending.length} pending
+          sign-in
+        </p>
+      )}
       {team.mine && (
         <div className="flex items-end gap-2">
           <PeopleEmailCombobox
@@ -337,6 +389,12 @@ function TeamRoster({ team }: { team: Team }) {
 
       {isLoading ? (
         <Skeleton className="h-8" />
+      ) : isError ? (
+        <ReadError
+          title="Couldn't load this team's members"
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
       ) : members.length === 0 && pending.length === 0 ? (
         <p className="text-xs text-muted">No members yet.</p>
       ) : (
@@ -355,7 +413,14 @@ function TeamRoster({ team }: { team: Team }) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => (isSelf ? setConfirmLeave(true) : void kick(m.userId, false))}
+                    onClick={() =>
+                      isSelf
+                        ? setConfirmLeave(true)
+                        : setRemoving({
+                            userId: m.userId,
+                            name: m.name ?? m.email ?? "this member",
+                          })
+                    }
                   >
                     {isSelf ? "Leave" : "Remove"}
                   </Button>
@@ -382,6 +447,18 @@ function TeamRoster({ team }: { team: Team }) {
         </ul>
       )}
 
+      <ConfirmDialog
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => removing && void kick(removing.userId, false)}
+        title={`Remove ${removing?.name ?? "member"} from ${team.name}?`}
+        actionLabel="Remove member"
+        destructive
+        loading={removeMember.isPending}
+      >
+        They lose access provided by this team immediately. Their direct grants and other team
+        memberships remain.
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirmLeave}
         onClose={() => setConfirmLeave(false)}

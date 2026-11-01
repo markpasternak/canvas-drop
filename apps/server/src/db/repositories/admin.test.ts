@@ -29,6 +29,47 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
     await client?.close();
   });
 
+  it("names each pending canvas/team grant with its own role, including missing targets", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const canvas = await canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug: "review-target",
+      title: "Review board",
+      apiKeyHash: "hash",
+    });
+    const team = await teamsRepository(client).create({
+      orgId: null,
+      name: "Review team",
+      createdBy: owner.id,
+    });
+    const invitations = invitationsRepository(client);
+    for (const [target, role] of [
+      [{ type: "canvas", id: canvas.id }, "editor"],
+      [{ type: "team", id: team.id }, "member"],
+      [{ type: "canvas", id: "missing-target" }, "viewer"],
+    ] as const) {
+      await invitations.record({ email: "pending@example.com", target, role, invitedBy: owner.id });
+    }
+    const result = await adminRepository(client).listPeople({
+      q: "pending@example.com",
+      limit: 20,
+      offset: 0,
+    });
+    expect(result.items[0]?.pendingGrants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetId: canvas.id,
+          targetName: "Review board",
+          role: "editor",
+        }),
+        expect.objectContaining({ targetId: team.id, targetName: "Review team", role: "member" }),
+        expect.objectContaining({ targetId: "missing-target", targetName: null, role: "viewer" }),
+      ]),
+    );
+    expect(new Set(result.items[0]?.pendingGrants.map((grant) => grant.id)).size).toBe(3);
+  });
+
   it("separates retained, eligible, incomplete and completed purges before pagination", async () => {
     client = await makeTestDb(dialect);
     const owner = await seedUser(client, "purge-owner");

@@ -102,7 +102,10 @@ export function passwordGate(deps: PasswordGateDeps) {
         );
         if (!r.allowed) {
           c.header("Retry-After", String(r.retryAfterSec));
-          return c.html(gatePage(canvas.title, true), 429);
+          return c.html(
+            gatePage(canvas.title, { kind: "rate_limited", retryAfterSec: r.retryAfterSec }),
+            429,
+          );
         }
       }
       const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
@@ -116,7 +119,7 @@ export function passwordGate(deps: PasswordGateDeps) {
         if (!(err instanceof PasswordCheckBusy)) throw err;
         // Too many checks in flight instance-wide: ask the visitor to retry shortly.
         c.header("Retry-After", "2");
-        return c.html(gatePage(canvas.title, true), 503);
+        return c.html(gatePage(canvas.title, { kind: "busy", retryAfterSec: 2 }), 503);
       }
       deps.audit.recordAudit({
         action: "password_attempt",
@@ -134,10 +137,10 @@ export function passwordGate(deps: PasswordGateDeps) {
         );
         return c.redirect(c.req.path, 303); // re-GET, now past the gate
       }
-      return c.html(gatePage(canvas.title, true), 401);
+      return c.html(gatePage(canvas.title, { kind: "incorrect" }), 401);
     }
 
-    return c.html(gatePage(canvas.title, false), 401);
+    return c.html(gatePage(canvas.title), 401);
   });
 }
 
@@ -147,8 +150,21 @@ export function passwordGate(deps: PasswordGateDeps) {
  * link sees the same design language, not a one-off (§14.5). Only the form is
  * gate-specific.
  */
-export function gatePage(title: string, error: boolean): string {
+export type PasswordGateState =
+  | { kind: "incorrect" }
+  | { kind: "rate_limited" | "busy"; retryAfterSec: number };
+
+export function gatePage(title: string, state?: PasswordGateState): string {
   const name = title ? escapeHtml(title) : "This canvas";
+  const wait = state && "retryAfterSec" in state ? Math.max(1, Math.ceil(state.retryAfterSec)) : 0;
+  const error =
+    state?.kind === "incorrect"
+      ? "Incorrect password. Try again."
+      : state?.kind === "rate_limited"
+        ? `Too many attempts. Try again in ${wait} second${wait === 1 ? "" : "s"}.`
+        : state?.kind === "busy"
+          ? `Password verification is busy. Try again in ${wait} second${wait === 1 ? "" : "s"}.`
+          : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -161,14 +177,7 @@ ${SYSTEM_THEME_INIT}
 ${SYSTEM_PAGE_STYLES}
   main { width: min(100%, 27rem); }
   .content { padding: clamp(1.5rem, 4vw, 2rem); }
-  .kicker {
-    margin: 0 0 .6rem;
-    color: var(--subtle);
-    font: 700 .75rem/1 ui-monospace, "SF Mono", Menlo, monospace;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-  }
-  h1 { margin: 0; color: var(--fg); font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 500; font-size: 1.6rem; line-height: 1.2; letter-spacing: -.015em; }
+  h1 { overflow-wrap: anywhere; margin: 0; color: var(--fg); font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 500; font-size: 1.6rem; line-height: 1.2; letter-spacing: -.015em; }
   .lede { margin: .5rem 0 1.25rem; color: var(--muted); font-size: .9rem; }
   .err {
     margin: 0 0 .85rem;
@@ -181,6 +190,7 @@ ${SYSTEM_PAGE_STYLES}
   }
   input {
     width: 100%;
+    min-height: 2.75rem;
     box-sizing: border-box;
     padding: .6rem .75rem;
     margin: 0 0 .85rem;
@@ -191,9 +201,14 @@ ${SYSTEM_PAGE_STYLES}
     font: inherit;
   }
   input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+  label { display: block; margin-bottom: .4rem; font-size: .9rem; font-weight: 600; }
+  .show { min-height: 2.75rem; display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; font-weight: 400; }
+  .show[hidden] { display: none; }
+  .show input { min-height: auto; width: auto; margin: 0; accent-color: var(--accent); }
+  .help { color: var(--muted); font-size: .875rem; line-height: 1.5; }
   button {
     width: 100%;
-    min-height: 2.5rem;
+    min-height: 2.75rem;
     padding: .6rem;
     border: 0;
     border-radius: .5rem;
@@ -212,16 +227,19 @@ ${SYSTEM_PAGE_STYLES}
   <main>
 ${SYSTEM_PAGE_BRAND}
     <section class="content">
-      <p class="kicker">Protected</p>
       <h1>${name} is password-protected</h1>
       <p class="lede">Enter the password to continue.</p>
-      ${error ? '<div class="err">Incorrect password. Try again.</div>' : ""}
+      ${error ? `<div class="err" id="password-error" role="alert">${error}</div>` : ""}
       <form method="POST">
-        <input type="password" name="password" autofocus autocomplete="current-password" aria-label="Password" placeholder="Password"/>
+        <label for="password">Password</label>
+        <input id="password" type="password" name="password" autofocus autocomplete="current-password" required aria-describedby="password-help${error ? " password-error" : ""}"${state?.kind === "incorrect" ? ' aria-invalid="true"' : ""}/>
+        <label class="show" hidden id="show-password-label"><input id="show-password" type="checkbox"/>Show password</label>
         <button type="submit">Unlock</button>
       </form>
+      <p class="help" id="password-help">Ask the person who shared this canvas for its password.</p>
     </section>
   </main>
+<script>document.getElementById("show-password-label").hidden=false;document.getElementById("show-password").addEventListener("change",function(){document.getElementById("password").type=this.checked?"text":"password";});</script>
 </body>
 </html>`;
 }

@@ -15,7 +15,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-type Handler = (init?: RequestInit) => Response;
+type Handler = (init?: RequestInit) => Response | Promise<Response>;
 function mockFetch(handlers: Record<string, Handler>) {
   const calls: Array<{ method: string; path: string; body?: string }> = [];
   vi.stubGlobal(
@@ -76,6 +76,96 @@ afterEach(() => {
 });
 
 describe("admin connections", () => {
+  it.each(["create", "edit"])(
+    "locks connection fields and cancel during a delayed %s",
+    async (operation) => {
+      let finish: ((response: Response) => void) | undefined;
+      const pending = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      const profile = { ...PROFILE, affectedCanvasCount: 0 };
+      const calls = mockFetch({
+        "GET /api/me": () => json(ME),
+        "GET /api/admin/connections": () =>
+          json({ connections: operation === "edit" ? [profile] : [] }),
+        "GET /api/admin/connections/health": () => json({ sinceMs: 1, profiles: [] }),
+        "GET /api/admin/canvases": () => json({ canvases: [], total: 0 }),
+        [`${operation === "create" ? "POST /api/admin/connections" : "PUT /api/admin/connections/p1"}`]:
+          () => pending,
+      });
+      renderPage();
+      const user = userEvent.setup();
+      if (operation === "create") {
+        await user.click(await screen.findByRole("button", { name: "New connection" }));
+        await user.type(screen.getByLabelText("Profile key"), "profile");
+        await user.type(screen.getByLabelText("Exact HTTPS origin"), "https://example.com");
+      } else {
+        await user.click(await screen.findByRole("button", { name: "Actions for Stock data" }));
+        await user.click(screen.getByRole("menuitem", { name: "Edit" }));
+      }
+      await user.clear(screen.getByLabelText("Display name"));
+      await user.type(screen.getByLabelText("Display name"), "Submitted");
+      await user.click(
+        screen.getByRole("button", {
+          name: operation === "create" ? "Create connection" : "Save changes",
+        }),
+      );
+      expect(screen.getByLabelText("Display name")).toBeDisabled();
+      expect(screen.getByRole("checkbox", { name: "POST" })).toBeDisabled();
+      const cancel = screen.getByRole("button", {
+        name: operation === "create" ? "Cancel" : "Cancel edit",
+      });
+      expect(cancel).toBeDisabled();
+      await user.type(screen.getByLabelText("Display name"), "Newer");
+      await user.click(cancel);
+      expect(screen.getByLabelText("Display name")).toHaveValue("Submitted");
+      finish?.(json({ connection: { ...profile, label: "Submitted" } }));
+      await waitFor(() => expect(screen.queryByLabelText("Display name")).not.toBeInTheDocument());
+      expect(calls.filter((c) => c.method === "PUT" || c.method === "POST")).toHaveLength(1);
+    },
+  );
+
+  it("does not present failed grants as empty and retries before allowing changes", async () => {
+    let failed = true;
+    mockFetch({
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/connections": () => json({ connections: [PROFILE] }),
+      "GET /api/admin/connections/health": () => json({ sinceMs: 1, profiles: [] }),
+      "GET /api/admin/canvases": () => json({ canvases: [], total: 0 }),
+      "GET /api/admin/connections/p1/canvases": () =>
+        failed ? json({ error: "unavailable" }, 503) : json({ canvases: [] }),
+      "GET /api/admin/connections/p1/events": () => json({ events: [], limit: 25, offset: 0 }),
+    });
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Manage" }));
+    expect(await screen.findByText("Couldn't load granted canvases")).toBeVisible();
+    expect(screen.queryByText("No canvases can use this connection.")).not.toBeInTheDocument();
+    failed = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No canvases can use this connection.")).toBeVisible();
+  });
+
+  it("Cancel discards a new profile including protected header values", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/connections": () => json({ connections: [] }),
+      "GET /api/admin/connections/health": () => json({ sinceMs: 1, profiles: [] }),
+      "GET /api/admin/canvases": () => json({ canvases: [], total: 0 }),
+    });
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "New connection" }));
+    await user.type(screen.getByLabelText("Display name"), "Draft profile");
+    await user.click(screen.getByRole("button", { name: "Add header" }));
+    await user.type(screen.getByLabelText("Header 1 value"), "memory-only-header");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "New connection" }));
+    expect(screen.getByLabelText("Display name")).toHaveValue("");
+    expect(screen.queryByLabelText("Header 1 value")).not.toBeInTheDocument();
+    expect(JSON.stringify(localStorage)).not.toContain("memory-only-header");
+  });
+
   it("requires explicit endpoint, method and cap before enabling a public grant, and can revoke it", async () => {
     let publicPolicy: PublicConnectionPolicy | null = null;
     const calls = mockFetch({
@@ -243,7 +333,8 @@ describe("admin connections", () => {
     });
     renderPage();
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Disable" }));
+    await user.click(await screen.findByRole("button", { name: "Actions for Stock data" }));
+    await user.click(screen.getByRole("menuitem", { name: "Disable" }));
     expect(
       screen.getByText(/takes effect immediately for 2 granted canvases/i),
     ).toBeInTheDocument();

@@ -22,6 +22,18 @@ const account = (id: string, extra: Partial<AccountSummary> = {}): AccountSummar
 });
 
 describe("account chooser page", () => {
+  it("keeps complete long identities inspectable without ellipsis", () => {
+    const email = `${"long-account-name".repeat(8)}@example.com`;
+    const html = accountChooserPage({
+      config,
+      current: account("me", { email, name: "A complete account name" }),
+      others: [],
+    });
+    expect(html).toContain(`title="${email}"`);
+    expect(html).toContain('title="A complete account name"');
+    expect(html).not.toContain("text-overflow: ellipsis");
+    expect(html).toContain("overflow-wrap: anywhere");
+  });
   it("leads with the current account when nothing is suggested", () => {
     const html = accountChooserPage({
       config,

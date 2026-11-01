@@ -11,7 +11,7 @@ import type { AppEnv } from "../http/types.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { assetPathFor, resolveAsset } from "./asset-resolver.js";
-import { isAnonymouslyPublic, principalAttributionId } from "./authorization.js";
+import { isAnonymouslyPublic, principalAttributionId, requestPrincipal } from "./authorization.js";
 import { mimeFor } from "./mime.js";
 import { blobKey } from "./storage-keys.js";
 
@@ -247,6 +247,12 @@ type NotFoundReason = "unpublished" | "no-home" | "missing";
  */
 function notFound(c: Context<AppEnv>, reason: NotFoundReason = "missing") {
   const copy = NOT_FOUND_COPY[reason];
+  const canvas = c.get("canvas") as Canvas;
+  const principal = requestPrincipal(c);
+  const knownManager =
+    (principal.kind === "member" && principal.id === canvas.ownerId) ||
+    c.get("canvasRole") === "editor";
+  const appBase = c.get("config")?.baseUrl.replace(/\/$/, "");
   return errorResponse(
     c,
     {
@@ -254,7 +260,15 @@ function notFound(c: Context<AppEnv>, reason: NotFoundReason = "missing") {
       code: "not_found",
       title: copy.title,
       message: copy.body,
-      hint: copy.hint,
+      hint: knownManager
+        ? copy.hint
+        : "Check the address or ask the person who shared this canvas for an updated link.",
+      ...(knownManager && appBase && reason !== "missing"
+        ? {
+            actionHref: `${appBase}/canvases/${encodeURIComponent(canvas.id)}/editor`,
+            actionLabel: "Open editor",
+          }
+        : {}),
     },
     { error: "not_found" },
     {
@@ -268,10 +282,11 @@ const NOT_FOUND_COPY: Record<NotFoundReason, { title: string; body: string; hint
   unpublished: {
     title: "Not published yet",
     body: "This canvas doesn’t have a published version to show.",
+    hint: "Open the editor to review and publish its draft.",
   },
   "no-home": {
     title: "No home page",
-    body: "This canvas was published without an index.html, so there’s nothing to show at its root.",
+    body: "This canvas has no home page to show at this address.",
     hint: "Deploy a file named index.html to set the home page.",
   },
   missing: {

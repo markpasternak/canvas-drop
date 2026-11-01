@@ -4,6 +4,24 @@ import { describe, expect, it, vi } from "vitest";
 import { Dialog } from "../components/Dialog.js";
 
 describe("Dialog keyboard focus", () => {
+  it("keeps side-panel dismissal in the fixed header and skips collapsed disclosure controls", async () => {
+    const close = vi.fn();
+    render(
+      <Dialog open placement="side" onClose={close} title="Canvas details">
+        <details>
+          <summary>Access</summary>
+          <button type="button">Hidden action</button>
+        </details>
+      </Dialog>,
+    );
+    await userEvent.tab({ shift: true });
+    expect(screen.getByText("Access")).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Close panel" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("honors autofocus and restores the trigger when dismissed", async () => {
     const trigger = document.createElement("button");
     document.body.append(trigger);

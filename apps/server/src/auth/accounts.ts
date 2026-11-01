@@ -149,7 +149,7 @@ function avatar(user: AccountSummary): string {
 
 function who(user: AccountSummary, badge?: string): string {
   const name = user.name?.trim();
-  return `<span class="who">${name ? `<strong>${escapeHtml(name)}</strong>` : ""}<span>${escapeHtml(user.email)}</span>${badge ? `<em class="badge">${badge}</em>` : ""}</span>`;
+  return `<span class="who">${name ? `<strong title="${escapeAttribute(name)}">${escapeHtml(name)}</strong>` : ""}<span title="${escapeAttribute(user.email)}">${escapeHtml(user.email)}</span>${badge ? `<em class="badge">${badge}</em>` : ""}</span>`;
 }
 
 const CHEVRON = `<svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -258,8 +258,8 @@ ${SYSTEM_PAGE_STYLES}
   }
 ${accountAvatarCss(".avatar-h")}
   .who { display: flex; min-width: 0; flex: 1; flex-direction: column; font-size: .875rem; }
-  .who span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-  .who strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .who span { overflow-wrap: anywhere; color: var(--muted); }
+  .who strong { overflow-wrap: anywhere; font-weight: 600; }
   .badge { margin-top: .2rem; color: var(--accent); font-size: .75rem; font-style: normal; font-weight: 650; }
   .tag { flex: none; padding: .15rem .5rem; border-radius: 999px; background: var(--surface-sunken); color: var(--muted); font-size: .7rem; font-weight: 600; }
   .chev { flex: none; color: var(--subtle); }

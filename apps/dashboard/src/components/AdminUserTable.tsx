@@ -1,7 +1,7 @@
 import { Check, Globe, Prohibit, ShieldChevron, XCircle } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import type { AdminPersonRow } from "../lib/api.js";
+import type { AdminPendingGrant, AdminPersonRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
 import { relativeTime } from "../lib/format.js";
 import {
@@ -12,8 +12,10 @@ import {
 } from "../lib/mutations.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { Badge } from "./Badge.js";
+import { Button } from "./Button.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { DataTable } from "./DataTable.js";
+import { Dialog } from "./Dialog.js";
 import { useToast } from "./Toast.js";
 
 const MENU_ICON = 15;
@@ -38,7 +40,10 @@ function RowActions({
   const toast = useToast();
   const userId = person.userId;
   const isSelf = userId === meId;
-  const firstPending = person.pendingGrants[0];
+  const navigate = useNavigate();
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [selectedGrant, setSelectedGrant] = useState<AdminPendingGrant | null>(null);
+  const grantName = (grant: AdminPendingGrant) => grant.targetName || grant.targetId;
   // The destructive directions (block / revoke public) confirm first — they fire
   // from a hover menu, and revoke sweeps every public canvas the person owns back
   // to private. The restorative directions (unblock / restore) stay one-click.
@@ -85,11 +90,13 @@ function RowActions({
     }
   }
 
-  async function cancelFirstPending() {
-    if (!firstPending) return;
+  async function cancelSelectedPending() {
+    if (!selectedGrant) return;
     try {
-      await cancelPending.mutateAsync(firstPending.id);
-      toast("Pending access canceled");
+      await cancelPending.mutateAsync(selectedGrant.id);
+      toast(`Pending access to ${grantName(selectedGrant)} canceled`);
+      setSelectedGrant(null);
+      setPendingOpen(true);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't cancel pending access", "error");
     }
@@ -98,17 +105,24 @@ function RowActions({
   return (
     <>
       <ActionMenu label={`Actions for ${person.name || person.email}`}>
+        <ActionMenuItem
+          onSelect={() =>
+            navigate({ to: "/admin/canvases", search: { person: person.email, page: 1 } })
+          }
+        >
+          Review access
+        </ActionMenuItem>
         {onOffboard && (
           <ActionMenuItem danger disabled={isSelf} onSelect={() => onOffboard(person.email)}>
             Offboard person
           </ActionMenuItem>
         )}
-        {firstPending && (
+        {person.pendingGrants.length > 0 && (
           <ActionMenuItem
             danger
             icon={<XCircle size={MENU_ICON} aria-hidden />}
-            title="Cancel this pending canvas or team access"
-            onSelect={cancelFirstPending}
+            title="Choose the exact canvas or team invitation to cancel"
+            onSelect={() => setPendingOpen(true)}
           >
             Cancel pending access
           </ActionMenuItem>
@@ -155,6 +169,64 @@ function RowActions({
           </>
         )}
       </ActionMenu>
+      <Dialog
+        open={pendingOpen}
+        onClose={() => setPendingOpen(false)}
+        title={`Pending access for ${person.email}`}
+      >
+        <p className="mb-3 text-sm text-muted">
+          These grants take effect after verified sign-in. Choose one invitation to cancel; other
+          grants remain.
+        </p>
+        <ul className="divide-y divide-border">
+          {person.pendingGrants.map((grant) => (
+            <li key={grant.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <p className="break-words font-medium">{grantName(grant)}</p>
+                <p className="text-xs text-muted">
+                  {grant.targetType === "canvas" ? "Canvas" : "Team"} ·{" "}
+                  {grant.role ?? (grant.targetType === "canvas" ? "viewer" : "member")} · Pending
+                  sign-in
+                </p>
+                <p className="break-all font-mono text-xs text-subtle">{grant.targetId}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setPendingOpen(false);
+                  setSelectedGrant(grant);
+                }}
+              >
+                Cancel access to {grantName(grant)}
+              </Button>
+            </li>
+          ))}
+        </ul>
+        {person.pendingGrants.length === 0 && (
+          <p role="status" className="text-sm text-muted">
+            No pending grants remain.
+          </p>
+        )}
+        <Button size="sm" variant="secondary" onClick={() => setPendingOpen(false)}>
+          Done
+        </Button>
+      </Dialog>
+      <ConfirmDialog
+        open={selectedGrant !== null}
+        onClose={() => {
+          setSelectedGrant(null);
+          setPendingOpen(true);
+        }}
+        onConfirm={cancelSelectedPending}
+        title={`Cancel access to ${selectedGrant ? grantName(selectedGrant) : "this target"}?`}
+        actionLabel="Cancel this grant"
+        destructive
+        loading={cancelPending.isPending}
+      >
+        {person.email} will no longer receive this {selectedGrant?.targetType} grant when signing
+        in. Other invitations and existing access stay unchanged.
+      </ConfirmDialog>
       {/* Outside the menu: the menu's portal unmounts on close, which would tear
           these down before they ever render. */}
       <ConfirmDialog
@@ -200,7 +272,8 @@ export function AdminUserTable({
   const navigate = useNavigate();
 
   function viewCanvases(person: AdminPersonRow) {
-    navigate({ to: "/admin/canvases", search: () => ({ person: person.email, page: 1 }) });
+    if (person.userId)
+      navigate({ to: "/admin/canvases", search: () => ({ owner: person.userId, page: 1 }) });
   }
 
   return (
@@ -237,15 +310,17 @@ export function AdminUserTable({
           </td>
           <td className="px-3 py-2 text-right text-muted">
             <div className="flex items-center justify-end gap-2">
-              <span className="tabular-nums">{u.canvasCount.toLocaleString()}</span>
-              <button
-                type="button"
-                onClick={() => viewCanvases(u)}
-                className="rounded-md px-2 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent-subtle hover:underline"
-                aria-label={`View canvases involving ${u.email}`}
-              >
-                View
-              </button>
+              {!u.userId && <span className="tabular-nums">0</span>}
+              {u.userId && (
+                <button
+                  type="button"
+                  onClick={() => viewCanvases(u)}
+                  className="rounded-md px-2 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent-subtle hover:underline"
+                  aria-label={`View ${u.canvasCount} canvases owned by ${u.email}`}
+                >
+                  {u.canvasCount.toLocaleString()} · View
+                </button>
+              )}
             </div>
           </td>
           <td className="px-3 py-2">

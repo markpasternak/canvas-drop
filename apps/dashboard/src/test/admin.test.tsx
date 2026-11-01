@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -14,7 +14,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-type Handler = (init?: RequestInit) => Response;
+type Handler = (init?: RequestInit) => Response | Promise<Response>;
 const calls: Array<{ method: string; path: string; body?: string }> = [];
 
 function mockFetch(handlers: Record<string, Handler>) {
@@ -52,7 +52,7 @@ function renderAt(path: string) {
       </QueryClientProvider>
     </ThemeProvider>,
   );
-  return { ...view, router };
+  return { ...view, router, qc };
 }
 
 const ROW = {
@@ -228,6 +228,494 @@ afterEach(() => {
 });
 
 describe("admin dashboard", () => {
+  it.each([
+    ["save", false],
+    ["reset", false],
+    ["save", true],
+    ["reset", true],
+  ] as const)(
+    "retains template content after acknowledged %s and failed refresh (newer edit: %s)",
+    async (operation, newerEdit) => {
+      let written = false;
+      let retrying = false;
+      let finish: ((response: Response) => void) | undefined;
+      const refreshed = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      const template = {
+        key: "team_invite",
+        subject: "Original",
+        bodyHtml: "<p>Original</p>",
+        bodyText: "Original",
+        overridden: true,
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/config": () => json({ fields: [] }),
+        "GET /api/admin/email-templates": () =>
+          retrying
+            ? refreshed.then((response) => response.clone())
+            : written
+              ? json({ error: "unavailable" }, 503)
+              : json({ templates: [template] }),
+        [`${operation === "save" ? "PUT" : "DELETE"} /api/admin/email-templates/team_invite`]:
+          () => {
+            written = true;
+            return json({ ok: true });
+          },
+      });
+      renderAt("/admin/settings");
+      const user = userEvent.setup();
+      const subject = await screen.findByLabelText("Team access subject");
+      await user.clear(subject);
+      await user.type(subject, "Submitted");
+      fireEvent.change(screen.getByLabelText("Team access HTML body"), {
+        target: { value: "<p>Submitted</p>" },
+      });
+      fireEvent.change(screen.getByLabelText("Team access text body"), {
+        target: { value: "Submitted" },
+      });
+      await user.click(
+        screen.getByRole("button", {
+          name: operation === "save" ? "Save" : "Reset to latest default",
+        }),
+      );
+      await screen.findByText(
+        operation === "save" ? "Saved · awaiting refresh" : "Reset · awaiting refresh",
+      );
+      await screen.findByText(/Your entered content is retained here/);
+      expect(subject).toHaveValue("Submitted");
+      expect(screen.getByLabelText("Team access HTML body")).toHaveValue("<p>Submitted</p>");
+      expect(screen.getByLabelText("Team access text body")).toHaveValue("Submitted");
+      expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          operation === "save" ? "Team access saved" : "Team access reset to default",
+        ),
+      ).not.toBeInTheDocument();
+      retrying = true;
+      await user.click(screen.getByRole("button", { name: "Try again" }));
+      if (newerEdit) {
+        await user.clear(subject);
+        await user.type(subject, "Newer");
+      }
+      finish?.(
+        json({
+          templates: [
+            {
+              ...template,
+              subject: "Effective",
+              bodyHtml: "<p>Effective</p>",
+              bodyText: "Effective",
+              overridden: operation === "save",
+            },
+          ],
+        }),
+      );
+      await waitFor(() =>
+        expect(screen.queryByText("Couldn’t refresh email templates")).not.toBeInTheDocument(),
+      );
+      expect(subject).toHaveValue(newerEdit ? "Newer" : "Effective");
+      expect(screen.getByLabelText("Team access HTML body")).toHaveValue(
+        newerEdit ? "<p>Submitted</p>" : "<p>Effective</p>",
+      );
+      expect(
+        calls.filter((call) => call.method === "PUT" || call.method === "DELETE"),
+      ).toHaveLength(1);
+      if (newerEdit) expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      else expect(screen.queryByText(/awaiting refresh/)).not.toBeInTheDocument();
+    },
+  );
+
+  it("keeps newer input when retrying a previously acknowledged configuration refresh", async () => {
+    let written = false;
+    let retrying = false;
+    let finish: ((response: Response) => void) | undefined;
+    const refresh = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const fields = (value: string) => [{ ...CONFIG_FIELDS[0], overridden: true, value }];
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/config": () =>
+        retrying
+          ? refresh
+          : written
+            ? json({ error: "unavailable" }, 503)
+            : json({ fields: fields("Original") }),
+      "GET /api/admin/email-templates": () => json({ templates: [] }),
+      "PUT /api/admin/config/ai.models": () => {
+        written = true;
+        return json({ ok: true });
+      },
+    });
+    renderAt("/admin/settings");
+    const user = userEvent.setup();
+    await user.clear(await screen.findByLabelText("Model allowlist"));
+    await user.type(screen.getByLabelText("Model allowlist"), "Submitted");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/Change saved, but the effective value couldn't be refreshed/);
+    retrying = true;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await user.clear(screen.getByLabelText("Model allowlist"));
+    await user.type(screen.getByLabelText("Model allowlist"), "Newer");
+    finish?.(json({ fields: fields("Submitted") }));
+    await waitFor(() =>
+      expect(screen.queryByText("Couldn’t refresh configuration")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("Model allowlist")).toHaveValue("Newer");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it.each(["save", "reset"])(
+    "keeps a confirmed %s distinct from a failed effective-value refresh",
+    async (operation) => {
+      let written = false;
+      let unavailable = true;
+      const fields = (value: string, overridden = true) => [
+        { ...CONFIG_FIELDS[0], overridden, value },
+      ];
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/config": () =>
+          written && unavailable
+            ? json({ error: "unavailable" }, 503)
+            : json({ fields: fields(written ? "Effective" : "Original", !written) }),
+        "GET /api/admin/email-templates": () => json({ templates: [] }),
+        [`${operation === "save" ? "PUT" : "DELETE"} /api/admin/config/ai.models`]: () => {
+          written = true;
+          return json({ ok: true });
+        },
+      });
+      renderAt("/admin/settings");
+      const user = userEvent.setup();
+      await user.clear(await screen.findByLabelText("Model allowlist"));
+      await user.type(screen.getByLabelText("Model allowlist"), "Submitted");
+      await user.click(
+        screen.getByRole("button", { name: operation === "save" ? "Save" : "Reset override" }),
+      );
+      await screen.findByText("Saved · awaiting refresh");
+      await screen.findByText(/Change saved, but the effective value couldn't be refreshed/);
+      expect(screen.getByLabelText("Model allowlist")).toHaveValue("Submitted");
+      expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/reset to environment\/default/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Read-only" }));
+      await user.click(screen.getByRole("button", { name: "Editable" }));
+      expect(screen.getByLabelText("Model allowlist")).toHaveValue("Submitted");
+      unavailable = false;
+      await user.click(screen.getByRole("button", { name: "Refresh effective value" }));
+      await waitFor(() =>
+        expect(screen.getByLabelText("Model allowlist")).toHaveValue("Effective"),
+      );
+      expect(screen.queryByText("Saved · awaiting refresh")).not.toBeInTheDocument();
+      expect(calls.filter((c) => c.method === "PUT" || c.method === "DELETE")).toHaveLength(1);
+    },
+  );
+
+  it("counts restorable and purgeable selections according to cleanup state", async () => {
+    const deletedAt = Date.now() - 40 * 86_400_000;
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () =>
+        json({
+          canvases: [
+            { ...ROW, status: "deleted", deletedAt, purgeStartedAt: null, purgedAt: null },
+            {
+              ...ROW,
+              id: "c2",
+              title: "Cleanup started",
+              status: "deleted",
+              deletedAt,
+              purgeStartedAt: Date.now() - 1000,
+              purgedAt: null,
+            },
+            {
+              ...ROW,
+              id: "c3",
+              title: "Cleanup complete",
+              status: "deleted",
+              deletedAt,
+              purgeStartedAt: Date.now() - 1000,
+              purgedAt: Date.now(),
+            },
+          ],
+          total: 3,
+          limit: 50,
+          offset: 0,
+        }),
+    });
+    renderAt("/admin/canvases?status=deleted");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("checkbox", { name: "Select this page" }));
+    expect(screen.getByRole("button", { name: "Restore selected" })).toHaveTextContent(
+      "Restore selected · 1",
+    );
+    expect(screen.getByRole("button", { name: "Permanently purge selected" })).toHaveTextContent(
+      "Permanently purge selected · 2",
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Select Happy Otter" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Cleanup started" }));
+    expect(screen.queryByRole("button", { name: "Restore selected" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Permanently purge selected" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(["save", "reset"])(
+    "locks a configuration %s through filter remounts and delayed reconciliation",
+    async (operation) => {
+      let finishWrite: ((response: Response) => void) | undefined;
+      let finishRead: ((response: Response) => void) | undefined;
+      const write = new Promise<Response>((resolve) => {
+        finishWrite = resolve;
+      });
+      const read = new Promise<Response>((resolve) => {
+        finishRead = resolve;
+      });
+      let writing = false;
+      const fields = (value: string) => [{ ...CONFIG_FIELDS[0], overridden: true, value }];
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/config": () =>
+          writing
+            ? read.then((response) => response.clone())
+            : json({ fields: fields("Original") }),
+        "GET /api/admin/email-templates": () => json({ templates: [] }),
+        [`${operation === "save" ? "PUT" : "DELETE"} /api/admin/config/ai.models`]: () => {
+          writing = true;
+          return write;
+        },
+      });
+      renderAt("/admin/settings");
+      const user = userEvent.setup();
+      await user.clear(await screen.findByLabelText("Model allowlist"));
+      await user.type(screen.getByLabelText("Model allowlist"), "Submitted");
+      await user.click(
+        screen.getByRole("button", { name: operation === "save" ? "Save" : "Reset override" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Read-only" }));
+      await user.click(screen.getByRole("button", { name: "Editable" }));
+      expect(screen.getByLabelText("Model allowlist")).toBeDisabled();
+      await user.type(screen.getByLabelText("Model allowlist"), "Newer edit");
+      expect(screen.getByLabelText("Model allowlist")).toHaveValue("Submitted");
+      finishWrite?.(json({ ok: true }));
+      await waitFor(() =>
+        expect(
+          calls.filter((c) => c.path === "/api/admin/config" && c.method === "GET").length,
+        ).toBeGreaterThan(1),
+      );
+      expect(screen.getByLabelText("Model allowlist")).toBeDisabled();
+      await user.type(screen.getByLabelText("Model allowlist"), "Still newer");
+      const effective = operation === "save" ? "Submitted" : "Inherited";
+      finishRead?.(json({ fields: fields(effective) }));
+      await waitFor(() => expect(screen.getByLabelText("Model allowlist")).toBeEnabled());
+      expect(screen.getByLabelText("Model allowlist")).toHaveValue(effective);
+      expect(calls.filter((c) => c.method === "PUT" || c.method === "DELETE")).toHaveLength(1);
+    },
+  );
+
+  it.each(["save", "reset"])(
+    "prevents overlapping template actions while %s is pending",
+    async (operation) => {
+      let finish: ((response: Response) => void) | undefined;
+      const pending = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/config": () => json({ fields: [] }),
+        "GET /api/admin/email-templates": () =>
+          json({
+            templates: [
+              {
+                key: "team_invite",
+                subject: "Join",
+                bodyHtml: "<p>Join</p>",
+                bodyText: "Join",
+                overridden: true,
+              },
+            ],
+          }),
+        [`${operation === "save" ? "PUT" : "DELETE"} /api/admin/email-templates/team_invite`]: () =>
+          pending,
+      });
+      renderAt("/admin/settings");
+      const user = userEvent.setup();
+      await user.type(await screen.findByLabelText("Team access subject"), " revised");
+      await user.click(
+        screen.getByRole("button", {
+          name: operation === "save" ? "Save" : "Reset to latest default",
+        }),
+      );
+      expect(screen.getByLabelText("Team access subject")).toBeDisabled();
+      const counterpart = screen.getByRole("button", {
+        name: operation === "save" ? "Reset to latest default" : "Save",
+      });
+      expect(counterpart).toBeDisabled();
+      await user.click(counterpart);
+      expect(calls.filter((c) => c.method === "PUT" || c.method === "DELETE")).toHaveLength(1);
+      finish?.(json({ ok: true }));
+      await waitFor(() => expect(screen.getByLabelText("Team access subject")).toBeEnabled());
+    },
+  );
+
+  it("cancels the selected pending grant and preserves the other target", async () => {
+    const grants = [
+      {
+        id: "invite-c",
+        targetType: "canvas",
+        targetId: "c1",
+        targetName: "Quarterly report",
+        role: "editor",
+      },
+      {
+        id: "invite-t",
+        targetType: "team",
+        targetId: "t1",
+        targetName: "Design team",
+        role: "member",
+      },
+    ];
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/people": () =>
+        json({
+          people: [{ ...USER_ROW, pendingCount: grants.length, pendingGrants: grants }],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        }),
+      "DELETE /api/admin/people/invitations/invite-t": () => {
+        grants.splice(1, 1);
+        return json({ ok: true });
+      },
+    });
+    renderAt("/admin/users");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for Alice" }));
+    await user.click(screen.getByRole("menuitem", { name: "Cancel pending access" }));
+    expect(await screen.findByText("Quarterly report")).toBeVisible();
+    expect(screen.getByText(/Canvas · editor/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel access to Design team" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Cancel access to Design team?" }),
+    ).toBeVisible();
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Cancel this grant" }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "DELETE").map((c) => c.path)).toEqual([
+        "/api/admin/people/invitations/invite-t",
+      ]),
+    );
+    expect(await screen.findByText("Quarterly report")).toBeVisible();
+  });
+
+  it("keeps configuration drafts through filters, failed saves, refresh failures and canceled navigation", async () => {
+    let failRead = false;
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/config": () =>
+        failRead ? json({ error: "unavailable" }, 503) : json({ fields: CONFIG_FIELDS }),
+      "GET /api/admin/email-templates": () => json({ templates: [] }),
+      "PUT /api/admin/config/ai.apiKey": () => json({ error: "unavailable" }, 503),
+    });
+    const { qc } = renderAt("/admin/settings");
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Provider API key"), "memory-only-draft");
+    await user.click(screen.getByRole("button", { name: "Read-only" }));
+    expect(screen.queryByLabelText("Provider API key")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Editable" }));
+    expect(screen.getByLabelText("Provider API key")).toHaveValue("memory-only-draft");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Request failed")).toBeVisible();
+    expect(screen.getByLabelText("Provider API key")).toHaveValue("memory-only-draft");
+    failRead = true;
+    await qc.invalidateQueries({ queryKey: ["admin", "config"] });
+    expect(await screen.findByText("Couldn’t refresh configuration")).toBeVisible();
+    expect(screen.getByLabelText("Provider API key")).toHaveValue("memory-only-draft");
+    await user.click(screen.getByRole("link", { name: "Activity" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Leave with unsaved changes?" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Provider API key")).toHaveValue("memory-only-draft");
+    expect(JSON.stringify(localStorage)).not.toContain("memory-only-draft");
+    expect(JSON.stringify(sessionStorage)).not.toContain("memory-only-draft");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByLabelText("Provider API key")).toHaveValue("");
+  });
+
+  it("reset override displays the inherited effective value after refetch", async () => {
+    let reset = false;
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/config": () =>
+        json({
+          fields: [
+            {
+              ...CONFIG_FIELDS[0],
+              overridden: !reset,
+              source: reset ? "environment" : "database",
+              value: reset ? "inherited-model" : "override-model",
+            },
+          ],
+        }),
+      "GET /api/admin/email-templates": () => json({ templates: [] }),
+      "DELETE /api/admin/config/ai.models": () => {
+        reset = true;
+        return json({ ok: true });
+      },
+    });
+    renderAt("/admin/settings");
+    expect(await screen.findByLabelText("Model allowlist")).toHaveValue("override-model");
+    await userEvent.click(screen.getByRole("button", { name: "Reset override" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Model allowlist")).toHaveValue("inherited-model"),
+    );
+  });
+
+  it("previews templates locally and retains edits when save and background refresh fail", async () => {
+    let failRead = false;
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/config": () => json({ fields: [] }),
+      "GET /api/admin/email-templates": () =>
+        failRead
+          ? json({ error: "unavailable" }, 503)
+          : json({
+              templates: [
+                {
+                  key: "team_invite",
+                  subject: "Join {{teamName}}",
+                  bodyHtml:
+                    '<h1>{{teamName}}</h1><img src="https://remote.invalid/pixel"><script>alert(1)</script>',
+                  bodyText: "Join the team",
+                  overridden: false,
+                },
+              ],
+            }),
+      "PUT /api/admin/email-templates/team_invite": () => json({ error: "unavailable" }, 503),
+    });
+    const { qc } = renderAt("/admin/settings");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("Team access subject");
+    await user.clear(field);
+    await user.type(field, "A revised invitation");
+    await user.click(screen.getByText("Preview email"));
+    const preview = screen.getByTitle("Team access email preview");
+    expect(preview).toHaveAttribute("sandbox", "");
+    expect(preview.getAttribute("srcdoc")).toContain("Example team");
+    expect(preview.getAttribute("srcdoc")).not.toContain("remote.invalid");
+    expect(preview.getAttribute("srcdoc")).not.toContain("<script");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Request failed")).toBeVisible();
+    failRead = true;
+    await qc.invalidateQueries({ queryKey: ["admin", "email-templates"] });
+    expect(await screen.findByText("Couldn’t refresh email templates")).toBeVisible();
+    expect(field).toHaveValue("A revised invitation");
+    expect(calls.some((c) => /send|preview/.test(c.path))).toBe(false);
+  });
+
   it.each([false, true])(
     "keeps archive results separate from refreshed eligibility (excluded selection: %s)",
     async (hasExcludedCanvas) => {
@@ -762,21 +1250,18 @@ describe("admin dashboard", () => {
     mockFetch({
       "GET /api/me": () => json(ADMIN_ME),
       "GET /api/admin/people": () => json({ people: [USER_ROW], total: 1, limit: 50, offset: 0 }),
-      "GET /api/admin/canvases?person=alice%40example.com&limit=50&offset=0": () =>
-        canvasPage([ROW]),
+      "GET /api/admin/canvases?owner=u1&limit=50&offset=0": () => canvasPage([ROW]),
     });
     renderAt("/admin/users");
     const user = userEvent.setup();
     await user.click(
-      await screen.findByRole("button", { name: "View canvases involving alice@example.com" }),
+      await screen.findByRole("button", { name: "View 1 canvases owned by alice@example.com" }),
     );
     expect(await screen.findByRole("heading", { name: "Canvases" })).toBeInTheDocument();
-    expect(await screen.findByText(/Showing canvases involving/)).toBeInTheDocument();
-    expect(
-      calls.some(
-        (c) => c.path === "/api/admin/canvases?person=alice%40example.com&limit=50&offset=0",
-      ),
-    ).toBe(true);
+    expect(await screen.findByText(/Showing canvases owned by/)).toBeInTheDocument();
+    expect(calls.some((c) => c.path === "/api/admin/canvases?owner=u1&limit=50&offset=0")).toBe(
+      true,
+    );
   });
 
   it("filters the Canvases table by owner when an owner email is clicked", async () => {
@@ -1048,6 +1533,7 @@ describe("admin dashboard", () => {
       name: /search configuration settings/i,
     });
 
+    await user.click(screen.getByRole("button", { name: "All configuration" }));
     const checks = [
       { term: "Provider", visible: "Provider API key", hidden: "SMTP host" },
       { term: "CANVAS_DROP_AI_MODELS", visible: "Model allowlist", hidden: "SMTP host" },

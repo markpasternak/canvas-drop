@@ -599,7 +599,8 @@ describe("dashboard app", () => {
       await screen.findByRole("heading", { name: "Dashboard view failed" }),
     ).toBeInTheDocument();
     expect(screen.getByText("route_error")).toBeInTheDocument();
-    expect(screen.getByText("render exploded")).toBeInTheDocument();
+    expect(screen.queryByText("render exploded")).not.toBeInTheDocument();
+    expect(screen.getByText("Technical details").parentElement).not.toHaveAttribute("open");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

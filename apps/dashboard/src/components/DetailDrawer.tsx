@@ -1,6 +1,7 @@
 import { X } from "@phosphor-icons/react";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useRef } from "react";
 import { useExitTransition } from "../lib/use-exit-transition.js";
+import { useModalLayer } from "../lib/use-modal-layer.js";
 
 /**
  * Right-side slide-in drawer for the detail rail below the `2xl` breakpoint (U3).
@@ -24,7 +25,6 @@ export function DetailDrawer({
   children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const restoreRef = useRef<HTMLElement | null>(null);
   // Two-phase mount so the sheet animates OUT (slide back to the right) before it
   // unmounts, the way Dialog/CommandPalette do — the focus-trap/Escape/restore
   // effect stays keyed on the live `open`, not on `mounted`.
@@ -34,46 +34,7 @@ export function DetailDrawer({
   // the sheet slides out showing what it had, not a flash of "select a canvas".
   const childrenRef = useRef<ReactNode>(children);
   if (open) childrenRef.current = children;
-  // Keep onClose out of the effect deps (a fresh arrow each render would tear down
-  // and re-run the focus trap), mirroring Dialog.tsx.
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    restoreRef.current = document.activeElement as HTMLElement | null;
-    const panel = panelRef.current;
-    panel?.querySelector<HTMLElement>("[data-autofocus]")?.focus() ?? panel?.focus();
-
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onCloseRef.current();
-        return;
-      }
-      if (e.key !== "Tab" || !panel) return;
-      const focusables = panel.querySelectorAll<HTMLElement>(
-        'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
-      );
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
-    }
-    document.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-      restoreRef.current?.focus?.();
-    };
-  }, [open]);
+  const { isTop } = useModalLayer({ open, panelRef, onClose });
 
   if (!mounted) return null;
 
@@ -90,7 +51,7 @@ export function DetailDrawer({
         data-state={state}
         aria-hidden
         onMouseDown={(e) => {
-          if (e.target === e.currentTarget) onClose();
+          if (isTop() && e.target === e.currentTarget) onClose();
         }}
       />
       <div

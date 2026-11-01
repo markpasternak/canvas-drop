@@ -59,6 +59,27 @@ export function AdminOffboardingDialog({
         )}
         {data && !results && (
           <>
+            <section
+              aria-label="Impact summary"
+              className="space-y-2 rounded-lg bg-surface-sunken p-3 text-sm"
+            >
+              <h3 className="font-semibold">Review impact</h3>
+              <p>
+                {data.owned.length} owned canvases · {data.direct.length} direct grants ·{" "}
+                {data.memberships.length} team memberships · {data.pending.length} pending
+                invitations
+              </p>
+              <p className={hasUnresolved ? "text-warning" : "text-muted"}>
+                {data.owned.filter((canvas) => !canvas.transferEligible).length} canvases need
+                handover · {data.createdTeams.length} teams need administration review.
+              </p>
+              <p className="text-muted">
+                {successor
+                  ? `Eligible canvases transfer to ${successor.email}.`
+                  : "No successor selected."}{" "}
+                Review handover below before confirming.
+              </p>
+            </section>
             <section className="space-y-2" aria-label="Account impact">
               <h3 className="font-semibold">Account and sign-in</h3>
               <p className="text-sm text-muted">
@@ -143,24 +164,29 @@ export function AdminOffboardingDialog({
                     Clear successor
                   </Button>
                 )}
-                <ul className="divide-y divide-border rounded-lg border border-border">
-                  {data.owned.map((canvas) => (
-                    <li key={canvas.id} className="space-y-1 p-3 text-sm">
-                      <p className="font-medium">
-                        {canvas.title || canvas.slug}{" "}
-                        <span className="text-xs text-subtle">({canvas.status})</span>
-                      </p>
-                      <p className="text-muted">
-                        {canvas.transferEligible
-                          ? `Transfer to ${data.recipient?.email}`
-                          : canvas.transferExplanation}
-                      </p>
-                      {canvas.publicLinkReverted && (
-                        <p className="text-xs text-muted">The public link becomes restricted.</p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <details open={!successor || data.owned.some((canvas) => !canvas.transferEligible)}>
+                  <summary className="cursor-pointer text-sm text-accent">
+                    Review {data.owned.length} ownership outcomes
+                  </summary>
+                  <ul className="mt-3 max-h-72 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+                    {data.owned.map((canvas) => (
+                      <li key={canvas.id} className="space-y-1 p-3 text-sm">
+                        <p className="font-medium">
+                          {canvas.title || canvas.slug}{" "}
+                          <span className="text-xs text-subtle">({canvas.status})</span>
+                        </p>
+                        <p className="text-muted">
+                          {canvas.transferEligible
+                            ? `Transfer to ${data.recipient?.email}`
+                            : canvas.transferExplanation}
+                        </p>
+                        {canvas.publicLinkReverted && (
+                          <p className="text-xs text-muted">The public link becomes restricted.</p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
                 <p className="text-xs text-subtle">
                   The departing person does not retain editor access. Existing ownership
                   notifications apply where enabled.
@@ -169,26 +195,33 @@ export function AdminOffboardingDialog({
             )}
             <section className="space-y-2" aria-label="Access removal">
               <h3 className="font-semibold">Access to remove</h3>
-              <ul className="space-y-1 text-sm text-muted">
-                {data.direct.map((grant) => (
-                  <li key={grant.id}>
-                    Direct {grant.role}: {grant.title || grant.canvasId}
-                  </li>
-                ))}
-                {data.memberships.map((team) => (
-                  <li key={team.id}>Team membership: {team.name}</li>
-                ))}
-                {data.pending.map((invite) => (
-                  <li key={invite.id}>
-                    Pending {invite.targetType} invitation · {invite.targetId}
-                  </li>
-                ))}
-                {data.permits.length > 0 && <li>Individual sign-in permission for {email}</li>}
-                {!data.direct.length &&
-                  !data.memberships.length &&
-                  !data.pending.length &&
-                  !data.permits.length && <li>No additional grants or pending invitations.</li>}
-              </ul>
+              <details
+                open={data.direct.length + data.memberships.length + data.pending.length <= 5}
+              >
+                <summary className="cursor-pointer text-sm text-accent">
+                  Review grants and invitations to remove
+                </summary>
+                <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto text-sm text-muted">
+                  {data.direct.map((grant) => (
+                    <li key={grant.id}>
+                      Direct {grant.role}: {grant.title || grant.canvasId}
+                    </li>
+                  ))}
+                  {data.memberships.map((team) => (
+                    <li key={team.id}>Team membership: {team.name}</li>
+                  ))}
+                  {data.pending.map((invite) => (
+                    <li key={invite.id}>
+                      Pending {invite.targetType} invitation · {invite.targetId}
+                    </li>
+                  ))}
+                  {data.permits.length > 0 && <li>Individual sign-in permission for {email}</li>}
+                  {!data.direct.length &&
+                    !data.memberships.length &&
+                    !data.pending.length &&
+                    !data.permits.length && <li>No additional grants or pending invitations.</li>}
+                </ul>
+              </details>
             </section>
             {data.createdTeams.length > 0 && (
               <section className="space-y-2">

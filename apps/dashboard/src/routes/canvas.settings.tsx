@@ -1,5 +1,5 @@
 import { ArrowSquareOut, CaretRight, Warning } from "@phosphor-icons/react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Badge } from "../components/Badge.js";
@@ -37,8 +37,9 @@ import { useCanvas, useMe } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const SECTIONS = [
-  { id: "url-routing", label: "URL & routing" },
+  { id: "publishing", label: "Publishing" },
   { id: "preview", label: "Cover image" },
+  { id: "url-routing", label: "URL & routing" },
   { id: "deploy-api", label: "Deploy API" },
   { id: "lifecycle", label: "Manage canvas" },
   { id: "danger", label: "Danger zone" },
@@ -122,35 +123,26 @@ export default function Settings() {
       <SettingsNav sections={SECTIONS} active={activeSection} onSelect={selectSection} />
       <div className="min-w-0 max-w-4xl space-y-8">
         <Section
-          id="url-routing"
-          title="URL & routing"
-          description="Control the stable URL, its aliases, and how unknown paths resolve."
+          id="publishing"
+          title="Publishing choices"
+          description="Set the canvas's title, description, cover and audience before sharing it."
         >
-          <Row
-            title="Canvas URL"
-            description={<span className="block break-all font-mono text-sm">{canvas.url}</span>}
-          >
-            <CopyButton
-              ref={urlCopyRef}
-              value={canvas.url}
-              label="Copy"
-              toastMessage="Link copied"
-            />
-            <IconLink href={canvas.url} target="_blank" rel="noreferrer" label="Open live canvas">
-              <ArrowSquareOut size={15} weight="bold" aria-hidden />
-            </IconLink>
-            <Button size="sm" variant="secondary" onClick={() => setConfirm("slug")}>
-              Change slug
-            </Button>
-          </Row>
-          <SlugAliases canvasId={canvas.id} me={me} />
-          <RowDivider />
-          <Toggle
-            label="Single-page app mode"
-            description="Serve the home page for unknown paths. Enable for apps with client-side routing; leave off for multi-page sites."
-            checked={canvas.spaFallback}
-            onChange={(spaFallback) => save({ spaFallback })}
-          />
+          <div className="flex flex-wrap gap-3 text-sm">
+            <Link
+              to="/canvases/$id"
+              params={{ id: canvas.id }}
+              className="text-accent hover:underline"
+            >
+              Edit title and description
+            </Link>
+            <Link
+              to="/canvases/$id/share"
+              params={{ id: canvas.id }}
+              className="text-accent hover:underline"
+            >
+              Review audience and discovery
+            </Link>
+          </div>
         </Section>
 
         <Section
@@ -299,6 +291,38 @@ export default function Settings() {
         </Section>
 
         <Section
+          id="url-routing"
+          title="URL & routing"
+          description="Control the stable URL, its aliases, and how unknown paths resolve."
+        >
+          <Row
+            title="Canvas URL"
+            description={<span className="block break-all font-mono text-sm">{canvas.url}</span>}
+          >
+            <CopyButton
+              ref={urlCopyRef}
+              value={canvas.url}
+              label="Copy"
+              toastMessage="Link copied"
+            />
+            <IconLink href={canvas.url} target="_blank" rel="noreferrer" label="Open live canvas">
+              <ArrowSquareOut size={15} weight="bold" aria-hidden />
+            </IconLink>
+            <Button size="sm" variant="secondary" onClick={() => setConfirm("slug")}>
+              Change slug
+            </Button>
+          </Row>
+          <SlugAliases canvasId={canvas.id} me={me} />
+          <RowDivider />
+          <Toggle
+            label="Single-page app mode"
+            description="Serve the home page for unknown paths. Enable for apps with client-side routing; leave off for multi-page sites."
+            checked={canvas.spaFallback}
+            onChange={(spaFallback) => save({ spaFallback })}
+          />
+        </Section>
+
+        <Section
           id="deploy-api"
           title="Deploy API"
           description="Use the per-canvas key for scripted deploys. Never put it in canvas files."
@@ -360,7 +384,7 @@ export default function Settings() {
             <>
               <Row
                 title="Unpublish canvas"
-                description="Takes it offline and back to Draft. It stays in your list and editable."
+                description="Takes the published link offline. Keep editing the draft, then Publish from the editor to bring it back."
               >
                 <Button size="sm" variant="secondary" onClick={() => setConfirm("unpublish")}>
                   Unpublish
@@ -372,7 +396,7 @@ export default function Settings() {
           {canvas.status === "archived" ? (
             <Row
               title="This canvas is archived"
-              description="It's offline and hidden from your main list. Unarchive it to bring it back at the same URL."
+              description="It is offline and hidden from your active list. Unarchive to return it to your list, then review sharing before sending the link again."
             >
               <Button
                 size="sm"
@@ -393,7 +417,7 @@ export default function Settings() {
           ) : (
             <Row
               title="Archive canvas"
-              description="Takes it offline and moves it to Archived. Unarchive to restore access at the same URL."
+              description="Takes it offline and hides it from your active list. Find it using the Archived filter, unarchive, then deliberately share it again."
             >
               <Button size="sm" variant="secondary" onClick={() => setConfirm("archive")}>
                 <Warning size={15} weight="bold" aria-hidden />
@@ -416,7 +440,7 @@ export default function Settings() {
           ) : (
             <Row
               title="Delete canvas"
-              description="Takes it offline and removes it from your list. Recoverable for 30 days, then purged."
+              description="Takes it offline and removes it from your list. Ask an administrator to restore it from Admin → Canvases → Deleted before permanent cleanup. The usual retention window is 30 days."
             >
               <Button variant="danger" size="sm" onClick={() => setConfirm("delete")}>
                 <Warning size={15} weight="bold" aria-hidden />

@@ -112,6 +112,8 @@ export interface AdminPendingGrant {
   id: string;
   targetType: "canvas" | "team";
   targetId: string;
+  targetName: string | null;
+  role: string | null;
   createdAt: number;
   invitedBy: string;
 }
@@ -211,6 +213,7 @@ export function adminRepository(client: DbClient) {
   const orgMembersT = sqlite ? sqliteSchema.orgMembers : pgSchema.orgMembers;
   const canvasAllowlistT = sqlite ? sqliteSchema.canvasAllowlist : pgSchema.canvasAllowlist;
   const teamMembersT = sqlite ? sqliteSchema.teamMembers : pgSchema.teamMembers;
+  const teamsT = sqlite ? sqliteSchema.teams : pgSchema.teams;
   const canvasTeamsT = sqlite ? sqliteSchema.canvasTeams : pgSchema.canvasTeams;
   const filesT = sqlite ? sqliteSchema.files : pgSchema.files;
   const usageT = sqlite ? sqliteSchema.usageEvents : pgSchema.usageEvents;
@@ -609,15 +612,29 @@ export function adminRepository(client: DbClient) {
           email: invitationsT.email,
           targetType: invitationsT.targetType,
           targetId: invitationsT.targetId,
+          targetName: sql<
+            string | null
+          >`coalesce(${canvasesT.title}, ${canvasesT.slug}, ${teamsT.name})`,
+          role: invitationsT.role,
           createdAt: invitationsT.createdAt,
           invitedBy: invitationsT.invitedBy,
         })
         .from(invitationsT)
+        .leftJoin(
+          canvasesT,
+          and(eq(invitationsT.targetType, "canvas"), eq(invitationsT.targetId, canvasesT.id)),
+        )
+        .leftJoin(
+          teamsT,
+          and(eq(invitationsT.targetType, "team"), eq(invitationsT.targetId, teamsT.id)),
+        )
         .where(isNull(invitationsT.consumedAt))) as Array<{
         id: string;
         email: string;
         targetType: "canvas" | "team";
         targetId: string;
+        targetName: string | null;
+        role: string | null;
         createdAt: number;
         invitedBy: string;
       }>;
@@ -679,6 +696,8 @@ export function adminRepository(client: DbClient) {
           id: inv.id,
           targetType: inv.targetType,
           targetId: inv.targetId,
+          targetName: inv.targetName,
+          role: inv.role,
           createdAt: Number(inv.createdAt),
           invitedBy: inv.invitedBy,
         });
