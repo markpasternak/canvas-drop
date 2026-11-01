@@ -16,10 +16,8 @@ export function Toggle({
   description?: ReactNode;
   disabled?: boolean;
 }) {
-  // A <label htmlFor> only names labelable elements (input/select/…), NOT a
-  // role="switch" button — browsers don't propagate it as the button's accessible
-  // name. Wire the NAME via aria-labelledby (the label only, so AT announces the
-  // control by its label) and the supplementary copy via aria-describedby.
+  // Keep the switch name separate from its supplementary description so assistive
+  // technology announces the setting, then its help text.
   const labelId = useId();
   const descId = useId();
   return (
@@ -42,17 +40,22 @@ export function Toggle({
         aria-describedby={description ? descId : undefined}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={cn(
-          "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:opacity-50",
-          checked ? "bg-accent" : "bg-border-strong",
-        )}
+        className="cd-touch-target relative inline-flex h-6 w-10 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
       >
         <span
+          aria-hidden
           className={cn(
-            "inline-block size-4 rounded-full bg-accent-fg shadow-[var(--shadow-xs)] transition-transform duration-100 [transition-timing-function:var(--ease-out)]",
-            checked ? "translate-x-5" : "translate-x-1",
+            "inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
+            checked ? "bg-accent" : "bg-border-strong",
           )}
-        />
+        >
+          <span
+            className={cn(
+              "inline-block size-4 rounded-full bg-accent-fg shadow-[var(--shadow-xs)] transition-transform duration-100 [transition-timing-function:var(--ease-out)]",
+              checked ? "translate-x-5" : "translate-x-1",
+            )}
+          />
+        </span>
       </button>
     </div>
   );

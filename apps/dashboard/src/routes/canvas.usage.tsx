@@ -75,7 +75,9 @@ export default function Usage() {
           </MetaItem>
         </MetaGrid>
         <div className="space-y-1.5">
-          <p className="text-[0.6875rem] font-medium text-subtle">Last 30 days</p>
+          <p className="text-[0.6875rem] font-medium text-subtle">
+            Last {usage.viewsByDay.length} days, including today
+          </p>
           {usage.totalViews === 0 ? (
             <p className="text-xs text-muted">No views yet.</p>
           ) : (
@@ -85,7 +87,8 @@ export default function Usage() {
             <summary className="cursor-pointer font-medium text-fg">View daily values</summary>
             <table className="mt-3 w-full text-left text-sm tabular-nums">
               <caption className="mb-2 text-left text-xs text-muted">
-                Views by UTC date over the last 30 days, including zero-view days. Today is partial.
+                Views by UTC date over the last {usage.viewsByDay.length} days, including zero-view
+                days. Today is partial.
               </caption>
               <thead>
                 <tr className="border-b border-border">

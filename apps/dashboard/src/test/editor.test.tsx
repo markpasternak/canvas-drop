@@ -712,6 +712,50 @@ describe("Editor route", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/versions"));
   });
 
+  it.each(["Keep editing", "Retry save and leave"])(
+    "closes fullscreen for visible failed-save recovery and supports %s",
+    async (action) => {
+      let fails = true;
+      mockFetch({
+        "GET /api/canvases/c1": () => json(CANVAS),
+        "GET /api/canvases/c1/draft": () => json(draftView()),
+        "GET /api/canvases/c1/draft/file": () => new Response("original"),
+        "PUT /api/canvases/c1/draft/file": () =>
+          fails ? json({ error: "offline" }, 503) : json(draftView({ dirty: true })),
+        "GET /api/canvases/c1/versions": () => json({ versions: [] }),
+      });
+      const { router } = renderEditor();
+      const editor = await screen.findByTestId("code-editor");
+      await waitFor(() => expect(editor).toHaveValue("original"));
+      fireEvent.change(editor, { target: { value: "only local copy" } });
+      fireEvent.click(screen.getByRole("button", { name: "Show preview" }));
+      fireEvent.click(screen.getByRole("button", { name: "Full screen preview" }));
+      expect(screen.getByRole("dialog", { name: "Draft preview (full screen)" })).toBeVisible();
+
+      void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+      const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+      expect(dialog).toBeVisible();
+      expect(dialog).toHaveFocus();
+      // Visibility alone cannot detect sibling overlays in jsdom: the preview
+      // must be removed so it cannot paint over recovery at the same z-index.
+      expect(screen.queryByRole("dialog", { name: "Draft preview (full screen)" })).toBeNull();
+      expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+      expect(within(dialog).getByRole("link", { name: "Download my edits" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("only%20local%20copy"),
+      );
+      fails = false;
+      await userEvent.click(within(dialog).getByRole("button", { name: action }));
+      if (action === "Keep editing") {
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+        expect(editor).toHaveValue("only local copy");
+      } else {
+        await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/versions"));
+      }
+    },
+  );
+
   it("renders an image preview (with Download) instead of the text editor", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),

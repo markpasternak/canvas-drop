@@ -1,10 +1,41 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { Dialog } from "../components/Dialog.js";
 import { DraftPreview } from "../components/DraftPreview.js";
 import { draftUsesScripts } from "../lib/file-kind.js";
 
 const noop = () => {};
+
+describe("DraftPreview modal ownership", () => {
+  it("keeps the fullscreen preview behind a protected dialog and retains its scroll lock", async () => {
+    const toggle = vi.fn();
+    const preview = (
+      <DraftPreview
+        canvasId="c1"
+        refreshKey={0}
+        onRefresh={noop}
+        fullscreen
+        onToggleFullscreen={toggle}
+      />
+    );
+    const { rerender } = render(
+      <>
+        {preview}
+        <Dialog open dismissable={false} onClose={noop} title="Publishing">
+          Please wait
+        </Dialog>
+      </>,
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(toggle).not.toHaveBeenCalled();
+    expect(document.body.style.overflow).toBe("hidden");
+    rerender(preview);
+    expect(document.body.style.overflow).toBe("hidden");
+    await userEvent.keyboard("{Escape}");
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+});
 
 describe("DraftPreview script-aware rendering", () => {
   it("renders the sandboxed iframe for a static draft (usesScripts false)", () => {

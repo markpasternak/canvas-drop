@@ -4,6 +4,7 @@ import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip } from "../components/Filters.js";
+import { NativeSelect } from "../components/NativeSelect.js";
 import { PendingChangesGuard } from "../components/PendingChangesGuard.js";
 import { ReadError } from "../components/ReadError.js";
 import { SearchInput } from "../components/SearchInput.js";
@@ -315,7 +316,7 @@ function DraftRow({ field }: { field: AdminConfigField }) {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {field.type === "enum" && field.enumValues ? (
-          <select
+          <NativeSelect
             aria-label={field.label}
             value={draft}
             disabled={pending}
@@ -323,14 +324,15 @@ function DraftRow({ field }: { field: AdminConfigField }) {
               setDraft(e.target.value);
               if (isSkinField) previewSkin(e.target.value);
             }}
-            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
+            controlSize="md"
+            wrapperClassName="flex-1 sm:w-56"
           >
             {field.enumValues.map((v) => (
               <option key={v} value={v}>
                 {v}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         ) : (
           <input
             type={field.secret ? "password" : field.type === "number" ? "number" : "text"}

@@ -9,7 +9,7 @@ The shortest path, from a signed-in dashboard:
 3. Review **Your draft is ready**: check the entry page, file count, destination and intended audience. Choose **Continue editing** to open the editor, or **Review and publish**, then **Publish canvas** to make it live.
 4. Copy the link or choose **Open canvas**. Save the optional deploy key if you plan to publish through the API; it is shown once. The **Overview** tab also has the URL: `{base}/c/{slug}/` in `path` mode, `https://{slug}.canvases.example.com/` in `subdomain` mode.
 
-![Create a canvas: HTML, document preview, title, workspace, and audience](/docs/assets/new-canvas.webp)
+![Create a canvas draft with an HTML preview, title, workspace, and audience](/docs/assets/new-canvas.webp)
 
 The same from a terminal, with the canvas id and key shown when you create a canvas:
 

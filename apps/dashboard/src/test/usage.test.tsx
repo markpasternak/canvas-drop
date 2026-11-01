@@ -67,13 +67,13 @@ function renderUsage() {
 
 afterEach(() => vi.restoreAllMocks());
 
-/** A dense 30-day sparkline series whose counts sum to `total`. */
+/** The server's rolling 30-day window spans 31 UTC date buckets, including today. */
 function viewsByDay(total: number): Array<{ dayMs: number; count: number }> {
   const DAY = 24 * 60 * 60 * 1000;
   const start = 1_700_000_000_000;
-  return Array.from({ length: 30 }, (_, i) => ({
+  return Array.from({ length: 31 }, (_, i) => ({
     dayMs: start + i * DAY,
-    count: i === 29 ? total : 0,
+    count: i === 30 ? total : 0,
   }));
 }
 
@@ -100,7 +100,8 @@ describe("usage tab", () => {
     const { container } = renderUsage();
     expect((await screen.findAllByText("42"))[0]).toBeInTheDocument(); // total views
     expect(screen.getByText(/7 unique/)).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /Views over the last/i })).toBeInTheDocument();
+    expect(screen.getByText("Last 31 days, including today")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Views over the last 31 days" })).toBeInTheDocument();
     expect(screen.getByText("1,280")).toBeInTheDocument(); // KV ops
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // file storage
     expect(screen.getByText("$0.0034")).toBeInTheDocument(); // AI cost (sub-cent precision)
@@ -108,7 +109,10 @@ describe("usage tab", () => {
     fireEvent.click(screen.getByText("View daily values"));
     const table = screen.getByRole("table");
     expect(table).toHaveTextContent("Date (UTC)");
-    expect(within(table).getAllByRole("row")).toHaveLength(31);
+    expect(table).toHaveAccessibleName(
+      "Views by UTC date over the last 31 days, including zero-view days. Today is partial.",
+    );
+    expect(within(table).getAllByRole("row")).toHaveLength(32);
     expect(table).toHaveTextContent("42");
     // Stats keep tabular-nums for column alignment.
     expect(container.querySelector("dd.tabular-nums")).not.toBeNull();

@@ -107,7 +107,7 @@ export function HoldButton({
         disabled={disabled || loading}
         aria-busy={loading || undefined}
         className={cn(
-          "relative inline-flex h-8 items-center justify-center gap-2 overflow-hidden rounded-md px-3",
+          "cd-touch-target relative inline-flex h-8 items-center justify-center gap-2 overflow-hidden rounded-md px-3",
           "select-none whitespace-nowrap text-[0.8125rem] font-medium text-danger-fg",
           // No hover color-shift: it would mask the fill while you mouse-hold.
           "bg-danger",

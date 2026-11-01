@@ -39,6 +39,12 @@ describe("onboarding — on-brand structure (U20)", () => {
     // The paths picker is a labeled region rendered as an on-brand boxed panel
     // (rounded border + surface), not a loose transparent list.
     const paths = await screen.findByRole("region", { name: /creation paths/i });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Ship your first canvas" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Connect your agent" }),
+    ).toBeInTheDocument();
     expect(paths.className).toMatch(/rounded-xl/);
     expect(paths.className).toMatch(/border-border/);
     expect(paths.className).toMatch(/bg-surface/);

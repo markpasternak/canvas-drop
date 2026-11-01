@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, type VersionInfo } from "../lib/api.js";
 import { archiveText, compareArchives, readCanvasArchive } from "../lib/canvas-archive.js";
 import { formatBytes } from "../lib/format.js";
 import { Button } from "./Button.js";
 import { CodeEditor } from "./CodeEditor.js";
+import { NativeSelect } from "./NativeSelect.js";
 import { ReadError } from "./ReadError.js";
 
 /** Protected exports only. Inspection never restores a version or moves either pointer. */
@@ -19,6 +20,7 @@ export function VersionInspection({
   current?: VersionInfo;
   onClose: () => void;
 }) {
+  const fileSelectId = useId();
   const section = useRef<HTMLElement>(null);
   useEffect(() => {
     const trigger = document.activeElement as HTMLElement | null;
@@ -86,13 +88,14 @@ export function VersionInspection({
       {old.data && (
         <>
           <div className="flex flex-wrap items-end gap-4">
-            <label className="min-w-0 flex-1 space-y-1 text-sm">
+            <label htmlFor={fileSelectId} className="min-w-0 flex-1 space-y-1 text-sm">
               <span className="block text-muted">File in this version</span>
-              <select
+              <NativeSelect
+                id={fileSelectId}
                 aria-label="Version file"
                 value={selected ?? ""}
                 onChange={(event) => setPath(event.target.value)}
-                className="min-h-11 w-full min-w-0 rounded-md border border-border bg-surface px-3 text-fg"
+                className="min-h-11"
               >
                 {(compare && live.data ? changes : old.data).map((file) => (
                   <option key={file.path} value={file.path}>
@@ -100,7 +103,7 @@ export function VersionInspection({
                     {"kind" in file ? ` · ${file.kind}` : ""}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             {current && current.number !== version.number && (
               <Button

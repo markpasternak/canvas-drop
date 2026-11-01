@@ -50,7 +50,7 @@ const SECTION_LINKS: ReadonlyArray<{
 /** The teal logo tile from the preview's `.brand .mark`: a rounded accent-filled
  *  square with the white brand mark, paired with the "canvas-drop" wordmark. A
  *  link home; org-agnostic and re-skinnable. */
-function Brand({ collapsed }: { collapsed?: boolean }) {
+function Brand({ collapsed, compact }: { collapsed?: boolean; compact?: boolean }) {
   return (
     <Link
       to="/"
@@ -65,7 +65,14 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
         <BrandMark className="size-5" />
       </span>
       {!collapsed && (
-        <span className="truncate text-[0.9375rem] font-semibold tracking-tight">canvas-drop</span>
+        <span
+          className={cn(
+            "truncate text-[0.9375rem] font-semibold tracking-tight",
+            compact && "max-[359px]:hidden",
+          )}
+        >
+          canvas-drop
+        </span>
       )}
     </Link>
   );
@@ -406,7 +413,7 @@ export function AppLayout() {
                   <List size={18} weight="bold" aria-hidden />
                 )}
               </button>
-              <Brand />
+              <Brand compact />
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <CreateCanvasButton compact className="max-[380px]:w-9 max-[380px]:px-0" />

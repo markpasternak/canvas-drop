@@ -48,6 +48,52 @@ describe("TagsEditor", () => {
     expect(screen.getByText("alpha")).toBeInTheDocument();
   });
 
+  it("pastes all complete tags in one update and retains the final fragment", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<Host initial={["existing"]} onChange={onChange} />);
+
+    const input = screen.getByLabelText("Tags");
+    await user.click(input);
+    await user.paste(" Alpha,beta,ALPHA,tail");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(["existing", "alpha", "beta"]);
+    expect(input).toHaveValue("tail");
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["existing", "alpha", "beta", "tail"]);
+  });
+
+  it("deduplicates a pasted batch and respects the combined tag limit", async () => {
+    const initial = Array.from({ length: MAX_TAGS - 2 }, (_, i) => `t${i}`);
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<Host initial={initial} onChange={onChange} />);
+
+    const input = screen.getByLabelText("Tags");
+    await user.click(input);
+    await user.paste("one,ONE,t1,two,extra,");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith([...initial, "one", "two"]);
+    expect(input).toBeDisabled();
+  });
+
+  it("preserves a pasted batch longer than 50 characters while validating each tag", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<Host onChange={onChange} />);
+    const input = screen.getByLabelText("Tags");
+    const first = "a".repeat(30);
+    const second = "b".repeat(30);
+    await user.click(input);
+    await user.paste(`${first},${second}`);
+    expect(input).toHaveValue(second);
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith([first, second]);
+    await user.paste(`${"x".repeat(51)},valid,`);
+    expect(onChange).toHaveBeenLastCalledWith([first, second, "valid"]);
+    expect(screen.getByRole("alert")).toHaveTextContent("Longer tags haven’t been added");
+  });
+
   it("trims and lowercases on confirm", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
@@ -83,7 +129,7 @@ describe("TagsEditor", () => {
 
     const tooLong = "x".repeat(51);
     const input = screen.getByLabelText("Tags") as HTMLInputElement;
-    // The input enforces maxLength=50; even forcing 51 chars via a comma split is rejected.
+    // Validate each tag rather than truncating a whole paste before parsing it.
     await user.type(input, `${tooLong},`);
     expect(onChange).not.toHaveBeenCalled();
   });

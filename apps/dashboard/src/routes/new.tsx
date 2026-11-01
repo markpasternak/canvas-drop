@@ -1,6 +1,6 @@
 import { ArrowRight, Code, FileHtml, FolderOpen, type Icon, Key } from "@phosphor-icons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CodeBox } from "../components/CodeBox.js";
 import { CopyButton } from "../components/CopyButton.js";
@@ -14,6 +14,7 @@ import {
 import { Dialog } from "../components/Dialog.js";
 import { DraftPreview } from "../components/DraftPreview.js";
 import { Field, TextareaField } from "../components/Field.js";
+import { NativeSelect } from "../components/NativeSelect.js";
 import { PublishReviewDialog } from "../components/PublishReviewDialog.js";
 import { ReadError } from "../components/ReadError.js";
 import { SlugField } from "../components/SlugField.js";
@@ -85,6 +86,7 @@ export default function CreateCanvas() {
 }
 
 function CreateCanvasForm({ accountId }: { accountId: string | undefined }) {
+  const workspaceId = useId();
   const [recovered] = useState(() => readCreateRecovery(accountId));
   const search = useSearch({ strict: false }) as { method?: string };
   const navigate = useNavigate();
@@ -654,15 +656,15 @@ function CreateCanvasForm({ accountId }: { accountId: string | undefined }) {
               placeholder="My prototype"
               maxLength={200}
             />
-            <label className="block space-y-1.5">
+            <label htmlFor={workspaceId} className="block space-y-1.5">
               <span className="text-sm font-medium text-fg">Workspace</span>
-              <select
+              <NativeSelect
+                id={workspaceId}
                 value={homeOrgId ?? ""}
                 onChange={(e) => {
                   setWorkspace(e.target.value === "" ? null : e.target.value);
                   setAudience(resetAudienceForDestination);
                 }}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
               >
                 <option value="">Personal</option>
                 {orgs.map((o) => (
@@ -670,7 +672,7 @@ function CreateCanvasForm({ accountId }: { accountId: string | undefined }) {
                     {o.name}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
               <span className="block text-xs text-muted">
                 Where this canvas lives. You can change sharing later; the workspace is fixed after
                 creation.

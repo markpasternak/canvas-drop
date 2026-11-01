@@ -1,10 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { Field } from "../components/Field.js";
+import { NativeSelect } from "../components/NativeSelect.js";
 import { PeopleEmailCombobox } from "../components/PeopleEmailCombobox.js";
 import { ReadError } from "../components/ReadError.js";
 import { SearchInput } from "../components/SearchInput.js";
@@ -69,6 +70,7 @@ export default function Teams() {
 /** The create form + the roster-managing list of the caller's teams. The "Personal vs Org"
  *  choice is fixed at creation: a no-org user sees only Personal; an org member sees both. */
 function YourTeams({ teams, orgs }: { teams: Team[]; orgs: Array<{ id: string; name: string }> }) {
+  const teamTypeId = useId();
   const toast = useToast();
   const create = useCreateTeam();
   const [name, setName] = useState("");
@@ -95,10 +97,14 @@ function YourTeams({ teams, orgs }: { teams: Team[]; orgs: Array<{ id: string; n
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border p-3">
         {orgs.length > 0 && (
-          <label className="flex flex-col gap-1 text-xs font-medium text-muted">
+          <label
+            htmlFor={teamTypeId}
+            className="flex flex-col gap-1 text-xs font-medium text-muted"
+          >
             Team type
-            <select
-              className="h-9 rounded-md border border-border bg-surface px-2 text-sm text-fg"
+            <NativeSelect
+              id={teamTypeId}
+              controlSize="md"
               value={orgId}
               onChange={(e) => setOrgId(e.target.value)}
               aria-label="Team type"
@@ -109,7 +115,7 @@ function YourTeams({ teams, orgs }: { teams: Team[]; orgs: Array<{ id: string; n
                   {o.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
         )}
         <Field

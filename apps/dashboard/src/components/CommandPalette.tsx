@@ -22,6 +22,7 @@ import { cn } from "../lib/cn.js";
 import { useMe } from "../lib/queries.js";
 import { useTheme } from "../lib/theme.js";
 import { useExitTransition } from "../lib/use-exit-transition.js";
+import { useModalLayer } from "../lib/use-modal-layer.js";
 import { openShortcuts } from "./Shortcuts.js";
 
 const OPEN_EVENT = "canvas-drop:command-search";
@@ -98,25 +99,32 @@ export function CommandPalette() {
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const restoreRef = useRef<HTMLElement | null>(null);
   const listId = useId();
   const labelId = useId();
   const { mounted, state } = useExitTransition(open);
 
   const close = () => setOpen(false);
+  const { isTop } = useModalLayer({ open, panelRef, onClose: close });
 
   // Global ⌘K / Ctrl-K toggles the palette. Lives at the shell so it works from
-  // any route. We intentionally don't gate on focus target — the palette is a
-  // global affordance and ⌘K isn't a browser/editor default we'd clobber.
+  // any route. An active modal owns the interaction until it closes, especially
+  // during a protected write; command navigation must not bypass that boundary.
   useEffect(() => {
+    const anotherModalIsOpen = () =>
+      Array.from(document.querySelectorAll('[aria-modal="true"]')).some(
+        (element) =>
+          element !== panelRef.current && element.getAttribute("data-state") !== "closed",
+      );
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
-        setOpen((v) => !v);
+        setOpen((value) => (value ? false : !anotherModalIsOpen()));
       }
     }
     document.addEventListener("keydown", onKey);
-    const show = () => setOpen(true);
+    const show = () => {
+      if (!anotherModalIsOpen()) setOpen(true);
+    };
     document.addEventListener(OPEN_EVENT, show);
     return () => {
       document.removeEventListener("keydown", onKey);
@@ -124,19 +132,11 @@ export function CommandPalette() {
     };
   }, []);
 
-  // Reset the query + highlight each time the palette opens, and move focus into
-  // the input. Restore focus to the opener on close (mirrors the Dialog trap).
+  // The shared modal layer owns focus, Escape and the body scroll lock.
   useEffect(() => {
     if (!open) return;
-    restoreRef.current = document.activeElement as HTMLElement | null;
     setQuery("");
     setActive(0);
-    // Focus after the panel mounts.
-    const t = setTimeout(() => inputRef.current?.focus(), 0);
-    return () => {
-      clearTimeout(t);
-      restoreRef.current?.focus?.();
-    };
   }, [open]);
 
   const themeCommands: Command[] = useMemo(
@@ -289,11 +289,6 @@ export function CommandPalette() {
   };
 
   function onPanelKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      return;
-    }
     if (e.key === "ArrowDown" && e.target === inputRef.current) {
       e.preventDefault();
       setActive((a) => (results.length === 0 ? 0 : (a + 1) % results.length));
@@ -309,20 +304,6 @@ export function CommandPalette() {
       runAt(active);
       return;
     }
-    if (e.key === "Tab") {
-      const controls = panelRef.current?.querySelectorAll<HTMLElement>(
-        "input,button:not([disabled])",
-      );
-      const first = controls?.[0];
-      const last = controls?.[controls.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
-    }
   }
 
   if (!mounted) return null;
@@ -333,7 +314,7 @@ export function CommandPalette() {
       className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]"
       role="presentation"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close();
+        if (isTop() && e.target === e.currentTarget) close();
       }}
     >
       <div
@@ -347,6 +328,7 @@ export function CommandPalette() {
         aria-modal="true"
         aria-labelledby={labelId}
         data-state={state}
+        tabIndex={-1}
         onKeyDown={onPanelKeyDown}
         className="cd-anim-pop relative flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-[var(--shadow-popover)]"
       >
@@ -357,6 +339,7 @@ export function CommandPalette() {
           <MagnifyingGlass size={18} weight="bold" aria-hidden className="shrink-0 text-muted" />
           <input
             ref={inputRef}
+            data-autofocus
             type="text"
             role="combobox"
             aria-expanded

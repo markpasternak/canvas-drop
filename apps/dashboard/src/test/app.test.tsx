@@ -105,6 +105,14 @@ describe("dashboard app", () => {
     expect((await screen.findAllByText("canvas-drop")).length).toBeGreaterThanOrEqual(1);
     // empty list → onboarding
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Your canvases" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Ship your first canvas" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Connect your agent" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Paste HTML/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect your agent" })).toHaveAttribute(
       "href",

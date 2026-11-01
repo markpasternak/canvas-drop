@@ -1,7 +1,8 @@
 import { useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { NativeSelect } from "../components/NativeSelect.js";
 import { PendingChangesGuard } from "../components/PendingChangesGuard.js";
 import { ReadError } from "../components/ReadError.js";
 import { RuntimePolicySettings } from "../components/RuntimePolicySettings.js";
@@ -61,6 +62,7 @@ export default function Capabilities() {
 }
 
 function CanvasCapabilities({ id }: { id: string }) {
+  const controlsId = useId();
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
   const connections = useCanvasConnections(id);
@@ -190,13 +192,16 @@ function CanvasCapabilities({ id }: { id: string }) {
                 onChange={(next) => update.mutate({ [f.key]: next }, { onError: onSaveError })}
               />
               {audience && (
-                <label className="grid gap-1 text-sm text-muted sm:max-w-sm">
+                <label
+                  htmlFor={`${controlsId}-${f.key}`}
+                  className="grid gap-1 text-sm text-muted sm:max-w-sm"
+                >
                   {f.key === "ai" ? "AI access" : "Authoring access"}
-                  <select
+                  <NativeSelect
+                    id={`${controlsId}-${f.key}`}
                     aria-label={f.key === "ai" ? "AI access" : "Authoring access"}
                     value={canvas[audience] ?? (f.key === "authoring" ? "viewers" : "editors")}
                     disabled={update.isPending || canvas.status === "disabled"}
-                    className="max-w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg"
                     onChange={(event) =>
                       update.mutate(
                         { [audience]: event.target.value as "editors" | "viewers" },
@@ -206,7 +211,7 @@ function CanvasCapabilities({ id }: { id: string }) {
                   >
                     <option value="editors">Owners and editors</option>
                     <option value="viewers">All signed-in viewers</option>
-                  </select>
+                  </NativeSelect>
                   {f.key === "ai"
                     ? "Requests use this canvas's AI budget."
                     : "People create canvases as themselves, within their existing account permissions."}
@@ -229,13 +234,16 @@ function CanvasCapabilities({ id }: { id: string }) {
         title="Connections"
         description="Third-party origins an administrator has granted to this canvas."
       >
-        <label className="grid gap-1 text-sm text-muted sm:max-w-sm">
+        <label
+          htmlFor={`${controlsId}-connections`}
+          className="grid gap-1 text-sm text-muted sm:max-w-sm"
+        >
           Connection access
-          <select
+          <NativeSelect
+            id={`${controlsId}-connections`}
             aria-label="Connection access"
             value={canvas.connectionsAudience ?? "editors"}
             disabled={update.isPending || canvas.status === "disabled"}
-            className="max-w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg"
             onChange={(event) =>
               update.mutate(
                 { connectionsAudience: event.target.value as "editors" | "viewers" },
@@ -245,7 +253,7 @@ function CanvasCapabilities({ id }: { id: string }) {
           >
             <option value="editors">Owners and editors</option>
             <option value="viewers">All signed-in viewers</option>
-          </select>
+          </NativeSelect>
           A resource policy may narrow this further. Administrator grants and methods always apply.
         </label>
         {connections.isLoading ? <p className="text-sm text-muted">Loading connections…</p> : null}

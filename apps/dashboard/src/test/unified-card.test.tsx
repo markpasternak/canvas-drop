@@ -120,12 +120,11 @@ describe("CanvasGridCard — the unified cover-fills-card", () => {
     expect(screen.getAllByText("Budget chart")).toHaveLength(1);
   });
 
-  it("keeps the caption on a themed opaque surface and actions above the preview", () => {
-    const { container } = renderGridCard();
+  it("keeps the caption on a themed opaque surface", () => {
+    renderGridCard();
     const name = screen.getByRole("link", { name: "Open Budget chart" });
     expect(name.className).toContain("text-fg");
     expect(name.closest("li")?.className).toContain("bg-surface");
-    expect(container.querySelectorAll(".backdrop-blur-md")).toHaveLength(1);
   });
 
   it("keeps the actions subordinate — the name link is the a11y-primary control, not the actions", () => {

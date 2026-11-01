@@ -104,23 +104,22 @@ describe("landing page — rendered content", () => {
   it("shows the six primitives and authoring", () => {
     const html = renderLandingPage();
     for (const tag of ["kv", "files", "ai", "identity", "realtime", "connections", "authoring"]) {
-      expect(html).toContain(`>${tag}</span>`);
+      expect(html).toContain(`class="prim p-${tag}"`);
     }
-    expect(html).toContain("Six primitives + authoring");
-    expect(html).toContain("Six runtime primitives");
-    expect(html).toContain("controlled access to third-party APIs");
-    expect(html).toContain("admin-granted Connections");
+    expect(html).toContain("Six built-in capabilities");
+    expect(html).toContain("approved third-party APIs");
+    expect(html).toContain("Admin-granted Connections");
     expect(html).not.toContain("Five primitives + authoring");
   });
 
   it("keeps the editorial display voice and capability detail", () => {
     const html = renderLandingPage();
     expect(html).toContain("--font-serif:");
-    expect(html).toContain('<span class="accent">Share it out.</span>');
+    expect(html).toContain('<span class="accent">Share it as a canvas.</span>');
     for (const primitive of ["kv", "realtime", "connections", "authoring"]) {
       expect(html).toContain(`class="prim p-${primitive}"`);
     }
-    expect(html).toContain("signed-in viewers publish canvases as themselves");
+    expect(html).toContain("signed-in viewers create and manage canvases as themselves");
   });
 
   it("self-hosts the Newsreader serif — no external/CDN font request (no phone-home)", () => {
@@ -140,16 +139,35 @@ describe("landing page — rendered content", () => {
   it("names walkthrough topics and points self-hosting at installation", () => {
     const html = renderLandingPage();
     expect(html).toContain('aria-label="Choose walkthrough topic"');
-    expect(html).toMatch(/data-embla-dot[^>]*>Your dashboard<\/button>/);
-    expect(html).toMatch(/data-embla-dot[^>]*>In-browser editor<\/button>/);
+    expect(html).toContain('<option value="0">Your workspace</option>');
+    expect(html).toContain('<option value="1">Edit &amp; publish</option>');
     expect(html).toContain('href="/docs/self-hosting/install">Self-host guide');
+  });
+
+  it("keeps all tour content usable without JavaScript and promotes only the first image", () => {
+    const html = renderLandingPage();
+    const tour = html.slice(
+      html.indexOf('<div class="carousel"'),
+      html.indexOf('id="how-it-works"'),
+    );
+    expect(tour.match(/aria-roledescription="slide"/g)).toHaveLength(11);
+    expect(tour.match(/View full-size screenshot/g)).toHaveLength(11);
+    expect(tour).toContain("data-embla-controls hidden");
+    expect(tour).not.toContain('aria-hidden="true" role="group"');
+    expect(tour).not.toContain(" inert");
+    expect(tour.match(/loading="eager"/g)).toHaveLength(1);
+    expect(tour.match(/loading="lazy"/g)).toHaveLength(10);
+    expect(tour).toContain('fetchpriority="high"');
+    expect(tour).toContain('tabindex="0" role="region" aria-label="Product screens"');
+    expect(tour).toContain('aria-describedby="tour-instructions"');
+    expect(tour.indexOf("data-embla-controls")).toBeLessThan(tour.indexOf("data-embla-viewport"));
   });
 
   it("retains the multi-view walkthrough and gallery without gated marketing links", () => {
     const html = renderLandingPage();
     expect(html).toContain('aria-label="Product walkthrough"');
     expect(html).toContain("data-embla");
-    expect(html).toContain('src="/docs/assets/landing-carousel.js"');
+    expect(html).toMatch(/src="\/docs\/assets\/landing-carousel\.js\?v=[a-f0-9]{8}"/);
     for (const view of [
       "landing-gallery",
       "landing-dashboard",
@@ -161,16 +179,16 @@ describe("landing page — rendered content", () => {
     expect(html).not.toContain('href="/gallery"');
     expect(html).not.toContain("data-canvas-demo");
     expect(html).not.toContain("Dashboards, calculators, roadmaps, and the next useful idea.");
-    expect(html).toContain("From an artifact to a tool your team can use.");
-    expect(html).toContain("Made in a chat, a cloud workspace, or on your laptop.");
-    expect(html).toContain("Built for teams");
+    expect(html).toContain("Make it with AI.");
+    expect(html).toContain("Each canvas is a live web page or app");
+    expect(html).toContain("named viewers and editors");
     expect(html).toContain("Restricted by default");
   });
 
   it("shows the sharing-ladder section with every rung and the auth-delegated-invite story (plan 003)", () => {
     const html = renderLandingPage();
     // The ladder heading + each rung in product order.
-    expect(html).toContain("An access ladder that fits how people actually share.");
+    expect(html).toContain("Start with the people and teams who need your canvas.");
     for (const rung of ["People &amp; teams", "Restricted", "Whole org", "Public link"]) {
       expect(html).toContain(`class="r-name">${rung}`);
     }
@@ -185,9 +203,9 @@ describe("landing page — rendered content", () => {
     // The people-and-teams entry is the accented (feature) one.
     expect(html).toContain('class="rung feature"');
     // The headline differentiator: auth-delegated invites (no app-owned credentials).
-    expect(html).toContain("no app-managed passwords, no magic-link accounts");
+    expect(html).toContain("no separate password to manage");
     // The list always applies; General access only widens.
-    expect(html).toContain("The people and teams you name always get in");
+    expect(html).toContain("The people and teams you add keep their access");
     // The Teams capability also appears in the "Built for teams" grid + the tour.
     expect(html).toContain("Teams &amp; invites");
   });
@@ -220,13 +238,13 @@ describe("landingGate — front-door routing", () => {
     const res = await app(oidc).request("/", { headers: HTML });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
-    expect(await res.text()).toContain("Share it out.");
+    expect(await res.text()).toContain("Share it as a canvas.");
   });
 
   it("renders the landing for the BASE host root (apex front door)", async () => {
     const res = await app(oidc).request("/", { headers: { ...HTML, host: "canvas-drop.com" } });
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("Share it out.");
+    expect(await res.text()).toContain("Share it as a canvas.");
   });
 
   it("falls through on a canvas SUBDOMAIN root so the gateway can redirect to login with a returnTo", async () => {

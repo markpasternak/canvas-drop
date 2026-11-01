@@ -10,7 +10,8 @@ import {
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CommandPalette, fuzzyMatch } from "../components/CommandPalette.js";
+import { CommandPalette, fuzzyMatch, openCommandPalette } from "../components/CommandPalette.js";
+import { Dialog } from "../components/Dialog.js";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 
@@ -100,11 +101,19 @@ function stub(
  * dashboard route tree (no lazy chunks, no AppLayout), so navigation resolves
  * deterministically and there's no cross-test accumulation.
  */
-function renderPalette() {
+function renderPalette(protectedDialog = false) {
   const rootRoute = createRootRoute({
     component: () => (
       <>
+        <button type="button" onClick={openCommandPalette}>
+          Search workspace
+        </button>
         <CommandPalette />
+        {protectedDialog && (
+          <Dialog open onClose={() => undefined} dismissable={false} title="Saving a copy">
+            <p>Please wait for the copy to finish.</p>
+          </Dialog>
+        )}
         <Outlet />
       </>
     ),
@@ -159,6 +168,37 @@ describe("fuzzyMatch", () => {
 });
 
 describe("CommandPalette", () => {
+  it("locks scrolling, traps keyboard focus and restores its opener", async () => {
+    stub();
+    renderPalette();
+    const opener = await screen.findByRole("button", { name: "Search workspace" });
+    document.body.style.overflow = "auto";
+    await userEvent.click(opener);
+    const input = await screen.findByRole("combobox");
+    expect(input).toHaveFocus();
+    expect(document.body.style.overflow).toBe("hidden");
+    await userEvent.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "Close command search" })).toHaveFocus();
+    await userEvent.tab();
+    expect(input).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
+    expect(opener).toHaveFocus();
+    expect(document.body.style.overflow).toBe("auto");
+    document.body.style.overflow = "";
+  });
+
+  it("does not open command navigation over a protected modal", async () => {
+    stub();
+    renderPalette(true);
+    const dialog = await screen.findByRole("dialog", { name: "Saving a copy" });
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+    expect(screen.queryByRole("combobox")).toBeNull();
+    openCommandPalette();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    await userEvent.keyboard("{Escape}");
+    expect(dialog).toBeInTheDocument();
+  });
   it("⌘K opens the palette; Escape closes it", async () => {
     stub();
     renderPalette();

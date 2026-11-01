@@ -668,6 +668,11 @@ function EditorWorkspace({ id }: { id: string }) {
     dirty: localDirty !== "clean" || save.isPending,
     saveBeforeLeave: flush,
   });
+  useEffect(() => {
+    // Recovery must be visible above the preview, and cancelling the pending
+    // navigation should return to the editable workspace rather than reopen it.
+    if (blocker.status === "blocked") setPreviewFullscreen(false);
+  }, [blocker.status]);
   function discardBuffer() {
     if (timerRef.current) clearTimeout(timerRef.current);
     pageTooLargeRef.current = false;
@@ -1286,7 +1291,7 @@ function EditorWorkspace({ id }: { id: string }) {
       <EditorStatusBar path={selected} fileCount={draft.files.length} />
 
       {/* Full-screen preview overlay */}
-      {previewFullscreen && (
+      {previewFullscreen && blocker.status !== "blocked" && (
         <DraftPreview
           canvasId={id}
           refreshKey={refreshKey}

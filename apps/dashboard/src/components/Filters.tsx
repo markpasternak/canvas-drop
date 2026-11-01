@@ -2,6 +2,7 @@ import { CaretDown, Check } from "@phosphor-icons/react";
 import type { ButtonHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "../lib/cn.js";
+import { selectControl, selectSizes } from "../lib/input-styles.js";
 
 /** Shared list-filter primitives (plan 004), reused by the gallery and the
  *  Your-canvases list so both surfaces filter with one visual vocabulary. */
@@ -116,7 +117,7 @@ export function FilterSelect({
   }
 
   return (
-    <div ref={rootRef} className="relative inline-flex">
+    <div ref={rootRef} className="relative inline-flex min-w-0">
       <span id={labelId} className="sr-only">
         {label}
       </span>
@@ -134,9 +135,9 @@ export function FilterSelect({
         onClick={() => setOpen((current) => !current)}
         onKeyDown={onTriggerKeyDown}
         className={cn(
-          "inline-flex h-9 min-w-36 items-center justify-between gap-3 rounded-lg border border-border bg-surface pr-2 pl-3 text-sm text-fg",
-          "transition-colors hover:bg-surface-hover focus:border-border-strong focus:outline-none",
-          "disabled:pointer-events-none disabled:opacity-50",
+          selectControl,
+          selectSizes.md,
+          "inline-flex min-w-36 items-center justify-between gap-3 px-3",
           className,
         )}
         {...rest}
@@ -171,7 +172,7 @@ export function FilterSelect({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => choose(o.value)}
                 className={cn(
-                  "flex h-8 w-full min-w-40 items-center gap-2 rounded-md px-2 text-left font-medium whitespace-nowrap transition-colors",
+                  "cd-touch-target flex h-8 w-full min-w-40 items-center gap-2 rounded-md px-2 text-left font-medium whitespace-nowrap transition-colors",
                   active ? "bg-surface-hover text-fg" : "text-muted",
                   selectedOption && "text-accent",
                 )}

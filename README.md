@@ -49,10 +49,10 @@ Open **[localhost:5173](http://localhost:5173)**. You're signed in as a local de
 
 To publish your first canvas:
 
-1. Select **Create canvas** and give it a title.
-2. Choose **Paste HTML**, or upload a folder or ZIP containing `index.html` and its assets.
-3. Check who can open it, then select **Create and publish**.
-4. Open the published canvas. Its address stays the same when you upload another version or publish edits.
+1. Select **Create canvas**, then choose **Paste HTML** or **Upload files** for a folder or ZIP containing `index.html` and its assets.
+2. Review the content, set the title, workspace and audience, then select **Create draft**.
+3. Check the saved draft. Choose **Continue editing** to work on it, or **Review and publish**, then **Publish canvas** to make it live.
+4. Open the published canvas and check its sharing settings. Its address stays the same when you upload another version or publish edits.
 
 For a ready-made example, upload the files in [`examples/hello-static`](examples/hello-static). The [quickstart](https://canvas-drop.com/docs/quickstart) walks through editing, sharing, and version recovery. On your own local instance, the docs are also available at **[localhost:3000/docs](http://localhost:3000/docs)**.
 

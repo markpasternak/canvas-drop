@@ -368,11 +368,11 @@ export function ListSkeleton() {
   );
 }
 
-/** Grid card — the cover-fills-card presentation behind the list/grid toggle, built
+/** Grid card — the preview-and-caption presentation behind the list/grid toggle, built
  *  on the shared {@link CanvasGridCard} so the owner grid and the public gallery read
- *  the same. Same data + same `actions` slot as {@link CanvasRow}; the cover fills the
- *  whole tile and the name/status/tags/description overlay it on a persistent scrim,
- *  with the actions in a raised top-right cluster. The ONLY owner-vs-gallery
+ *  the same. Same data + same `actions` slot as {@link CanvasRow}; the preview stays
+ *  clear and the caption groups identity, status and always-visible actions.
+ *  The ONLY owner-vs-gallery
  *  difference is which slots get filled (here: lifecycle actions + bulk-select). */
 export function CanvasCard({
   canvas,

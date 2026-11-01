@@ -183,6 +183,28 @@ describe("Overview details recovery", () => {
     ).toEqual([{ tags: ["alpha", "beta"] }, { tags: ["alpha", "beta"] }]);
   });
 
+  it("saves every pasted tag once in the details batch", async () => {
+    let saved = { ...CANVAS };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(saved),
+      "PATCH /api/canvases/c1/settings": () => {
+        saved = { ...CANVAS, tags: ["alpha", "beta", "gamma", "delta"] };
+        return json(saved);
+      },
+    });
+    const user = userEvent.setup();
+    renderOverview();
+    await user.click(await screen.findByText("Edit details"));
+    await user.click(screen.getByLabelText("Tags"));
+    await user.paste("beta, ALPHA, gamma,delta");
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "Save details" }));
+    expect(await screen.findByText("Details saved")).toBeInTheDocument();
+    expect(
+      calls.filter((call) => call.method === "PATCH").map((call) => JSON.parse(call.body ?? "{}")),
+    ).toEqual([{ tags: ["alpha", "beta", "gamma", "delta"] }]);
+  });
+
   it("keeps failed edits mounted when navigation is blocked, then discards explicitly", async () => {
     mockFetch({
       "PATCH /api/canvases/c1/settings": () =>

@@ -6,7 +6,6 @@ import {
   type Team,
   type TransferCandidate,
 } from "../lib/api.js";
-import { inputControl } from "../lib/input-styles.js";
 import { addPersonFeedback } from "../lib/invite-feedback.js";
 import { usePeopleSearch } from "../lib/queries.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
@@ -14,6 +13,7 @@ import { ApiKeyReveal } from "./ApiKeyReveal.js";
 import { Badge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { NativeSelect } from "./NativeSelect.js";
 import { PeopleEmailCombobox } from "./PeopleEmailCombobox.js";
 import { ReadError } from "./ReadError.js";
 import { Skeleton } from "./Skeleton.js";
@@ -245,9 +245,10 @@ function CanvasPeopleAccessList({
   }
 
   const roleSelect = (e: AllowlistEntry) => (
-    <select
+    <NativeSelect
       aria-label={`Role for ${entryLabel(e)}`}
-      className={`${inputControl} h-8 w-auto min-w-24 py-0 text-xs`}
+      controlSize="sm"
+      wrapperClassName="min-w-28"
       value={e.role === "editor" ? "editor" : "viewer"}
       onChange={(event) => {
         const next = event.target.value as AccessRole;
@@ -256,7 +257,7 @@ function CanvasPeopleAccessList({
     >
       <option value="viewer">Viewer</option>
       <option value="editor">Editor</option>
-    </select>
+    </NativeSelect>
   );
 
   function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
@@ -344,17 +345,21 @@ function CanvasPeopleAccessList({
               inputClassName="h-10"
             />
           </div>
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-fg">
+          <label
+            htmlFor={`${tabsId}-person-role`}
+            className="flex flex-col gap-1.5 text-sm font-medium text-fg"
+          >
             Role
-            <select
+            <NativeSelect
+              id={`${tabsId}-person-role`}
               aria-label="Role for the person to add"
-              className={`${inputControl} h-10 min-w-28 py-0`}
+              wrapperClassName="min-w-28"
               value={personRole}
               onChange={(event) => setPersonRole(event.target.value as AccessRole)}
             >
               <option value="viewer">Viewer</option>
               <option value="editor">Editor</option>
-            </select>
+            </NativeSelect>
           </label>
           <div className="flex flex-col gap-1.5">
             <span aria-hidden="true" className="invisible text-sm font-medium">
@@ -377,11 +382,14 @@ function CanvasPeopleAccessList({
           aria-labelledby={`${tabsId}-teams-tab`}
           className="flex flex-wrap items-start gap-2"
         >
-          <label className="flex min-w-[12rem] flex-1 flex-col gap-1.5 text-sm font-medium text-fg">
+          <label
+            htmlFor={`${tabsId}-team`}
+            className="flex min-w-[12rem] flex-1 flex-col gap-1.5 text-sm font-medium text-fg"
+          >
             Team
-            <select
+            <NativeSelect
+              id={`${tabsId}-team`}
               aria-label="Team to add"
-              className={`${inputControl} h-10 py-0`}
               value={teamId}
               onChange={(event) => setTeamId(event.target.value)}
             >
@@ -392,19 +400,23 @@ function CanvasPeopleAccessList({
                   {team.orgId === null ? " (personal)" : ""}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-fg">
+          <label
+            htmlFor={`${tabsId}-team-role`}
+            className="flex flex-col gap-1.5 text-sm font-medium text-fg"
+          >
             Role
-            <select
+            <NativeSelect
+              id={`${tabsId}-team-role`}
               aria-label="Role for the team to add"
-              className={`${inputControl} h-10 min-w-28 py-0`}
+              wrapperClassName="min-w-28"
               value={teamRole}
               onChange={(event) => setTeamRole(event.target.value as AccessRole)}
             >
               <option value="viewer">Viewer</option>
               <option value="editor">Editor</option>
-            </select>
+            </NativeSelect>
           </label>
           <div className="flex flex-col gap-1.5">
             <span aria-hidden="true" className="invisible text-sm font-medium">
@@ -428,10 +440,10 @@ function CanvasPeopleAccessList({
           {entries.map((e) => (
             <li
               key={e.id}
-              className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm"
+              className="grid grid-cols-1 items-start gap-2 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3"
             >
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="truncate text-fg">{entryLabel(e)}</span>
+              <span className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="break-all text-fg">{entryLabel(e)}</span>
                 {e.kind === "team" && (
                   <TeamScopeBadge
                     team={{
@@ -454,7 +466,7 @@ function CanvasPeopleAccessList({
                 )}
                 {e.kind === "guest" && <span className="text-xs text-muted">legacy guest</span>}
               </span>
-              <span className="flex shrink-0 items-center gap-1">
+              <span className="flex min-h-8 shrink-0 items-center justify-end gap-1">
                 {e.kind === "owner" ? (
                   <span className="text-xs font-medium text-fg">Owner</span>
                 ) : e.kind === "guest" ? (

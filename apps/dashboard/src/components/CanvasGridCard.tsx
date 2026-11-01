@@ -11,20 +11,13 @@ import { Tag } from "./Tag.js";
 
 const MAX_CARD_TAGS = 3;
 
-/** A local translucent surface for an overlay cluster (the top-right actions, the
- *  bulk-select pill). A frosted dark glass + hairline so the controls read on ANY
- *  cover — bright, dark, busy — without per-image analysis. */
-const overlaySurfaceClass =
-  "rounded-md border border-[var(--card-overlay-border)] bg-[var(--card-overlay-fill)] p-0.5 shadow-[var(--shadow-sm)] backdrop-blur-md backdrop-saturate-150";
-
 /** Re-export so a single import covers building the `coverType` prop. */
 export { coverType };
 
 /** The themed name link stretches its hit area across the caption. */
 export const cardNameLinkClass =
   "min-w-0 max-w-full truncate font-display text-[1.05rem] text-fg underline-offset-2 " +
-  "outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:underline " +
-  "";
+  "outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:underline";
 
 export interface CanvasGridCardProps {
   /** Stable seed for the generative fallback cover (the canvas id). */
@@ -36,7 +29,7 @@ export interface CanvasGridCardProps {
   /** Publication lifecycle (drives the cover content axis). */
   status?: PublicationState;
   /** Display title. The cover renders pure-background (no baked text), so the title is
-   *  owned by `nameLink` in the overlay; this is kept for call-site clarity + as the
+   *  owned by `nameLink` in the caption; this is kept for call-site clarity + as the
    *  source the caller's `nameLink`/aria-label is built from (never printed twice). */
   title: string;
   /** The single accessible affordance: a router <Link> or external <a> the caller
@@ -55,7 +48,7 @@ export interface CanvasGridCardProps {
   description?: string | null;
   /** Top-left overlay (owner: bulk-select checkbox). Raised above the card click. */
   topLeft?: ReactNode;
-  /** Top-right overlay: the overflow menu + primary action(s). Raised + stop-prop. */
+  /** Caption actions, always visible and outside the preview. Raised + stop-prop. */
   actions?: ReactNode;
   /** Bottom strip extra (gallery: owner avatar/name). Raised above the card click. */
   footer?: ReactNode;
@@ -117,38 +110,24 @@ export function CanvasGridCard({
         onActivate();
       }}
     >
-      <div className="relative aspect-[16/10] overflow-hidden bg-surface-sunken">
+      <div className="relative aspect-[3/2] overflow-hidden bg-surface-sunken">
         <div className="absolute inset-0">
           <CanvasCover seed={seed} previewUrl={previewUrl} type={type} status={status} plain />
         </div>
 
-        {/* Top row: optional left control (bulk-select) + the actions/overflow, each on a
-          local frosted pill so they read on any cover. The actions stay tappable (z-10)
-          and stop propagation so they never navigate. On hover/focus they fade fully in;
-          on touch (no hover) they stay visible. They are subordinate to the name link. */}
-        <div className="relative z-10 flex items-start justify-between gap-2 p-2.5">
-          {topLeft ? (
-            <CardControls className={overlaySurfaceClass}>{topLeft}</CardControls>
-          ) : (
-            <span />
-          )}
-          {actions ? (
-            <CardControls
-              className={cn(
-                overlaySurfaceClass,
-                "opacity-100 transition-opacity duration-100 [transition-timing-function:var(--ease-out)] sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
-              )}
-            >
-              {actions}
+        {topLeft && (
+          <div className="absolute left-2 top-2">
+            <CardControls className="rounded-md border border-border bg-surface p-2">
+              {topLeft}
             </CardControls>
-          ) : null}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* An opaque themed caption keeps identity legible regardless of the preview. */}
-      <div className="relative mt-auto p-3.5">
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="flex min-w-0 flex-col items-start gap-2">
+      <div className="relative flex flex-1 flex-col gap-2 p-3">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             {nameLink}
             {badges && (
               <span className="relative z-10 flex max-w-full shrink-0 flex-wrap items-center gap-1">
@@ -157,10 +136,24 @@ export function CanvasGridCard({
             )}
           </div>
 
+          {desc && (
+            <p
+              className={cn("text-sm text-muted", footer ? "line-clamp-1" : "line-clamp-2")}
+              title={desc}
+            >
+              {desc}
+            </p>
+          )}
+
           {shownTags.length > 0 && (
             <CardControls className="flex-wrap gap-1">
               {shownTags.map((tag) => (
-                <Tag key={tag} size="xs" onClick={onTagClick ? () => onTagClick(tag) : undefined}>
+                <Tag
+                  key={tag}
+                  size="xs"
+                  className="max-w-full break-all"
+                  onClick={onTagClick ? () => onTagClick(tag) : undefined}
+                >
                   {tag}
                 </Tag>
               ))}
@@ -171,20 +164,13 @@ export function CanvasGridCard({
               )}
             </CardControls>
           )}
-
-          {desc && (
-            // Truncated to ~2 lines with an ellipsis; the full text is exposed via the
-            // native title tooltip so an overflowing description is still readable.
-            <p
-              className={cn("text-sm text-muted", footer ? "line-clamp-1" : "line-clamp-2")}
-              title={desc}
-            >
-              {desc}
-            </p>
-          )}
-
-          {footer && <CardControls className="pt-0.5">{footer}</CardControls>}
         </div>
+        {(footer || actions) && (
+          <div className="mt-auto flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 pt-1">
+            {footer && <CardControls className="min-w-0 max-w-full flex-1">{footer}</CardControls>}
+            {actions && <CardControls className="ml-auto flex-wrap">{actions}</CardControls>}
+          </div>
+        )}
       </div>
     </li>
   );

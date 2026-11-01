@@ -205,7 +205,7 @@ describe("buildApp", () => {
     const res = await app(client).request("/welcome");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
-    expect(await res.text()).toContain("Share it out.");
+    expect(await res.text()).toContain('aria-label="Introducing canvas-drop"');
   });
 
   it("GET /healthz returns 503 when the DB ping fails", async () => {

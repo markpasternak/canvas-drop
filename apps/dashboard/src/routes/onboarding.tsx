@@ -1,8 +1,7 @@
 import { ArrowRight, ArrowSquareOut, Code, FileHtml, FolderOpen } from "@phosphor-icons/react";
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { CopyButton } from "../components/CopyButton.js";
-import { PageHeader } from "../components/Surface.js";
 
 const AGENT_SNIPPET = `# Deploy to canvas-drop
 # 1. Create a canvas in the dashboard ("Use the API") to get its ID + secret key.
@@ -60,14 +59,19 @@ function PathCard({
  * /onboarding directly. */
 export default function Onboarding() {
   const navigate = useNavigate();
+  const standalone = useLocation({ select: (location) => location.pathname === "/onboarding" });
+  const Heading = standalone ? "h1" : "h2";
+  const SectionHeading = standalone ? "h2" : "h3";
   const go = (method: string) => navigate({ to: "/new", search: { method } });
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <PageHeader
-        title="Ship your first canvas"
-        description={
-          <>
+      <header className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <Heading className="truncate font-display text-h1 leading-tight tracking-[var(--display-tracking)] text-fg">
+            Ship your first canvas
+          </Heading>
+          <p className="max-w-2xl text-sm text-muted">
             A canvas is a small web artifact on its own URL. Start from a snippet, local files, or
             your agent &mdash; or read the{" "}
             <a
@@ -78,9 +82,9 @@ export default function Onboarding() {
               <ArrowSquareOut size={13} weight="bold" aria-hidden />
             </a>
             .
-          </>
-        }
-      />
+          </p>
+        </div>
+      </header>
 
       <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
         <section
@@ -88,9 +92,9 @@ export default function Onboarding() {
           aria-labelledby="connect-agent-title"
         >
           <Code size={28} className="text-accent" aria-hidden />
-          <h2 id="connect-agent-title" className="font-display text-h2 text-fg">
+          <SectionHeading id="connect-agent-title" className="font-display text-h2 text-fg">
             Connect your agent
-          </h2>
+          </SectionHeading>
           <p className="max-w-prose text-sm leading-relaxed text-muted">
             Connect a compatible AI agent once through MCP. It can create canvases, work on drafts
             and publish with your account’s permissions.
@@ -109,7 +113,9 @@ export default function Onboarding() {
           className="space-y-3 rounded-xl border border-border bg-surface p-5"
           aria-label="Creation paths"
         >
-          <h2 className="font-display text-h2 text-fg">Already have something?</h2>
+          <SectionHeading className="font-display text-h2 text-fg">
+            Already have something?
+          </SectionHeading>
           <PathCard
             icon={<FileHtml size={18} aria-hidden />}
             title="Paste HTML"
