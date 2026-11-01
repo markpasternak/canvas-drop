@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 env:
-  PNPM_VERSION: 11.28.9
-  NODE_VERSION: 24
+  PNPM_VERSION: 12.16.1
+  NODE_VERSION: 26.13.0
 
 jobs:
   lint:
@@ -81,7 +81,7 @@ jobs:
       - run: pnpm test:dashboard
 
   # Postgres leg: same suite, plus real-infrastructure smoke tests against a live
-  # postgres:16 (node-postgres driver) and MinIO (real S3Driver) — coverage the
+  # postgres:16 (node-postgres driver) and SeaweedFS (real S3Driver) — coverage the
   # in-process drivers can't give.
   test-postgres:
     name: Test (postgres + real infra)
@@ -161,6 +161,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+  container-smoke:
+    name: Container upgrade smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Builds the normal non-root image, seeds a real DB with the prior Node24 /
+      # SQLite12 driver, then boots Node26 / SQLite13 and drills the compiled ops CLI.
+      # The script owns unique container/image/volume names and removes them on exit.
+      - run: node scripts/container-smoke.mjs
+
   dependency-audit:
     name: Dependency audit (advisory)
     runs-on: ubuntu-latest
@@ -175,6 +189,4 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Advisory only — surfaces findings in the log without blocking the run.
-      # (Current finding: esbuild, a dev-only transitive of drizzle-kit; the
-      # advisory is Deno-specific and does not affect our Node usage.)
       - run: pnpm audit --audit-level high || true

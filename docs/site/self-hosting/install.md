@@ -20,7 +20,7 @@ pnpm install && cp .env.example .env && pnpm dev
 | Path | Needs | What you get |
 |---|---|---|
 | [Docker Compose](#docker-compose) | Docker with Compose v2 (`docker compose`, not the legacy `docker-compose`) | An identity-aware proxy in front, canvas-drop in real `proxy` auth mode, Postgres, and a bundled demo identity provider on `http://localhost:8080`. Evaluate here; graduating the same files to a real IdP is configuration. |
-| [From source](#run-from-source) | Node 24 or newer, pnpm 11 | `pnpm dev` on `http://localhost:5173` with SQLite, local storage, and `dev` auth that signs every request in. Develop canvas-drop itself, or try Bearer deploys and MCP with no proxy in the way. |
+| [From source](#run-from-source) | Node 26.13 or newer in the 26.x LTS line, pnpm 12 | `pnpm dev` on `http://localhost:5173` with SQLite, local storage, and `dev` auth that signs every request in. Develop canvas-drop itself, or try Bearer deploys and MCP with no proxy in the way. |
 
 Both run the same code. Database, storage, URL mode, and auth are drivers behind
 one switch variable each; swapping one later is a config change, never a code
@@ -256,9 +256,7 @@ in the repo; the [Deploy](/docs/self-hosting/deploy) page summarises it under
 
 ## Run from source
 
-For developing canvas-drop, or for a zero-config local instance. Requires Node 24
-or newer and pnpm 11 (`package.json` pins `pnpm@11.28.9`; `corepack enable` selects
-it).
+For developing canvas-drop, or for a zero-config local instance. Requires Node 26.13 or newer in the 26.x LTS line and pnpm 12 (`package.json` pins `pnpm@12.16.1`). Node 26 does not bundle Corepack; install the pinned package manager with `npm install --global pnpm@12.16.1`.
 
 ```bash
 git clone https://github.com/markpasternak/canvas-drop.git
@@ -270,9 +268,7 @@ curl -fsS http://localhost:3000/healthz
 # 200 {"status":"ok","db":"ok","version":"..."}
 ```
 
-`pnpm install` builds `better-sqlite3` natively; the build is pre-approved in
-`pnpm-workspace.yaml`, so there is no prompt. (The Docker builder installs
-`python3 make g++` for the same reason.)
+`better-sqlite3` 13 ships N-API binaries for the supported macOS, Linux and Windows x64/ARM64 platforms; a compiler is not needed for those installs. The workspace keeps explicit native build approvals for packages that need an install script. Unsupported platforms or custom SQLite builds need a separate native build setup.
 
 | URL | What it serves |
 |---|---|

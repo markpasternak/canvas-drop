@@ -35,7 +35,7 @@ For apps that need their own server code, build jobs, or database schema, use an
 
 ## Try it locally
 
-You need **Node 24 or newer** and **pnpm 11**.
+You need **Node 26.13 or newer in the 26.x LTS line** and **pnpm 12**.
 
 ```bash
 git clone https://github.com/markpasternak/canvas-drop.git

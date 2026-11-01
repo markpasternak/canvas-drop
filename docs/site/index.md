@@ -22,7 +22,7 @@ SDK, and that backend stays off until the owner or an editor turns it on.
 ## Try it
 
 A signed-in local instance with no external services (`path` URLs, SQLite, local
-disk, `dev` auth). You need Node 24 or newer and pnpm:
+disk, `dev` auth). You need Node 26.13 or newer in the 26.x LTS line and pnpm:
 
 ```sh
 git clone https://github.com/markpasternak/canvas-drop.git

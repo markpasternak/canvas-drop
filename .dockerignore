@@ -25,11 +25,16 @@ data
 .agents
 .worktrees
 
-# Deployment infra (gitignored anyway), docs, and examples — none are needed at
-# build or runtime (the server serves a pre-generated docs module), so keep them
-# out of the build context and the image.
+# Deployment infra, source documentation, and standalone examples are not needed.
+# The compiled docs HTML is generated, but its renderer, tour images, carousel,
+# and social card are read from disk at runtime. Include only those public assets.
 deploy
-docs
+docs/*
+!docs/site
+docs/site/*
+!docs/site/assets
+!docs/site/assets/**
+!docs/site/og.png
 examples
 
 # Tests / coverage / misc

@@ -36,5 +36,5 @@ Redistribution boundary
 This NOTICE covers the npm dependencies bundled into the canvas-drop application
 image. It does NOT cover the off-the-shelf container images that docker-compose
 references and pulls at runtime — Dex, oauth2-proxy, Caddy, PostgreSQL, MinIO,
-and the node:24-slim base image. Those are pulled from their own registries
+and the node:26.13.0-slim base image. Those are pulled from their own registries
 under their own licenses and are not redistributed by this project.

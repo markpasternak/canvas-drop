@@ -14,9 +14,9 @@
     "url": "https://github.com/markpasternak/canvas-drop/issues"
   },
   "type": "module",
-  "packageManager": "pnpm@11.28.9",
+  "packageManager": "pnpm@12.16.1",
   "engines": {
-    "node": ">=24"
+    "node": "^26.13.0"
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
@@ -68,9 +68,10 @@
     "sanitize-html": "2.18.1",
     "sharp": "^0.35.5",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.12"
+    "vitest": "^5.0.5",
+    "vite": "^8.3.5"
   },
   "dependencies": {
-    "mermaid": "11.17.2"
+    "mermaid": "12.2.0"
   }
 }

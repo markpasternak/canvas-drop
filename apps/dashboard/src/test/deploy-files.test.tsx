@@ -56,6 +56,19 @@ describe("canvasRelativePaths", () => {
     expect(canvasRelativePaths(files)).toEqual(["css/a.css", "js/b.js"]);
   });
 
+  it("normalizes file-selector's dot prefix before deciding whether the batch has a wrapper", () => {
+    const files = [
+      makeFile("index.html", { path: "./index.html" }),
+      makeFile("style.css", { path: "/assets/style.css" }),
+      makeFile("index.html", { path: "/examples/index.html" }),
+    ];
+    expect(canvasRelativePaths(files)).toEqual([
+      "index.html",
+      "assets/style.css",
+      "examples/index.html",
+    ]);
+  });
+
   it("strips leading slashes and falls back to name when no path metadata is present", () => {
     expect(canvasRelativePaths([makeFile("bare.css")])).toEqual(["bare.css"]);
   });

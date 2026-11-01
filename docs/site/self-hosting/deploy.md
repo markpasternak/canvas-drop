@@ -185,8 +185,7 @@ mode those settings never assert identity. See [Behind a CDN](/docs/self-hosting
 ## Run with Docker
 
 There is no published image; build it from the repo. The `Dockerfile` is multi-stage on
-`node:24-slim`: a `builder` stage compiles the workspace (it needs `python3`, `make`, and
-`g++` for the SQLite driver), and a `runtime` stage carries no compilers and runs as a
+`node:26.13.0-slim`: a `builder` stage compiles the workspace and installs the pinned pnpm. SQLite and Argon2 supply native binaries for the supported platforms. A `runtime` stage runs as a
 dedicated non-root `canvasdrop` user (uid/gid 1001).
 
 ```bash
@@ -272,8 +271,7 @@ Moving off the bundled IdP is configuration, not code, but each step matters:
 
 ## Running the bare process
 
-To run without Docker, build the workspace and start the compiled server. Node 24 or
-newer and pnpm 11 (`corepack enable` picks up the pinned version) are required.
+To run without Docker, build the workspace and start the compiled server. Node 26.13 or newer in the 26.x LTS line and pnpm 12 are required. Install the pinned package manager with `npm install --global pnpm@12.16.1`; Node 26 does not bundle Corepack.
 
 ```bash
 pnpm install --frozen-lockfile
