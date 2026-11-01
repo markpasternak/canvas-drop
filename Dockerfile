@@ -6,20 +6,16 @@
 # they are separate off-the-shelf containers wired by docker-compose.yml.
 
 # ── builder ───────────────────────────────────────────────────────────────────
-FROM node:24-slim AS builder
+FROM node:26.13.0-slim AS builder
 WORKDIR /app
 
-# better-sqlite3 compiles from source via node-gyp (it is under `allowBuilds` in
-# pnpm-workspace.yaml) and node:24-slim ships no compiler. @node-rs/argon2 ships
-# prebuilt napi binaries and needs none. The runtime stage needs neither.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 make g++ \
- && rm -rf /var/lib/apt/lists/*
-
-# pnpm via corepack, pinned to the repo's packageManager.
+# better-sqlite3 13 and @node-rs/argon2 ship N-API prebuilts for the supported
+# Linux x64/ARM64 images. No compiler is needed for the normal image install.
+# Node 26 no longer bundles Corepack; install the repository's exact pnpm version
+# from npm rather than depending on an undeclared global Corepack installation.
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@11.28.9 --activate
+RUN npm install --global --no-audit --no-fund pnpm@12.16.1
 
 # Whole workspace (the .dockerignore keeps node_modules/dist/.env/.git out), then
 # install + build in topo order (shared → sdk → dashboard → server).
@@ -28,7 +24,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm build
 
 # ── runtime ───────────────────────────────────────────────────────────────────
-FROM node:24-slim AS runtime
+FROM node:26.13.0-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV CANVAS_DROP_PORT=3000
