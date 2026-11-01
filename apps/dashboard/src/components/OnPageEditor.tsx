@@ -7,8 +7,9 @@ export interface OnPageEditorProps {
   /** The single HTML file the on-page edits are saved to. */
   htmlPath: string;
   saving: boolean;
-  /** Called (debounced by the in-page shim) with the cleaned, edited HTML. */
+  /** Called immediately with cleaned HTML; the parent owns autosave debounce/recovery. */
   onSave: (html: string) => void;
+  onTooLarge?: () => void;
 }
 
 /**
@@ -18,10 +19,18 @@ export interface OnPageEditorProps {
  * to the HTML file. `sandbox="allow-scripts"` (no `allow-same-origin`) keeps the page
  * in an opaque origin. It can postMessage to us but can't touch the dashboard session.
  */
-export function OnPageEditor({ canvasId, htmlPath, saving, onSave }: OnPageEditorProps) {
+export function OnPageEditor({
+  canvasId,
+  htmlPath,
+  saving,
+  onSave,
+  onTooLarge,
+}: OnPageEditorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const tooLargeRef = useRef(onTooLarge);
+  tooLargeRef.current = onTooLarge;
   // Fixed src (no refresh key) so saving never reloads the page mid-edit.
   const src = `/api/canvases/${canvasId}/preview/?edit=1`;
 
@@ -30,7 +39,12 @@ export function OnPageEditor({ canvasId, htmlPath, saving, onSave }: OnPageEdito
       // Validate by source window, not origin. The sandboxed iframe is opaque ("null").
       if (e.source !== iframeRef.current?.contentWindow) return;
       const data = e.data as { type?: string; html?: string };
-      if (data?.type === "cd-onpage" && typeof data.html === "string") {
+      if (data?.type === "cd-onpage-too-large") tooLargeRef.current?.();
+      if (
+        data?.type === "cd-onpage" &&
+        typeof data.html === "string" &&
+        data.html.length <= 2 * 1024 * 1024
+      ) {
         onSaveRef.current(data.html);
       }
     }
@@ -49,9 +63,15 @@ export function OnPageEditor({ canvasId, htmlPath, saving, onSave }: OnPageEdito
         title="Page text"
         description={<span className="font-mono">{htmlPath}</span>}
         actions={
-          <span className="text-xs text-subtle">{saving ? "Saving..." : "Click text to edit"}</span>
+          <span role="status" className="text-xs text-subtle">
+            {saving ? "Saving..." : "Click text to edit"}
+          </span>
         }
       />
+      <p className="border-b border-border px-3 py-2 text-xs text-muted">
+        Edit visible text and formatting. Images and layout stay in Code; select Code above to
+        return.
+      </p>
       <iframe
         key={htmlPath}
         ref={iframeRef}

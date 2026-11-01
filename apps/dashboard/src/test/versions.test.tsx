@@ -356,3 +356,49 @@ describe("Version cleanup selection", () => {
     expect(calls.some((c) => c.url.endsWith("/prune"))).toBe(false);
   });
 });
+
+describe("read-only historical inspection", () => {
+  it("compares protected version files without restoring or changing either pointer", async () => {
+    const { zipSync, strToU8 } = await import("fflate");
+    const archive = (html: string) =>
+      new Response(zipSync({ "index.html": strToU8(html) }), {
+        headers: { "content-type": "application/zip" },
+      });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/versions": () =>
+        json({ versions: [{ ...VERSION, number: 2, current: false }, VERSION] }),
+      "GET /api/canvases/c1/versions/2/download": () => archive("<h1>Previous</h1>"),
+      "GET /api/canvases/c1/versions/1/download": () => archive("<h1>Current</h1>"),
+    });
+    renderVersions();
+    const row = (await screen.findByText("v2")).closest("li") as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Inspect" }));
+    expect(
+      await screen.findByText(/working draft and current version stay unchanged/),
+    ).toBeVisible();
+    await waitFor(() => expect(screen.getByTestId("code-editor")).toHaveValue("<h1>Previous</h1>"));
+    await userEvent.click(screen.getByRole("button", { name: "Compare with current v1" }));
+    expect(await screen.findByText(/1 changed/)).toBeVisible();
+    expect(screen.getAllByTestId("code-editor")).toHaveLength(2);
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+    expect(calls.some((call) => /\/draft|\/restore|\/rollback/.test(call.url))).toBe(false);
+  });
+
+  it("does not expose source after a denied export and offers Retry", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/versions": () => json({ versions: [VERSION] }),
+      "GET /api/canvases/c1/versions/1/download": () => json({ error: "NOT_FOUND" }, 404),
+    });
+    renderVersions();
+    await userEvent.click(await screen.findByRole("button", { name: "Inspect" }));
+    expect(await screen.findByText("Couldn't inspect this version")).toBeVisible();
+    expect(screen.queryByTestId("code-editor")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.url.endsWith("/download"))).toHaveLength(2),
+    );
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
+});

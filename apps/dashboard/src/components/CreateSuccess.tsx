@@ -32,7 +32,8 @@ export function CreateSuccess({
       )}
       <div className="space-y-4">
         <CodeBox value={result.url} copy copyLabel="Copy link" copyToast="Canvas link copied" />
-        <div className="flex flex-wrap gap-5 text-sm">
+        <div className="flex flex-wrap items-center gap-5 text-sm">
+          <Button onClick={onDone}>{result.shareFailed ? "Check sharing" : "Go to canvas"}</Button>
           <a
             href={result.url}
             target="_blank"
@@ -51,24 +52,20 @@ export function CreateSuccess({
           </a>
         </div>
       </div>
-      <div className="space-y-4 border-t border-border pt-6">
-        <p className="text-sm text-muted">
-          You only need a deploy key for API deployments. Save it now, or continue without it. You
-          can generate a replacement in Settings later.
-        </p>
-        <details className="space-y-4">
-          <summary className="cursor-pointer text-sm font-medium text-fg">
-            Save your deploy key (shown once)
-          </summary>
-          <CodeBox value={result.apiKey} copy copyLabel="Copy key" copyToast="Key copied" />
-          <Button onClick={onDone}>I’ve saved the key</Button>
-        </details>
-        <Button variant="secondary" onClick={onDone}>
-          {result.shareFailed
-            ? "Continue without saving · Open Share"
-            : "Continue without saving the key"}
-        </Button>
-      </div>
+      {result.apiKey && (
+        <div className="space-y-4 border-t border-border pt-6">
+          <p className="text-sm text-muted">
+            You only need a deploy key for API deployments. Save it now, or continue without it. You
+            can generate a replacement in Settings later.
+          </p>
+          <details className="space-y-4">
+            <summary className="cursor-pointer text-sm font-medium text-fg">
+              Save your deploy key (shown once)
+            </summary>
+            <CodeBox value={result.apiKey} copy copyLabel="Copy key" copyToast="Key copied" />
+          </details>
+        </div>
+      )}
     </div>
   );
 }

@@ -42,10 +42,13 @@ export function PublishReviewDialog({
   canvasId,
   onClose,
   onPublished,
+  plannedAudience,
 }: {
   canvasId: string;
   onClose: () => void;
-  onPublished?: () => void;
+  onPublished?: () => void | Promise<void>;
+  /** Creation-only: the selected audience will be applied after the first publish. */
+  plannedAudience?: string;
 }) {
   const query = useQuery({
     queryKey: ["publish-review", canvasId],
@@ -67,7 +70,15 @@ export function PublishReviewDialog({
   const [error, setError] = useState("");
   const review = query.isError ? undefined : query.data;
   const busy = checking || query.isFetching || publish.isPending;
-  const canPublish = !!review && review.canvas.status === "active" && review.draft.files.length > 0;
+  const creationChanged =
+    !!plannedAudience &&
+    !!review &&
+    (review.canvas.currentVersionId !== null || review.canvas.access !== "private");
+  const canPublish =
+    !!review &&
+    !creationChanged &&
+    review.canvas.status === "active" &&
+    review.draft.files.length > 0;
 
   async function confirmPublish() {
     if (!review || !canPublish || busy || submitting.current) return;
@@ -84,7 +95,7 @@ export function PublishReviewDialog({
       }
       const result = await publish.mutateAsync();
       toast(`Published version ${result.version}`);
-      onPublished?.();
+      await onPublished?.();
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.hint : "The server response did not arrive.");
@@ -181,13 +192,32 @@ export function PublishReviewDialog({
             </section>
             <section className="space-y-1.5" aria-label="Audience after publishing">
               <h3 className="text-xs font-semibold text-fg">Who can open after publishing</h3>
-              <CanvasAudience
-                canvas={review.canvas}
-                orgs={me?.orgs}
-                isGuest={me?.isGuest}
-                afterPublish
-              />
+              {plannedAudience ? (
+                <>
+                  <p className="text-sm font-medium text-fg">{plannedAudience}</p>
+                  <p className="text-xs leading-relaxed text-muted">
+                    Publication happens first with Restricted access, then your selected audience is
+                    applied. If sharing cannot be confirmed, check sharing before sending the link.
+                  </p>
+                </>
+              ) : (
+                <CanvasAudience
+                  canvas={review.canvas}
+                  orgs={me?.orgs}
+                  isGuest={me?.isGuest}
+                  afterPublish
+                />
+              )}
             </section>
+            {creationChanged && (
+              <p role="alert" className="text-sm text-warning">
+                This canvas was published or its access changed elsewhere.{" "}
+                <Link to="/canvases/$id/share" params={{ id: canvasId }} className="underline">
+                  Open sharing to review its current state
+                </Link>{" "}
+                before continuing.
+              </p>
+            )}
             {review.draft.files.length === 0 && (
               <p role="alert" className="text-sm text-warning">
                 This draft is empty. Add a file before publishing.

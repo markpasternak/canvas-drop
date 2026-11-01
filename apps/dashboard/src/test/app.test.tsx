@@ -105,7 +105,11 @@ describe("dashboard app", () => {
     expect((await screen.findAllByText("canvas-drop")).length).toBeGreaterThanOrEqual(1);
     // empty list → onboarding
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
-    expect(screen.getByText(/paste html/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Paste HTML/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect your agent" })).toHaveAttribute(
+      "href",
+      "/docs/agents/mcp",
+    );
   });
 
   it("exposes a skip-to-content link that targets the main landmark", async () => {

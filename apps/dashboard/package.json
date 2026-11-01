@@ -29,6 +29,7 @@
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-router": "^1.170.44",
     "downshift": "^9.4.0",
+    "fflate": "^0.8.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-dropzone": "^17.0.0"

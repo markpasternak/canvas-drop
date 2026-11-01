@@ -93,9 +93,9 @@ export function PublishBar({
   const StatusIcon = status.icon;
 
   return (
-    <div className="sticky top-18 z-20 -mx-2 rounded-xl border border-border bg-surface/95 px-3 py-2 shadow-[var(--shadow-panel)] backdrop-blur supports-[backdrop-filter]:bg-surface/85 md:mx-0 lg:top-4">
+    <div className="sticky top-18 z-20 -mx-2 rounded-xl border border-border bg-surface/95 px-3 py-2 shadow-[var(--shadow-panel)]  md:mx-0 lg:top-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           {stale && (
             <span
               className="inline-flex items-center gap-1.5 rounded-md border border-warning/25 bg-warning-subtle px-2 py-1 text-xs font-medium text-warning"
@@ -104,7 +104,12 @@ export function PublishBar({
               <WarningCircle size={15} weight="fill" aria-hidden />A newer version was published
             </span>
           )}
-          <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", status.tone)}>
+          <span
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className={cn("inline-flex items-center gap-1.5 text-xs font-medium", status.tone)}
+          >
             <StatusIcon size={15} weight="bold" aria-hidden />
             {status.label}
           </span>
@@ -150,7 +155,7 @@ export function PublishBar({
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-4 gap-1 lg:hidden">
+      <div className="mt-2 grid grid-cols-3 gap-1 @[68rem]/editor:hidden">
         <PaneButton active={pane === "files"} onClick={() => onPaneChange("files")}>
           <Files size={15} weight="bold" aria-hidden />
           Files
@@ -166,18 +171,6 @@ export function PublishBar({
         >
           <Browser size={15} weight="bold" aria-hidden />
           Preview
-        </PaneButton>
-        <PaneButton
-          active={pane === "onpage"}
-          onClick={() => {
-            onOnPageMode();
-            onPaneChange("onpage");
-          }}
-          disabled={!onPageAvailable}
-          title={onPageAvailable ? "Edit text directly on the rendered page" : onPageHint}
-        >
-          <TextAa size={15} weight="bold" aria-hidden />
-          Page
         </PaneButton>
       </div>
     </div>
@@ -195,7 +188,7 @@ function PaneButton({
       type="button"
       aria-pressed={active}
       className={cn(
-        "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
+        "inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
         active
           ? "bg-accent-subtle text-accent"
           : "border border-border bg-surface text-muted hover:bg-surface-hover hover:text-fg",

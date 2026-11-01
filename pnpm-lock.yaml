@@ -118,6 +118,9 @@ importers:
       downshift:
         specifier: ^9.4.0
         version: 9.4.0(react@19.2.7)
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       react:
         specifier: ^19.2.7
         version: 19.2.7

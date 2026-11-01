@@ -30,7 +30,6 @@ const ON_PAGE_SHIM = `<script data-cd-edit>
   ready(function () {
     try { document.designMode = "on"; } catch (e) {}
 
-    var timer;
     function serialize() {
       // Detach our injected nodes, serialize the clean live document, re-attach.
       // Synchronous, so no intermediate paint; reference-based, so collision-proof.
@@ -50,10 +49,11 @@ const ON_PAGE_SHIM = `<script data-cd-edit>
       return html;
     }
     function save() {
-      clearTimeout(timer);
-      timer = setTimeout(function () {
-        parent.postMessage({ type: "cd-onpage", html: serialize() }, "*");
-      }, 400);
+      // Capture immediately. The parent owns autosave debounce and exit protection,
+      // so navigation never races a second debounce hidden inside this frame.
+      var html = serialize();
+      if (html.length <= 2 * 1024 * 1024) parent.postMessage({ type: "cd-onpage", html: html }, "*");
+      else parent.postMessage({ type: "cd-onpage-too-large" }, "*");
     }
     document.addEventListener("input", save);
 

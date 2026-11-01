@@ -28,3 +28,16 @@ describe("CodeEditor — brand-tokenized highlighting", () => {
     expect(host?.querySelector(".cm-content")?.textContent).toContain("const answer");
   });
 });
+
+describe("CodeEditor accessible contract", () => {
+  it("names the source, exposes read-only state and associates keyboard help", () => {
+    render(
+      <CodeEditor path="pages/home.html" value="<h1>Hello</h1>" readOnly onChange={vi.fn()} />,
+    );
+    const textbox = document.querySelector('[role="textbox"]');
+    expect(textbox).toHaveAttribute("aria-label", "Source code for pages/home.html");
+    expect(textbox).toHaveAttribute("aria-readonly", "true");
+    const help = document.getElementById(textbox?.getAttribute("aria-describedby") ?? "");
+    expect(help).toHaveTextContent("Read-only source inspection");
+  });
+});

@@ -6,9 +6,11 @@ import { Button } from "../components/Button.js";
 import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { DeployButton } from "../components/DeployButton.js";
+import { ReadError } from "../components/ReadError.js";
 import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
+import { VersionInspection } from "../components/VersionInspection.js";
 import { VersionPruneDialog } from "../components/VersionPruneDialog.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
@@ -21,7 +23,7 @@ import { useCanvas, useVersions } from "../lib/queries.js";
  * Confirm-and-await, not optimistic, since it changes the live canvas for all. */
 export default function Versions() {
   const { id } = useParams({ strict: false }) as { id: string };
-  const { data: versions, isLoading, isError } = useVersions(id);
+  const { data: versions, isLoading, isError, refetch } = useVersions(id);
   const { data: canvas } = useCanvas(id);
   const rollback = useRollback(id);
   const restore = useRestoreToDraft(id);
@@ -32,6 +34,7 @@ export default function Versions() {
   const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number[] | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
+  const [inspecting, setInspecting] = useState<VersionInfo | null>(null);
   // Deploy + make-live target the live canvas. Disabled while archived/disabled.
   const isActive = canvas?.status === "active";
   const isDisabled = canvas?.status === "disabled";
@@ -46,7 +49,7 @@ export default function Versions() {
     );
   }
   if (isError) {
-    return <TabEmptyState title="Couldn't load versions" description="Please try again." />;
+    return <ReadError title="Couldn't load versions" onRetry={() => void refetch()} />;
   }
   if (!versions || versions.length === 0) {
     return (
@@ -91,12 +94,21 @@ export default function Versions() {
 
   return (
     <TabContentFrame>
+      {inspecting && (
+        <VersionInspection
+          key={inspecting.number}
+          canvasId={id}
+          version={inspecting}
+          current={versions.find((version) => version.current)}
+          onClose={() => setInspecting(null)}
+        />
+      )}
       <Section
         id="version-history"
         title="Version history"
         description={`${versions.length} ${versions.length === 1 ? "version" : "versions"} kept for this canvas.${
           isActive
-            ? " Restore a version to the draft to review it, or make it current to change the live canvas immediately."
+            ? " Inspect and compare files before restoring. Restore replaces the working draft; Make current changes the live canvas immediately."
             : " Unarchive to publish or change the current version."
         }`}
       >
@@ -180,6 +192,9 @@ export default function Versions() {
               </div>
               {v.status === "ready" && (
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+                  <Button variant="secondary" size="sm" onClick={() => setInspecting(v)}>
+                    Inspect
+                  </Button>
                   <a
                     href={`/api/canvases/${id}/versions/${v.number}/download`}
                     className="inline-flex h-8 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border-strong bg-surface-raised px-3 text-[0.8125rem] font-medium text-fg transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover active:translate-y-px"

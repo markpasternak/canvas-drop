@@ -1,13 +1,4 @@
-import {
-  ArrowSquareOut,
-  DownloadSimple,
-  Eye,
-  LinkSimple,
-  PencilSimple,
-  Plus,
-  Trash,
-  UploadSimple,
-} from "@phosphor-icons/react";
+import { ArrowSquareOut, Eye, LinkSimple, Plus, UploadSimple } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -25,11 +16,12 @@ import { EditorStatusBar } from "../components/EditorStatusBar.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Field } from "../components/Field.js";
 import { FileTree } from "../components/FileTree.js";
-import { IconButton, IconLink } from "../components/IconButton.js";
+import { IconButton } from "../components/IconButton.js";
 import { NonEditableFileView } from "../components/NonEditableFileView.js";
 import { OnPageEditor } from "../components/OnPageEditor.js";
 import { type EditorPane, type LocalDirtyState, PublishBar } from "../components/PublishBar.js";
 import { PublishReviewDialog } from "../components/PublishReviewDialog.js";
+import { ReadError } from "../components/ReadError.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PaneHeader, WorkspacePane } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
@@ -54,6 +46,7 @@ import {
   useUploadDraftFiles,
 } from "../lib/mutations.js";
 import { keys, useCanvas, useDraft, usePublishedFiles } from "../lib/queries.js";
+import { useUnsavedChanges } from "../lib/use-unsaved-changes.js";
 
 const AUTOSAVE_MS = 700;
 const ROOT_HTML = "index.html";
@@ -110,13 +103,22 @@ function DraftRepairNotice({
  */
 export default function Editor() {
   const { id } = useParams({ strict: false }) as { id: string };
+  return <EditorWorkspace key={id} id={id} />;
+}
+
+/** Route identity owns buffers and mutation callbacks, including delayed non-save writes. */
+function EditorWorkspace({ id }: { id: string }) {
   const { data: canvas } = useCanvas(id);
-  const { data: draft, isLoading, isError } = useDraft(id);
+  const { data: draft, isLoading, isError, refetch: refetchDraft } = useDraft(id);
   const [selected, setSelected] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [editorRevision, setEditorRevision] = useState(0);
+  const [pageTooLarge, setPageTooLarge] = useState(false);
+  const pageTooLargeRef = useRef(false);
   const [mode, setMode] = useState<"code" | "onpage">("code");
+  const [onPagePath, setOnPagePath] = useState<string | null>(null);
   const [pane, setPane] = useState<EditorPane>("code");
-  const [previewVisible, setPreviewVisible] = useState(true);
+  const [previewVisible, setPreviewVisible] = useState(false);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [newPath, setNewPath] = useState("");
@@ -143,6 +145,7 @@ export default function Editor() {
   const bufferPathRef = useRef<string | null>(null);
   const loadedRef = useRef<string>("");
   const dirtyRef = useRef<boolean>(false);
+  const uncertainWriteRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The reactive twin of dirtyRef, for the status bar: "unsaved" while an edit sits
   // in the debounce window, "failed" after a flush error — so the bar never claims
@@ -220,16 +223,29 @@ export default function Editor() {
   // alone until the editor resolves it — see hashesRef). Called SYNCHRONOUSLY from every
   // mutation response (review #13) — the effect below is only the backstop for reads —
   // so a rename or delete right after a save already carries the post-save hash.
-  const trackHashes = (view: DraftView) => {
+  const trackHashes = (view: DraftView, acknowledgedPath?: string) => {
     const next = new Map<string, string>();
     for (const f of view.files) {
       if (f.hash === undefined) continue;
-      if (conflictRef.current?.path === f.path) {
+      if (
+        conflictRef.current?.path === f.path ||
+        (dirtyRef.current && bufferPathRef.current === f.path && acknowledgedPath !== f.path)
+      ) {
         const kept = hashesRef.current.get(f.path);
         if (kept !== undefined) next.set(f.path, kept);
         continue;
       }
       next.set(f.path, f.hash);
+    }
+    // A background delete is still a concurrent edit. Keep the hash we edited
+    // against even when the path is absent, so saving cannot recreate it as new.
+    for (const path of [
+      conflictRef.current?.path,
+      dirtyRef.current ? bufferPathRef.current : null,
+    ]) {
+      if (!path || path === acknowledgedPath || next.has(path)) continue;
+      const kept = hashesRef.current.get(path);
+      if (kept !== undefined) next.set(path, kept);
     }
     hashesRef.current = next;
   };
@@ -242,59 +258,20 @@ export default function Editor() {
   // Fall back to code mode if on-page editing stops being available — the draft loses
   // its single HTML page, or it gains JavaScript (on-page can't render JS; see onPageAvailable).
   useEffect(() => {
-    if (mode === "onpage" && !onPageAvailable) {
+    if (mode === "onpage" && !onPageAvailable && !dirtyRef.current) {
       setMode("code");
       setPane("code");
     }
   }, [mode, onPageAvailable]);
 
-  // On unmount (tab switch / navigation), persist any edit still inside the autosave
-  // debounce window — clearing the timer alone would silently drop it. Write directly
-  // (not via the react-query mutation, whose observer is torn down on unmount) so the
-  // PUT survives the component going away; the draft refetches fresh on remount.
-  useEffect(() => {
-    return () => {
+  // A route exit is now awaited and recoverable. Cleanup only cancels the debounce;
+  // it never dispatches an invisible best-effort write after the UI has disappeared.
+  useEffect(
+    () => () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      // Same guards as flush() (review #12): a conflicted path or a locked-out session
-      // never issues the doomed PUT on exit.
-      if (
-        dirtyRef.current &&
-        bufferPathRef.current !== null &&
-        conflictRef.current?.path !== bufferPathRef.current &&
-        !lockedOutRef.current
-      ) {
-        const path = bufferPathRef.current;
-        const body = bufferRef.current;
-        const expectedHash = hashesRef.current.get(path) ?? "none";
-        dirtyRef.current = false;
-        // Surface the in-flight edit to other draft consumers (the Versions tab's restore
-        // confirm-gate reads `draft.dirty`) so a restore can't bypass confirmation while
-        // this flush is still settling. Reconciled to server-authoritative dirty on settle.
-        qc.setQueryData<DraftView>(keys.draft(id), (d) => (d ? { ...d, dirty: true } : d));
-        // Bound the best-effort flush and pin the file's hash: a slow/unreachable server on
-        // navigation must not leave the PUT pending, and a flush that lands after another
-        // editor's save (or a restore) is rejected (409 DRAFT_CONFLICT) instead of
-        // clobbering their file. Warn instead of swallowing silently so a dropped
-        // exit-save is diagnosable.
-        void api
-          .putDraftFile(id, path, body, {
-            signal: AbortSignal.timeout(5000),
-            expectedHash,
-          })
-          .then(() => {
-            // Write through the per-file content cache so remounting the editor
-            // within staleTime doesn't re-seed from the pre-flush content.
-            qc.setQueryData(keys.draftFile(id, path), body);
-          })
-          .catch((err) => {
-            console.warn(`canvas-drop: failed to flush pending edit to ${path} on exit`, err);
-          })
-          .finally(() => {
-            void qc.invalidateQueries({ queryKey: keys.draft(id) });
-          });
-      }
-    };
-  }, [id, qc]);
+    },
+    [],
+  );
 
   const content = useQuery({
     queryKey: keys.draftFile(id, selected ?? ""),
@@ -303,7 +280,15 @@ export default function Editor() {
   });
 
   useEffect(() => {
-    if (content.data !== undefined && editable) {
+    if (
+      content.data !== undefined &&
+      editable &&
+      !dirtyRef.current &&
+      !conflictRef.current &&
+      !lockedOutRef.current
+    ) {
+      if (bufferPathRef.current === selected && loadedRef.current !== content.data)
+        setEditorRevision((revision) => revision + 1);
       loadedRef.current = content.data;
       bufferRef.current = content.data;
       bufferPathRef.current = selected;
@@ -332,6 +317,7 @@ export default function Editor() {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    if (pageTooLargeRef.current) return false;
     if (!dirtyRef.current || bufferPathRef.current === null) return true;
     const path = bufferPathRef.current;
     const body = bufferRef.current;
@@ -340,36 +326,43 @@ export default function Editor() {
     // Once the server has refused this session's role, no further save is attempted.
     if (lockedOutRef.current) return false;
     try {
+      uncertainWriteRef.current = true;
       const saved = await save.mutateAsync({
         path,
         content: body,
         expectedHash: hashesRef.current.get(path) ?? "none",
       });
-      trackHashes(saved);
+      uncertainWriteRef.current = false;
+      trackHashes(saved, path);
       // The buffer may have moved on while the save was in flight — new keystrokes,
       // or a different file entirely. Only touch the dirty state for OUR file, and
       // only mark clean when the buffer still holds exactly what we saved (a stale
       // resolution must never mask a newer unsaved edit).
       if (bufferPathRef.current === path) {
         loadedRef.current = body;
-        if (bufferRef.current === body) {
-          dirtyRef.current = false;
-          setLocalDirty("clean");
-        }
+        // Even a revert to the previous loaded text is a newer revision once this
+        // request has changed the server. Recompute against the acknowledged body.
+        dirtyRef.current = bufferRef.current !== body || pageTooLargeRef.current;
+        setLocalDirty(dirtyRef.current ? "unsaved" : "clean");
       }
       setRefreshKey((k) => k + 1);
-      return true;
+      return !dirtyRef.current || (await flushOnce());
     } catch (err) {
+      // A rejected response does not establish that the server did not commit.
+      // Preserve even a revert to the old baseline until a later write is acknowledged.
+      if (bufferPathRef.current === path) dirtyRef.current = true;
       if (err instanceof ApiError && err.code === "DRAFT_CONFLICT") {
         // Another editor saved this file first (R17): keep the buffer, show their
         // current content beside it, and let the editor compare before choosing.
-        await openConflict(path, err);
+        openConflict(path, err);
         return false;
       }
       if (err instanceof ApiError && (err.status === 404 || err.code === "OWNER_ONLY")) {
         // The role behind this session is gone (or the act is the owner's): keep the
         // buffer, stop saving, and say so once — no toast storm on every debounce.
-        setLockedOut({ path, code: err.code, content: body });
+        const refusal = { path, code: err.code, content: bufferRef.current };
+        lockedOutRef.current = refusal;
+        setLockedOut(refusal);
         setLocalDirty("failed");
         return false;
       }
@@ -381,17 +374,32 @@ export default function Editor() {
 
   /** Surface a stale-save refusal: fetch the server's current content for the path so the
    *  editor can compare it with the kept buffer (KTD14 — the buffer is never dropped). */
-  async function openConflict(path: string, err: ApiError) {
-    const theirs = await api.getDraftFile(id, path).catch(() => null);
+  function openConflict(path: string, err: ApiError) {
     const d = err.details;
-    setConflict({
+    const next: DraftConflict = {
       path,
       currentHash: typeof d.currentHash === "string" ? d.currentHash : "none",
       updatedByName: typeof d.updatedByName === "string" ? d.updatedByName : null,
       updatedAt: typeof d.updatedAt === "number" ? d.updatedAt : null,
-      theirs,
-    });
+      theirs: null,
+    };
+    conflictRef.current = next;
+    setConflict(next);
     setLocalDirty("conflict");
+    loadConflictComparison(next);
+  }
+
+  function loadConflictComparison(snapshot: DraftConflict) {
+    // Optional comparison must not delay the recovery dialog or discard/export.
+    void api
+      .getDraftFile(id, snapshot.path, AbortSignal.timeout(15_000))
+      .then((theirs) => {
+        if (conflictRef.current !== snapshot) return;
+        const next = { ...snapshot, theirs };
+        conflictRef.current = next;
+        setConflict(next);
+      })
+      .catch(() => {});
   }
 
   /** Resolve a conflict by adopting the other editor's version: the buffer becomes theirs. */
@@ -404,9 +412,14 @@ export default function Editor() {
       bufferRef.current = theirs;
       loadedRef.current = theirs;
       dirtyRef.current = false;
+      uncertainWriteRef.current = false;
       setLocalDirty("clean");
     }
+    conflictRef.current = null;
     setConflict(null);
+    setMode("code");
+    setPane("code");
+    setEditorRevision((revision) => revision + 1);
     setRefreshKey((k) => k + 1);
   }
 
@@ -415,6 +428,7 @@ export default function Editor() {
   async function overwriteWithMine() {
     if (!conflict) return;
     hashesRef.current.set(conflict.path, conflict.currentHash);
+    conflictRef.current = null;
     setConflict(null);
     if (bufferPathRef.current === conflict.path) {
       dirtyRef.current = true;
@@ -424,9 +438,9 @@ export default function Editor() {
   }
 
   const onEditorChange = (next: string) => {
-    if (bufferPathRef.current !== selected) return;
+    if (bufferPathRef.current !== selected || lockedOutRef.current) return;
     bufferRef.current = next;
-    dirtyRef.current = next !== loadedRef.current;
+    dirtyRef.current = next !== loadedRef.current || uncertainWriteRef.current;
     setLocalDirty(dirtyRef.current ? "unsaved" : "clean");
     if (timerRef.current) clearTimeout(timerRef.current);
     if (dirtyRef.current) timerRef.current = setTimeout(() => void flush(), AUTOSAVE_MS);
@@ -443,7 +457,7 @@ export default function Editor() {
   };
 
   async function uploadFiles(files: File[]) {
-    if (files.length === 0) return;
+    if (files.length === 0 || !(await flush())) return;
     const paths = canvasRelativePaths(files);
     // Each upload carries the hash we last saw for its path (review #2): a new path has
     // none; an existing one is replaced only against the version we loaded.
@@ -492,6 +506,10 @@ export default function Editor() {
 
   async function onReplaceChosen(file: File) {
     if (!selected) return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     try {
       // Wait for any in-flight save of this path so the replace pins the post-save hash.
       await flushingRef.current;
@@ -503,6 +521,7 @@ export default function Editor() {
       trackHashes(view);
       loadedRef.current = "";
       dirtyRef.current = false;
+      uncertainWriteRef.current = false;
       setLocalDirty("clean"); // the replaced bytes ARE the saved state
       await content.refetch();
       setRefreshKey((k) => k + 1);
@@ -514,7 +533,7 @@ export default function Editor() {
 
   async function addFile() {
     const path = newPath.trim();
-    if (!path || addDuplicate) return;
+    if (!path || addDuplicate || !(await flush())) return;
     try {
       await create.mutateAsync(path);
       setAddOpen(false);
@@ -532,6 +551,7 @@ export default function Editor() {
       setNewPath(ROOT_HTML);
       return;
     }
+    if (!(await flush())) return;
     try {
       await create.mutateAsync(ROOT_HTML);
       setSelected(ROOT_HTML);
@@ -545,7 +565,7 @@ export default function Editor() {
    *  persist the buffer first, then retarget it to the new path after the rename
    *  (covers a failed flush leaving `dirtyRef` set — the mirror of the delete guard). */
   async function guardedRename(from: string, to: string): Promise<void> {
-    await flush();
+    if (!(await flush())) throw new Error("Save or recover your edits before renaming.");
     const view = await rename.mutateAsync({
       from,
       to,
@@ -583,17 +603,11 @@ export default function Editor() {
 
   async function confirmDelete() {
     if (!deleting) return;
-    // Clear any pending autosave for the file being deleted FIRST. Otherwise an
-    // in-window edit (debounce timer pending, or the unmount-flush) would re-PUT the
-    // buffer and resurrect the file the user just deleted.
-    if (bufferPathRef.current === deleting) {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      dirtyRef.current = false;
-      bufferPathRef.current = null;
-      setLocalDirty("clean");
+    // Preserve the buffer until deletion is acknowledged; a failed DELETE must not
+    // mark unsaved text clean or let navigation discard it.
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
     try {
       // A save of this very path may still be in flight; let it settle so the delete is
@@ -604,6 +618,12 @@ export default function Editor() {
         expectedHash: hashesRef.current.get(deleting),
       });
       trackHashes(next);
+      if (bufferPathRef.current === deleting) {
+        dirtyRef.current = false;
+        uncertainWriteRef.current = false;
+        bufferPathRef.current = null;
+        setLocalDirty("clean");
+      }
       if (selected === deleting) setSelected(next.files[0]?.path ?? null);
       setDeleting(null);
       setRefreshKey((k) => k + 1);
@@ -618,37 +638,48 @@ export default function Editor() {
     // the on-page seeding doesn't overwrite the unsaved buffer.
     if (!(await flush())) return;
     setSelected(htmlFile.path);
+    setOnPagePath(htmlFile.path);
     setMode("onpage");
     setPane("onpage");
   }
 
-  async function onPageSave(html: string) {
-    if (!htmlFile) return;
-    try {
-      // useSaveDraftFile writes the saved HTML through the per-file content cache,
-      // so switching back to Code shows the on-page edits (not a stale buffer that
-      // would otherwise overwrite them on the next code edit). The save is pinned to the
-      // hash we loaded (review #2) exactly like the code editor's autosave.
-      await flushingRef.current;
-      const saved = await save.mutateAsync({
-        path: htmlFile.path,
-        content: html,
-        expectedHash: hashesRef.current.get(htmlFile.path) ?? "none",
-      });
-      trackHashes(saved);
-      setRefreshKey((k) => k + 1);
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "DRAFT_CONFLICT") {
-        // Same resolution path as the code editor: their version beside the kept buffer.
-        bufferRef.current = html;
-        bufferPathRef.current = htmlFile.path;
-        await openConflict(htmlFile.path, err);
-        return;
-      }
-      if (!(await refuseIfLockedOut(err))) {
-        toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
-      }
+  function onPageSave(html: string) {
+    if (!onPagePath) return;
+    pageTooLargeRef.current = false;
+    setPageTooLarge(false);
+    // Same buffer and debounce as Code, including failure, conflict and route exit.
+    bufferPathRef.current = onPagePath;
+    bufferRef.current = html;
+    dirtyRef.current = html !== loadedRef.current || uncertainWriteRef.current;
+    if (lockedOutRef.current) {
+      const refusal = { ...lockedOutRef.current, content: html };
+      lockedOutRef.current = refusal;
+      setLockedOut(refusal);
+      setLocalDirty("failed");
+      return;
     }
+    setLocalDirty(conflictRef.current ? "conflict" : dirtyRef.current ? "unsaved" : "clean");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (dirtyRef.current && !conflictRef.current)
+      timerRef.current = setTimeout(() => void flush(), AUTOSAVE_MS);
+  }
+
+  const blocker = useUnsavedChanges({
+    dirty: localDirty !== "clean" || save.isPending,
+    saveBeforeLeave: flush,
+  });
+  function discardBuffer() {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    pageTooLargeRef.current = false;
+    setPageTooLarge(false);
+    dirtyRef.current = false;
+    uncertainWriteRef.current = false;
+    bufferRef.current = loadedRef.current;
+    conflictRef.current = null;
+    lockedOutRef.current = null;
+    setConflict(null);
+    setLockedOut(null);
+    setLocalDirty("clean");
   }
 
   async function onPublish() {
@@ -695,7 +726,7 @@ export default function Editor() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  if (canvas && canvas.status !== "active") {
+  if (canvas && canvas.status !== "active" && localDirty === "clean") {
     return (
       <TabEmptyState
         title="Editing is paused"
@@ -714,8 +745,8 @@ export default function Editor() {
       </TabContentFrame>
     );
   }
-  if (isError || !draft) {
-    return <TabEmptyState title="Couldn't load the editor" description="Please try again." />;
+  if (!draft) {
+    return <ReadError title="Couldn’t load the editor" onRetry={() => void refetchDraft()} />;
   }
 
   const body =
@@ -731,7 +762,7 @@ export default function Editor() {
       />
     ) : content.isLoading ? (
       <Skeleton className="h-full" />
-    ) : content.isError ? (
+    ) : content.isError && !dirtyRef.current ? (
       <EmptyState
         title="Couldn’t load this file"
         description={
@@ -739,18 +770,24 @@ export default function Editor() {
             ? content.error.hint
             : "The file’s contents couldn’t be read. If this canvas was deployed before the editor existed, re-deploy it."
         }
+        action={
+          <Button size="sm" variant="secondary" onClick={() => void content.refetch()}>
+            Retry file
+          </Button>
+        }
       />
     ) : (
       <CodeEditor
-        key={selected}
+        key={`${selected}:${editorRevision}`}
+        readOnly={!!lockedOut || canvas?.status !== "active"}
         path={selected}
-        value={content.data ?? ""}
+        value={bufferPathRef.current === selected ? bufferRef.current : (content.data ?? "")}
         onChange={onEditorChange}
         onSave={() => void flush()}
       />
     );
 
-  const workspaceHeight = "h-[calc(100dvh-18.5rem)] min-h-[34rem]";
+  const workspaceHeight = "h-[calc(100dvh-16rem)] min-h-[26rem]";
   const paneVisible = (target: EditorPane) => pane === target;
   const selectedIsHtml = selectedFile ? isHtmlFile(selectedFile) : false;
   const draftRepairNotice =
@@ -809,9 +846,10 @@ export default function Editor() {
       />
     ) : null;
 
-  const changePane = (next: EditorPane) => {
+  const changePane = async (next: EditorPane) => {
+    if (mode === "onpage" && !(await flush())) return;
     if (next === "preview") setPreviewVisible(true);
-    if (next === "code") setMode("code");
+    if (next === "code" || next === "preview") setMode("code");
     setPane(next);
   };
 
@@ -822,7 +860,7 @@ export default function Editor() {
           "flex-col transition-colors",
           "h-full min-w-0",
           paneVisible("files") ? "flex" : "hidden",
-          "lg:flex",
+          "@[44rem]/editor:flex",
           dropzone.isDragActive && "bg-accent-subtle ring-2 ring-accent ring-inset",
         ),
       })}
@@ -903,39 +941,30 @@ export default function Editor() {
   const selectedActions =
     selected && selectedFile ? (
       <div className="flex items-center gap-1">
-        <IconLink
-          href={rawUrl(id, selected)}
-          download={baseName(selected)}
-          label="Download file"
-          className="border-border bg-surface-raised"
-        >
-          <DownloadSimple size={15} weight="bold" aria-hidden />
-        </IconLink>
-        <IconButton
-          label="Replace file"
-          onClick={() => replaceInputRef.current?.click()}
-          className="border-border bg-surface-raised"
-        >
-          <UploadSimple size={15} weight="bold" aria-hidden />
-        </IconButton>
-        <IconButton
-          label="Rename file"
-          onClick={() => {
-            setRenaming(selected);
-            setRenameTo(selected);
-          }}
-          className="border-border bg-surface-raised"
-        >
-          <PencilSimple size={15} weight="bold" aria-hidden />
-        </IconButton>
-        <IconButton
-          label="Delete file"
-          tone="danger"
-          onClick={() => setDeleting(selected)}
-          className="border-border bg-surface-raised"
-        >
-          <Trash size={15} weight="bold" aria-hidden />
-        </IconButton>
+        <ActionMenu label="File actions">
+          <ActionMenuItem
+            onSelect={() => {
+              const anchor = document.createElement("a");
+              anchor.href = rawUrl(id, selected);
+              anchor.download = baseName(selected);
+              anchor.click();
+            }}
+          >
+            Download file
+          </ActionMenuItem>
+          <ActionMenuItem onSelect={() => replaceInputRef.current?.click()}>
+            Replace file
+          </ActionMenuItem>
+          <ActionMenuItem
+            onSelect={() => {
+              setRenaming(selected);
+              setRenameTo(selected);
+            }}
+          >
+            Rename file
+          </ActionMenuItem>
+          <ActionMenuItem onSelect={() => setDeleting(selected)}>Delete file</ActionMenuItem>
+        </ActionMenu>
         {fileLinkMenu}
       </div>
     ) : null;
@@ -947,17 +976,29 @@ export default function Editor() {
           "flex-col",
           "h-full min-w-0",
           paneVisible("code") ? "flex" : "hidden",
-          "lg:flex",
+          pane === "preview" && previewVisible
+            ? "@[44rem]/editor:hidden @[68rem]/editor:flex"
+            : "@[44rem]/editor:flex",
         )}
       >
         <PaneHeader
-          title={<span className="font-mono">{selected ?? "No file selected"}</span>}
+          title={
+            <span className="block whitespace-normal break-all font-mono">
+              {selected ?? "No file selected"}
+            </span>
+          }
           description={editable ? "Autosaves to draft" : "Asset preview"}
           actions={
             <>
               {selectedActions}
               {!previewVisible && (
-                <IconButton label="Show preview" onClick={() => setPreviewVisible(true)}>
+                <IconButton
+                  label="Show preview"
+                  onClick={() => {
+                    setPreviewVisible(true);
+                    setPane("preview");
+                  }}
+                >
                   <Eye size={15} weight="bold" aria-hidden />
                 </IconButton>
               )}
@@ -974,7 +1015,7 @@ export default function Editor() {
         className={cn(
           "min-h-0 h-full min-w-0",
           paneVisible("preview") ? "block" : "hidden",
-          "lg:block",
+          paneVisible("preview") ? "@[44rem]/editor:block" : "@[68rem]/editor:block",
         )}
       >
         <DraftPreview
@@ -983,32 +1024,47 @@ export default function Editor() {
           onRefresh={() => setRefreshKey((k) => k + 1)}
           fullscreen={false}
           onToggleFullscreen={() => setPreviewFullscreen(true)}
-          onHide={() => setPreviewVisible(false)}
+          onHide={() => {
+            setPreviewVisible(false);
+            setPane("code");
+          }}
           usesScripts={usesScripts}
         />
       </section>
     ) : null;
 
   const onPagePane =
-    mode === "onpage" && htmlFile ? (
+    mode === "onpage" && onPagePath ? (
       <section
         className={cn(
           "min-h-0 h-full min-w-0",
           paneVisible("onpage") ? "block" : "hidden",
-          "lg:block",
+          "@[44rem]/editor:block",
         )}
       >
         <OnPageEditor
           canvasId={id}
-          htmlPath={htmlFile.path}
+          htmlPath={onPagePath}
           saving={save.isPending}
           onSave={onPageSave}
+          onTooLarge={() => {
+            pageTooLargeRef.current = true;
+            setPageTooLarge(true);
+            dirtyRef.current = true;
+            setLocalDirty("failed");
+            if (timerRef.current) clearTimeout(timerRef.current);
+          }}
         />
       </section>
     ) : null;
 
   return (
-    <TabContentFrame className="space-y-3">
+    <TabContentFrame className="@container/editor min-w-0 space-y-3">
+      {isError && (
+        <ReadError title="Couldn't refresh the draft" onRetry={() => void refetchDraft()}>
+          Your last loaded files and local edits remain here. Retry to check the current draft.
+        </ReadError>
+      )}
       {draftRepairNotice}
       {lockedOut && (
         <section
@@ -1058,6 +1114,7 @@ export default function Editor() {
         <section
           className="border border-danger/30 bg-danger-subtle/40 px-4 py-3"
           data-testid="draft-conflict"
+          role="alert"
         >
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-fg">
@@ -1074,7 +1131,21 @@ export default function Editor() {
               </pre>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={useTheirVersion}>
+              {conflict.theirs === null && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => loadConflictComparison(conflict)}
+                >
+                  Retry comparison
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={conflict.theirs === null}
+                onClick={useTheirVersion}
+              >
                 Use their version
               </Button>
               <Button size="sm" variant="danger" onClick={() => void overwriteWithMine()}>
@@ -1104,7 +1175,8 @@ export default function Editor() {
         surface={mode}
         pane={pane}
         onPaneChange={changePane}
-        onCodeMode={() => {
+        onCodeMode={async () => {
+          if (!(await flush())) return;
           setMode("code");
           setPane("code");
         }}
@@ -1114,6 +1186,81 @@ export default function Editor() {
         previewAvailable
         onPublish={onPublish}
       />
+      {pageTooLarge && (
+        <p role="alert" className="text-sm text-danger">
+          This page exceeds the 2 MB Page text limit. The latest text is still in the page below but
+          cannot be saved or exported here. Shorten it or copy the text before leaving. A smaller
+          page will save normally.
+        </p>
+      )}
+      {localDirty === "failed" && !lockedOut && !pageTooLarge && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-danger">
+          <span>Your edits are still here. Save them before leaving.</span>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={save.isPending}
+            onClick={() => void flush()}
+          >
+            Retry save
+          </Button>
+          <a
+            href={`data:text/plain;charset=utf-8,${encodeURIComponent(bufferRef.current)}`}
+            download={baseName(bufferPathRef.current ?? "draft.html")}
+            className="underline"
+          >
+            Download my edits
+          </a>
+        </div>
+      )}
+      <Dialog
+        open={blocker.status === "blocked"}
+        onClose={() => blocker.reset?.()}
+        title="Your edits haven’t been saved"
+      >
+        <p className="text-sm text-muted">
+          {pageTooLarge
+            ? "Return to Page text and shorten or copy the oversized content. The source download cannot include this edit. "
+            : "Stay here to resolve the save or export your current file. "}
+          Leaving without saving discards the unsaved changes to{" "}
+          <code>{bufferPathRef.current}</code>.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => blocker.reset?.()}>
+            Keep editing
+          </Button>
+          {!pageTooLarge && (
+            <a
+              className="inline-flex min-h-10 items-center px-3 text-sm text-accent underline"
+              href={`data:text/plain;charset=utf-8,${encodeURIComponent(bufferRef.current)}`}
+              download={baseName(bufferPathRef.current ?? "draft.html")}
+            >
+              Download my edits
+            </a>
+          )}
+
+          {!conflict && !lockedOut && !pageTooLarge && (
+            <Button
+              loading={save.isPending}
+              onClick={async () => {
+                if (await flush()) blocker.proceed?.();
+              }}
+            >
+              Retry save and leave
+            </Button>
+          )}
+          <Button
+            variant="danger"
+            disabled={save.isPending}
+            onClick={() => {
+              discardBuffer();
+              blocker.proceed?.();
+            }}
+          >
+            Discard edits and leave
+          </Button>
+        </div>
+      </Dialog>
       {reviewCanvasId === id && (
         <PublishReviewDialog canvasId={id} onClose={() => setReviewCanvasId(null)} />
       )}
@@ -1123,10 +1270,10 @@ export default function Editor() {
           "grid min-w-0 gap-3",
           workspaceHeight,
           mode === "onpage"
-            ? "lg:grid-cols-[16rem_minmax(0,1fr)]"
+            ? "@[44rem]/editor:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)]"
             : previewVisible
-              ? "lg:grid-cols-[16rem_minmax(28rem,1.08fr)_minmax(22rem,0.92fr)]"
-              : "lg:grid-cols-[16rem_minmax(0,1fr)]",
+              ? "@[44rem]/editor:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)] @[68rem]/editor:grid-cols-[minmax(10rem,14rem)_minmax(0,1.1fr)_minmax(0,1fr)]"
+              : "@[44rem]/editor:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)]",
         )}
       >
         {fileRail}

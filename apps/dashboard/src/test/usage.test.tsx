@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
@@ -98,13 +98,18 @@ describe("usage tab", () => {
         }),
     });
     const { container } = renderUsage();
-    expect(await screen.findByText("42")).toBeInTheDocument(); // total views
+    expect((await screen.findAllByText("42"))[0]).toBeInTheDocument(); // total views
     expect(screen.getByText(/7 unique/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Views over the last/i })).toBeInTheDocument();
     expect(screen.getByText("1,280")).toBeInTheDocument(); // KV ops
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // file storage
     expect(screen.getByText("$0.0034")).toBeInTheDocument(); // AI cost (sub-cent precision)
     expect(screen.getByText("9")).toBeInTheDocument(); // realtime connects
+    fireEvent.click(screen.getByText("View daily values"));
+    const table = screen.getByRole("table");
+    expect(table).toHaveTextContent("Date (UTC)");
+    expect(within(table).getAllByRole("row")).toHaveLength(31);
+    expect(table).toHaveTextContent("42");
     // Stats keep tabular-nums for column alignment.
     expect(container.querySelector("dd.tabular-nums")).not.toBeNull();
     // Flat redesign (U3): the tab reads as hairline-divided bands, not boxed Panel cards.
@@ -132,7 +137,7 @@ describe("usage tab", () => {
     });
     renderUsage();
     // Views render regardless of backend (KTD-5); the query DOES fire now.
-    expect(await screen.findByText("3")).toBeInTheDocument(); // total views
+    expect((await screen.findAllByText("3"))[0]).toBeInTheDocument(); // total views
     expect(screen.getByText(/2 unique/)).toBeInTheDocument();
     expect(screen.getByText(/Turn on/i)).toBeInTheDocument();
     expect(screen.queryByText("KV operations")).not.toBeInTheDocument();

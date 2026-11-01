@@ -1,4 +1,4 @@
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -28,7 +28,7 @@ export default function Usage() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: canvas, isLoading: canvasLoading } = useCanvas(id);
   // Views apply to all canvases, so the usage query always runs (KTD-5).
-  const { data: usage, isLoading: usageLoading, isError, refetch } = useUsage(id);
+  const { data: usage, isLoading: usageLoading, isError, refetch, dataUpdatedAt } = useUsage(id);
   const backendOn = canvas?.backendEnabled ?? false;
 
   if (isError) {
@@ -57,7 +57,12 @@ export default function Usage() {
 
   return (
     <TabContentFrame>
-      <Section id="views" title="Views">
+      <Section
+        id="views"
+        title="Views"
+        description="This canvas only. Totals cover retained view events, normally up to 90 days after routine cleanup. Unique viewers counts signed-in accounts; anonymous visits have no unique identity. Repeated visits within the counting window are combined."
+      >
+        <p className="text-xs text-muted">Updated {new Date(dataUpdatedAt).toLocaleString()}</p>
         <MetaGrid>
           <MetaItem label="Total views">
             <Metric
@@ -76,10 +81,49 @@ export default function Usage() {
           ) : (
             <Sparkline data={usage.viewsByDay} className="h-10 w-full text-accent" />
           )}
+          <details className="pt-3 text-sm">
+            <summary className="cursor-pointer font-medium text-fg">View daily values</summary>
+            <table className="mt-3 w-full text-left text-sm tabular-nums">
+              <caption className="mb-2 text-left text-xs text-muted">
+                Views by UTC date over the last 30 days, including zero-view days. Today is partial.
+              </caption>
+              <thead>
+                <tr className="border-b border-border">
+                  <th scope="col" className="py-2">
+                    Date (UTC)
+                  </th>
+                  <th scope="col" className="py-2 text-right">
+                    Views
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.viewsByDay.map((day) => (
+                  <tr key={day.dayMs} className="border-b border-border">
+                    <th scope="row" className="py-2 font-normal">
+                      <time dateTime={new Date(day.dayMs).toISOString().slice(0, 10)}>
+                        {new Date(day.dayMs).toLocaleDateString(undefined, {
+                          timeZone: "UTC",
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </time>
+                    </th>
+                    <td className="py-2 text-right">{day.count.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
         </div>
       </Section>
 
-      <Section id="backend-usage" title="Backend usage">
+      <Section
+        id="backend-usage"
+        title="Backend usage"
+        description="Operations, connections and AI usage cover retained events. File storage is the current amount stored, including uploads that predate the reporting window."
+      >
         {backendOn ? (
           <MetaGrid>
             <MetaItem label="KV operations">
@@ -103,8 +147,15 @@ export default function Usage() {
           </MetaGrid>
         ) : (
           <p className="text-sm text-muted">
-            Turn on <strong className="font-medium text-fg">Backend</strong> to use KV, files, AI,
-            and realtime. Those usage figures will appear here once it does.
+            Turn on{" "}
+            <Link
+              to="/canvases/$id/capabilities"
+              params={{ id }}
+              className="font-medium text-accent underline"
+            >
+              Backend
+            </Link>{" "}
+            to use KV, files, AI, and realtime. Those usage figures will appear here once it does.
           </p>
         )}
       </Section>

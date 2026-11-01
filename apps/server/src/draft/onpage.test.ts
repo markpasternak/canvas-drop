@@ -45,3 +45,47 @@ describe("injectOnPageEditor", () => {
     expect(out.indexOf("data-cd-edit")).toBeLessThan(out.toLowerCase().indexOf("</body>"));
   });
 });
+
+it("posts edits immediately and sends a bounded size warning instead of dropping an oversized edit", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const listeners = new Map<string, () => void>();
+  const posted: Array<{ type: string; html?: string }> = [];
+  const element = () => ({
+    setAttribute() {},
+    appendChild() {},
+    addEventListener() {},
+    style: {},
+    parentNode: null,
+  });
+  const document = {
+    readyState: "complete",
+    currentScript: element(),
+    designMode: "off",
+    documentElement: { outerHTML: "<html><body>Edited</body></html>" },
+    body: element(),
+    createElement: element,
+    addEventListener(name: string, handler: () => void) {
+      listeners.set(name, handler);
+    },
+  };
+  const script = injectOnPageEditor("")
+    .replace(/^<script data-cd-edit>\n/, "")
+    .replace(/<\/script>$/, "");
+  runInNewContext(script, {
+    document,
+    parent: {
+      postMessage(message: { type: string; html?: string }) {
+        posted.push(message);
+      },
+    },
+    window: { addEventListener() {} },
+  });
+  listeners.get("input")?.();
+  expect(posted).toEqual([
+    { type: "cd-onpage", html: "<!doctype html>\n<html><body>Edited</body></html>" },
+  ]);
+  document.documentElement.outerHTML = "x".repeat(2 * 1024 * 1024 + 1);
+  listeners.get("input")?.();
+  expect(posted[1]).toEqual({ type: "cd-onpage-too-large" });
+  expect(listeners.has("message")).toBe(false); // no message echo/save loop
+});
