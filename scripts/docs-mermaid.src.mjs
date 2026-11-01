@@ -1,6 +1,6 @@
 // Source for the self-hosted docs Mermaid bundle, compiled by `pnpm docs:mermaid`
-// (esbuild → IIFE) into apps/server/src/docs/mermaid.bundle.ts as a committed
-// string constant the server serves verbatim at GET /docs/mermaid.js. Bundling
+// (esbuild → IIFE) into docs/site/assets/mermaid.js as a committed asset
+// the server serves verbatim at GET /docs/mermaid.js. Bundling
 // it (rather than pulling mermaid from a CDN) keeps the docs CSP at
 // `script-src 'self'` and honors the no-phone-home rule — mermaid is large, so it
 // is loaded deferred and only initialized when a diagram is present on the page.
@@ -109,6 +109,10 @@ function configure() {
     startOnLoad: false,
     securityLevel: "strict",
     theme: "base",
+    // Mermaid 12 defaults to ELK/neo. Keep the docs' existing layout and shapes
+    // while the live theme variables below continue to supply the design colors.
+    layout: "dagre",
+    look: "classic",
     flowchart: { curve: "basis", useMaxWidth: true },
     sequence: { useMaxWidth: true },
   };

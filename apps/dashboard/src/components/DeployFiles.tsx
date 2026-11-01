@@ -8,7 +8,10 @@ import { cn } from "../lib/cn.js";
  * webkitRelativePath; a lone dropped file has only its name. */
 export function rawUploadPath(file: File): string {
   const withPath = file as File & { path?: string };
-  return (withPath.path || file.webkitRelativePath || file.name).replace(/^\/+/, "");
+  // file-selector uses "./name" for top-level files without directory metadata.
+  // Remove that prefix before finding a shared wrapper; otherwise a mixed drop
+  // can leave "./index.html" beside "assets/style.css" in the submitted manifest.
+  return (withPath.path || file.webkitRelativePath || file.name).replace(/^(?:\/|\.\/)+/, "");
 }
 
 const topSegment = (p: string): string | null =>
@@ -80,6 +83,8 @@ export function FileDrop({
     onDrop,
     noClick: true,
     noKeyboard: true,
+    // Clipboard upload became opt-out in dropzone 19; keep uploads explicit.
+    noPaste: true,
     disabled: busy,
   });
 

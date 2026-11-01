@@ -121,6 +121,35 @@ const draftView = (over: Partial<Record<string, unknown>> = {}) => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Editor route", () => {
+  it("does not upload clipboard files pasted into the file rail", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>Keep this draft</h1>"),
+    });
+    renderEditor();
+    await screen.findByTestId("code-editor");
+    const rail = screen
+      .getByRole("button", { name: "Upload files" })
+      .closest('[role="presentation"]');
+    if (!rail) throw new Error("expected the file rail dropzone");
+    const file = new File(["image"], "clipboard.png", { type: "image/png" });
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        types: ["Files"],
+        files: [file],
+        items: [{ kind: "file", type: file.type, getAsFile: () => file }],
+      },
+    });
+    await act(async () => {
+      fireEvent(rail, event);
+    });
+    expect(calls.filter((call) => call.method !== "GET")).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+    expect(screen.getByTestId("code-editor")).toHaveValue("<h1>Keep this draft</h1>");
+  });
+
   it("shows and opens the selected file's published URL, including nested encoded paths", async () => {
     const path = "pages/quarterly report.html";
     const url = "http://x/c/quiet-otter/pages/quarterly%20report.html";

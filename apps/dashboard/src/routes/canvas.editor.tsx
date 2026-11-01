@@ -502,7 +502,13 @@ function EditorWorkspace({ id }: { id: string }) {
     return false;
   }
 
-  const dropzone = useDropzone({ noClick: true, onDrop: (a) => void uploadFiles(a) });
+  const dropzone = useDropzone({
+    noClick: true,
+    // A clipboard file should not become a draft upload merely because the file
+    // rail has focus. Keep the existing drop/picker interactions after v19.
+    noPaste: true,
+    onDrop: (a) => void uploadFiles(a),
+  });
 
   async function onReplaceChosen(file: File) {
     if (!selected) return;
