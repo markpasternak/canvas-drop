@@ -510,6 +510,13 @@ export function AdminCanvasTable({
                     .filter(Boolean)
                     .join(" · ") || "No additional people or teams"}
                 </p>
+                <div className="flex flex-wrap gap-1">
+                  {c.hasPassword && <Badge tone="warning">Password</Badge>}
+                  {c.expiryState === "expired" && <Badge tone="danger">Expired</Badge>}
+                  {c.access === "public_link" && !c.publicLinkEffective && (
+                    <Badge tone="warning">Public unavailable</Badge>
+                  )}
+                </div>
                 <details>
                   <summary className="cursor-pointer text-xs text-subtle">Access details</summary>
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -528,9 +535,7 @@ export function AdminCanvasTable({
                             : "Public unavailable"}
                         </Badge>
                       ))}
-                    {c.hasPassword && <Badge tone="warning">Password</Badge>}
                     {c.expiryState === "active" && <Badge tone="warning">Expires</Badge>}
-                    {c.expiryState === "expired" && <Badge tone="danger">Expired</Badge>}
                     {exposureFor(c).pendingInviteCount > 0 && (
                       <Badge tone="warning">
                         {exposureFor(c).pendingInviteCount} pending access
@@ -542,6 +547,13 @@ export function AdminCanvasTable({
             </td>
             <td className="px-3 py-2">
               <StatusBadge status={c.status} />
+              <p className="mt-1 text-xs text-muted">
+                {c.publicationState === "published"
+                  ? "Published"
+                  : c.publicationState === "draft"
+                    ? "Draft"
+                    : "Not live"}
+              </p>
             </td>
             {!hiddenColumns.includes("size") && (
               <td className="px-3 py-2 text-right tabular-nums text-muted">

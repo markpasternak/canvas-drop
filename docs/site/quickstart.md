@@ -82,14 +82,16 @@ Click **Create canvas** in the dashboard (or open `/new`). Pick a source:
 
 | Source | What happens |
 |--------|--------------|
-| **Paste HTML** | A single `index.html`, created and published in one step. |
-| **Upload files** | Select files, a folder, or one ZIP, review the summary, then click **Create and publish**. Relative paths are preserved; archives are checked and extracted server-side. |
+| **Paste HTML** | Saves a single `index.html` to an unpublished draft for review. |
+| **Upload files** | Select files, a folder, or one ZIP, review the summary, then click **Create draft**. Relative paths are preserved. |
 | **Use the API** | Mints an empty canvas plus a per-canvas key (shown once) and a ready-to-run `curl` command. The canvas stays unpublished until your first deploy. |
 
 Review your content first, then set the title, workspace, and audience (**Restricted**
 by default). Custom slug and backend controls are under **Optional settings**. Paste
-and upload publish when you explicitly click **Create and publish**. The result shows
-your link and lets you save the optional deploy key or continue without it.
+and upload stop at **Your draft is ready**, where you can check the entry page, file
+count, destination and intended audience. **Continue editing** opens the editor;
+**Review and publish**, followed by **Publish canvas**, makes it live. The published
+result shows your link and lets you save the optional deploy key or continue without it.
 
 Every canvas gets a slug and a URL. The default slug is random
 (`quiet-otter-x7k2`); a custom slug is lowercase letters, digits, and hyphens,
@@ -160,10 +162,10 @@ stock-data API that requires a server-side credential or fixed `User-Agent`. See
 
 ## Publish and share
 
-Two words mean different things here. **Publish** turns the editor's draft into
-a new immutable version. **Deploy** (folder, ZIP, paste, or the Deploy API)
-publishes a version directly, with no draft step; the **New version** button on
-every detail tab does this for an existing canvas.
+Dashboard creation and the editor save an unpublished **draft** first.
+**Review and publish** confirms the destination, content and audience, then turns
+that draft into a new immutable version. **Upload new version** on an existing
+canvas’s **Overview** and the **Deploy API** publish directly to live.
 
 The **Editor** tab works on a mutable draft with autosave. **Publish** (⌘↵ or
 Ctrl+Enter) snapshots it into a new version and points the canvas URL at it.

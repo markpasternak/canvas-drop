@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -273,6 +273,66 @@ describe("Your canvases — the Details button opens the inline rail (?selected)
 });
 
 describe("Your canvases — detail rail (two-pane / drawer)", () => {
+  it("keeps the drawer and scroll lock beneath a dismissable or pending duplicate dialog", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    const originalFetch = globalThis.fetch;
+    let finish: ((response: Response) => void) | undefined;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (new URL(url, "http://localhost").pathname === "/api/canvases/alpha/clone")
+          return pending;
+        return originalFetch(url, init);
+      }),
+    );
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "auto";
+    renderAt("/?selected=alpha");
+    const user = userEvent.setup();
+    const drawer = await screen.findByRole("dialog", { name: "Canvas details" });
+    const duplicate = within(drawer).getByRole("button", { name: "Duplicate Alpha canvas" });
+    await user.click(duplicate);
+    await screen.findByRole("dialog", { name: "Duplicate canvas" });
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Duplicate canvas" })).not.toBeInTheDocument(),
+    );
+    expect(selectedAttr()).toBe("alpha");
+    expect(duplicate).toHaveFocus();
+    expect(document.body.style.overflow).toBe("hidden");
+    await user.click(duplicate);
+    const clone = await screen.findByRole("dialog", { name: "Duplicate canvas" });
+    await user.click(within(clone).getByRole("button", { name: "Duplicate canvas" }));
+    expect(within(clone).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(selectedAttr()).toBe("alpha");
+    expect(clone).toBeInTheDocument();
+    await user.tab();
+    expect(clone).toHaveFocus();
+    finish?.(
+      new Response(JSON.stringify({ error: "unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await waitFor(() =>
+      expect(within(clone).getByRole("button", { name: "Cancel" })).toBeEnabled(),
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Duplicate canvas" })).not.toBeInTheDocument(),
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Canvas details" })).not.toBeInTheDocument(),
+    );
+    expect(document.body.style.overflow).toBe("auto");
+    document.body.style.overflow = overflow;
+  });
+
   /** The detail rail (inline at xl, drawer below) is the canvas-details region. */
   function detailRegion(): HTMLElement | null {
     return document.querySelector('[aria-label="Canvas details"]');
@@ -369,10 +429,10 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
   });
 
   /** Force the xl breakpoint so the INLINE sticky rail (no scrim) renders instead of
-   *  the drawer. matchMedia is read by useMediaQuery("(min-width: 1280px)"). */
+   *  the drawer. matchMedia is read by useMediaQuery("(min-width: 1536px)"). */
   function stubXl() {
     vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query.includes("1280"),
+      matches: query.includes("1536"),
       media: query,
       onchange: null,
       addListener: () => {},
@@ -382,6 +442,25 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
       dispatchEvent: () => false,
     }));
   }
+
+  it("inline rail (xl): Escape dismisses Duplicate before clearing the selection", async () => {
+    stubXl();
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    const user = userEvent.setup();
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+    const rail = detailRegion();
+    if (!rail) throw new Error("Detail rail missing");
+    await user.click(within(rail).getByRole("button", { name: "Duplicate Alpha canvas" }));
+    await screen.findByRole("dialog", { name: "Duplicate canvas" });
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Duplicate canvas" })).not.toBeInTheDocument(),
+    );
+    expect(selectedAttr()).toBe("alpha");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(selectedAttr()).toBeNull());
+  });
 
   it("inline rail (xl): Escape clears the selection", async () => {
     stubXl();

@@ -1,6 +1,6 @@
 import { ArrowRight, Code, FileHtml, FolderOpen, type Icon, Key } from "@phosphor-icons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CodeBox } from "../components/CodeBox.js";
 import { CopyButton } from "../components/CopyButton.js";
@@ -9,14 +9,19 @@ import { CreateSuccess, type PublishedCanvasResult } from "../components/CreateS
 import {
   canvasRelativePaths,
   FileDropOrProgress,
-  folderFormFromFiles,
   rawUploadPath,
 } from "../components/DeployFiles.js";
+import { Dialog } from "../components/Dialog.js";
+import { DraftPreview } from "../components/DraftPreview.js";
 import { Field, TextareaField } from "../components/Field.js";
+import { NativeSelect } from "../components/NativeSelect.js";
+import { PublishReviewDialog } from "../components/PublishReviewDialog.js";
+import { ReadError } from "../components/ReadError.js";
 import { SlugField } from "../components/SlugField.js";
 import { InlineNotice, PageHeader } from "../components/Surface.js";
 import { Toggle } from "../components/Toggle.js";
-import { ApiError, api } from "../lib/api.js";
+import { ApiError, api, type DraftView } from "../lib/api.js";
+import { archivePath, readUploadArchive, UPLOAD_ARCHIVE_MAX_BYTES } from "../lib/canvas-archive.js";
 import { cn } from "../lib/cn.js";
 import {
   applyCreateAudience,
@@ -25,12 +30,21 @@ import {
   defaultCreateAudience,
   resetAudienceForDestination,
 } from "../lib/create-audience.js";
+import {
+  type CreateMethod,
+  clearCreateRecovery,
+  type PendingCreateDraft,
+  readCreateRecovery,
+  type SelectedUpload,
+  writeCreateRecovery,
+} from "../lib/create-recovery.js";
 import { deployCurl } from "../lib/deploy-curl.js";
+import { draftUsesScripts } from "../lib/file-kind.js";
 import { useMe } from "../lib/queries.js";
 import type { SlugStatus } from "../lib/use-slug-availability.js";
+import { useUnsavedChanges } from "../lib/use-unsaved-changes.js";
 
-type Method = "paste" | "upload" | "api";
-type SelectedUpload = { kind: "folder" | "zip"; files: File[]; paths: string[] };
+type Method = CreateMethod;
 type MethodConfig = {
   id: Method;
   label: string;
@@ -56,6 +70,24 @@ const METHODS = [
 ] satisfies [MethodConfig, ...MethodConfig[]];
 
 export default function CreateCanvas() {
+  const me = useMe();
+  if (me.isPending)
+    return (
+      <p role="status" className="text-sm text-muted">
+        Loading your workspace…
+      </p>
+    );
+  if (me.isError && !me.data)
+    return (
+      <ReadError title="Couldn't load workspace information" onRetry={() => void me.refetch()} />
+    );
+  const account = me.data?.id;
+  return <CreateCanvasForm key={account ?? "loading"} accountId={account} />;
+}
+
+function CreateCanvasForm({ accountId }: { accountId: string | undefined }) {
+  const workspaceId = useId();
+  const [recovered] = useState(() => readCreateRecovery(accountId));
   const search = useSearch({ strict: false }) as { method?: string };
   const navigate = useNavigate();
 
@@ -63,16 +95,16 @@ export default function CreateCanvas() {
     search.method === "folder" || search.method === "zip"
       ? "upload"
       : (METHODS.find((m) => m.id === search.method)?.id ?? "paste");
-  const [method, setMethod] = useState<Method>(initial);
-  const [title, setTitle] = useState("");
-  const [titleEdited, setTitleEdited] = useState(false);
+  const [method, setMethod] = useState<Method>(recovered?.method ?? initial);
+  const [title, setTitle] = useState(recovered?.title ?? "");
+  const [titleEdited, setTitleEdited] = useState(recovered?.titleEdited ?? false);
   // Optional custom slug (plan 004). `slug` is the cosmetic-normalized value; `status`
   // gates submit — blocked when a slug is entered but not confirmed available.
   const meQuery = useMe();
   const me = meQuery.data;
   const busyRef = useRef(false);
   const [slug, setSlug] = useState<{ slug: string; status: SlugStatus }>({
-    slug: "",
+    slug: recovered?.slug ?? "",
     status: "idle",
   });
   const slugBlocked = slug.slug !== "" && slug.status !== "available";
@@ -80,15 +112,17 @@ export default function CreateCanvas() {
   // orgs. `undefined` = not explicitly chosen → fall back to the members-default-Org rule.
   // The server re-validates against the caller's membership regardless (never trusts this).
   const orgs = me?.orgs ?? [];
-  const [workspace, setWorkspace] = useState<string | null | undefined>(undefined);
+  const [workspace, setWorkspace] = useState<string | null | undefined>(recovered?.workspace);
   // Default selection: a member of exactly one org lands in it; everyone else is Personal.
   const homeOrgId = workspace === undefined ? (orgs.length === 1 ? orgs[0]?.id : null) : workspace;
   // Backend-group master switch chosen at create time (plan 006). Off by default;
   // changeable later in the canvas Backend tab.
-  const [backendEnabled, setBackendEnabled] = useState(false);
-  const [audience, setAudience] = useState(defaultCreateAudience);
-  const [html, setHtml] = useState("");
-  const [upload, setUpload] = useState<SelectedUpload | null>(null);
+  const [backendEnabled, setBackendEnabled] = useState(recovered?.backendEnabled ?? false);
+  const [audience, setAudience] = useState(() =>
+    recovered ? { ...recovered.audience, password: "" } : defaultCreateAudience(),
+  );
+  const [html, setHtml] = useState(recovered?.html ?? "");
+  const [upload, setUpload] = useState<SelectedUpload | null>(recovered?.upload ?? null);
   const preview = useMemo(
     () => (method === "paste" ? createDocumentPreview(html) : null),
     [html, method],
@@ -96,7 +130,9 @@ export default function CreateCanvas() {
   const canvasTitle = titleEdited ? title : (preview?.title ?? "");
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    recovered?.pending ? "Your upload is unfinished. Retry to continue the saved draft." : null,
+  );
   // Upload progress: null = not uploading; 0-100 = % of bytes sent (100 = sent,
   // server now extracting/publishing).
   const [progress, setProgress] = useState<number | null>(null);
@@ -108,7 +144,13 @@ export default function CreateCanvas() {
 
   function fail(err: unknown) {
     busyRef.current = false;
-    setError(err instanceof ApiError ? err.hint : "Something went wrong. Try again.");
+    setError(
+      err instanceof ApiError
+        ? err.hint
+        : err instanceof Error
+          ? err.message
+          : "Something went wrong. Try again.",
+    );
     setBusy(false);
     setProgress(null);
   }
@@ -122,84 +164,168 @@ export default function CreateCanvas() {
     return false;
   }
 
-  async function revealPublished(id: string, apiKey: string, url: string) {
-    const outcome = await applyCreateAudience(id, audience, api.updateSettings);
-    setBusy(false);
-    setProgress(null);
-    const shareFailed = outcome.kind === "failed";
-    const access = shareFailed
-      ? "Check sharing before distributing the link"
-      : audience.choice === "private"
-        ? "Restricted · Only you can open it"
-        : audience.choice === "workspace"
-          ? `Everyone in ${orgs.find((org) => org.id === homeOrgId)?.name ?? "your workspace"}`
-          : `Public link · Anyone with the link${audience.requirePassword ? " and password" : ""}`;
-    setRevealed({ apiKey, id, url, audience: access, shareFailed });
-  }
+  const [prepared, setPrepared] = useState<{
+    canvas: PendingCreateDraft["canvas"];
+    draft: DraftView;
+  } | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [previewKey, setPreviewKey] = useState(0);
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
+  const [formKey, setFormKey] = useState(0);
+  const completedRef = useRef(false);
+  const pendingRef = useRef<PendingCreateDraft | null>(recovered?.pending ?? null);
+  const hasInput = !!(
+    html ||
+    title ||
+    slug.slug ||
+    upload ||
+    backendEnabled ||
+    workspace !== undefined ||
+    audience.choice !== "private"
+  );
+  const blocker = useUnsavedChanges({
+    dirty: busy || (hasInput && !prepared && !revealed && !apiResult && !leaving),
+    saveBeforeLeave: async () => completedRef.current,
+  });
+  useEffect(() => {
+    if (completedRef.current) return;
+    writeCreateRecovery(accountId, {
+      method,
+      title,
+      titleEdited,
+      html,
+      slug: slug.slug,
+      workspace,
+      backendEnabled,
+      audience,
+      upload,
+      pending: pendingRef.current,
+    });
+  });
 
-  async function createPaste() {
-    if (busyRef.current || !html.trim() || meQuery.isPending || meQuery.isError) return;
-    if (slugBlocked) {
-      setError("Pick an available slug, or clear it for a random one.");
-      return;
-    }
-    if (!validateAudience()) return;
-    busyRef.current = true;
-    setBusy(true);
+  function discardInput() {
+    clearCreateRecovery();
+    setTitle("");
+    setTitleEdited(false);
+    setHtml("");
+    setUpload(null);
+    setSlug({ slug: "", status: "idle" });
+    setFormKey((key) => key + 1);
+    setWorkspace(undefined);
+    setBackendEnabled(false);
+    setAudience(defaultCreateAudience());
     setError(null);
-    try {
-      const res = await api.pasteHtml({
-        html,
-        title: canvasTitle || undefined,
-        backendEnabled,
-        slug: slug.slug || undefined,
-        orgId: homeOrgId,
-      });
-      await revealPublished(res.id, res.apiKey, res.url);
-    } catch (err) {
-      fail(err);
-    }
+    pendingRef.current = null;
   }
 
-  async function createWithUpload(kind: "folder" | "zip", files: File[]) {
-    if (busyRef.current || meQuery.isPending || meQuery.isError) return;
-    if (files.length === 0) return;
-    if (slugBlocked) {
-      setError("Pick an available slug, or clear it for a random one.");
+  const audienceLabel =
+    audience.choice === "private"
+      ? "Restricted · Only you can open it"
+      : audience.choice === "workspace"
+        ? `Everyone in ${orgs.find((org) => org.id === homeOrgId)?.name ?? "your workspace"}`
+        : `Public link · Anyone with the link${audience.requirePassword ? " and password" : ""}`;
+
+  async function stageDraft(files: Array<{ path: string; body: Blob }>) {
+    if (
+      busyRef.current ||
+      meQuery.isPending ||
+      meQuery.isError ||
+      (slugBlocked && !pendingRef.current)
+    )
+      return;
+    if (!files.length) {
+      setError("Choose at least one usable canvas file.");
       return;
     }
-    if (!validateAudience()) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
     setProgress(0);
-    const onProgress = (f: number) => setProgress(Math.round(f * 100));
     try {
-      const canvas = await api.createCanvas({
-        title: canvasTitle || undefined,
-        backendEnabled,
-        slug: slug.slug || undefined,
-        orgId: homeOrgId,
-      });
-      try {
-        if (kind === "folder") {
-          await api.deployFolder(canvas.id, folderFormFromFiles(files), onProgress);
-        } else {
-          const first = files[0];
-          if (!first) return;
-          await api.deployZip(canvas.id, await first.arrayBuffer(), onProgress);
-        }
-      } catch (deployErr) {
-        // Deploy failed after the canvas was created. Soft-delete the orphan so
-        // the user isn't left with an empty canvas + a forfeited key (mirrors the
-        // server-side /paste cleanup). Then surface the deploy error for retry.
-        await api.deleteCanvas(canvas.id).catch(() => {});
-        throw deployErr;
+      if (!pendingRef.current) {
+        const canvas = await api.createCanvas({
+          title: canvasTitle || undefined,
+          backendEnabled,
+          slug: slug.slug || undefined,
+          orgId: homeOrgId,
+        });
+        pendingRef.current = { canvas, files, next: 0, uncertain: false };
       }
-      await revealPublished(canvas.id, canvas.apiKey, canvas.url);
+      const pending = pendingRef.current;
+      for (; pending.next < pending.files.length; pending.next++) {
+        const file = pending.files[pending.next];
+        if (!file) continue;
+        if (pending.uncertain) {
+          const current = await api.getDraft(pending.canvas.id);
+          const existing = current.files.find((entry) => entry.path === file.path);
+          if (existing) {
+            const hash = Array.from(
+              new Uint8Array(await crypto.subtle.digest("SHA-256", await file.body.arrayBuffer())),
+              (byte) => byte.toString(16).padStart(2, "0"),
+            ).join("");
+            if (existing.hash !== hash)
+              throw new Error(
+                `${file.path} changed in the saved draft. Open it to compare before replacing anything.`,
+              );
+            pending.uncertain = false;
+            setProgress(Math.round(((pending.next + 1) / pending.files.length) * 100));
+            continue;
+          }
+        }
+        pending.uncertain = true;
+        await api.uploadDraftFile(pending.canvas.id, file.path, file.body, "none");
+        pending.uncertain = false;
+        setProgress(Math.round(((pending.next + 1) / pending.files.length) * 100));
+      }
+      const draft = await api.getDraft(pending.canvas.id);
+      completedRef.current = true;
+      clearCreateRecovery();
+      setPrepared({ canvas: pending.canvas, draft });
+      busyRef.current = false;
+      setBusy(false);
+      setProgress(null);
     } catch (err) {
       fail(err);
     }
+  }
+
+  async function createPaste() {
+    if (!html.trim()) return;
+    await stageDraft([{ path: "index.html", body: new Blob([html], { type: "text/html" }) }]);
+  }
+
+  async function createWithUpload(kind: "folder" | "zip", files: File[]) {
+    if (busyRef.current) return;
+    try {
+      if (kind === "zip") {
+        const file = files[0];
+        if (!file) return;
+        if (file.size > UPLOAD_ARCHIVE_MAX_BYTES)
+          throw new Error(
+            "ZIP uploads are limited to 110 MB, with 100 MB of expanded canvas files.",
+          );
+        const entries = readUploadArchive(new Uint8Array(await file.arrayBuffer()));
+        await stageDraft(
+          entries.map((entry) => ({ path: entry.path, body: new Blob([entry.bytes]) })),
+        );
+      } else {
+        const paths = canvasRelativePaths(files);
+        await stageDraft(
+          files.flatMap((body, i) => {
+            const path = archivePath(paths[i] ?? body.name);
+            return path ? [{ path, body }] : [];
+          }),
+        );
+      }
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  async function reviewDraft() {
+    if (!prepared || busyRef.current || !validateAudience()) return;
+    setError(null);
+    setReviewOpen(true);
   }
 
   async function createApiOnly() {
@@ -218,6 +344,8 @@ export default function CreateCanvas() {
         slug: slug.slug || undefined,
         orgId: homeOrgId,
       });
+      completedRef.current = true;
+      clearCreateRecovery();
       setApiResult({ id: canvas.id, apiKey: canvas.apiKey, url: canvas.url });
       setBusy(false);
     } catch (err) {
@@ -261,8 +389,7 @@ export default function CreateCanvas() {
   }
 
   if (leaving) return <PageHeader title="Opening your canvas…" />;
-  const blocked =
-    slugBlocked || (method !== "api" && audienceBlocked) || meQuery.isPending || meQuery.isError;
+  const blocked = slugBlocked || meQuery.isPending || meQuery.isError;
   if (revealed)
     return (
       <CreateSuccess
@@ -281,22 +408,139 @@ export default function CreateCanvas() {
       </div>
     );
 
+  if (prepared)
+    return (
+      <div className="mx-auto max-w-6xl space-y-6">
+        <PageHeader
+          title="Your draft is ready"
+          description="Saved to your canvases. Preview it, keep editing, or review before publishing."
+        />
+        {error && (
+          <InlineNotice tone="danger" role="alert">
+            {error}
+          </InlineNotice>
+        )}
+        <div className="flex flex-wrap items-start justify-between gap-5 border-y border-border py-5">
+          <dl className="grid min-w-0 gap-x-8 gap-y-3 sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-muted">Destination</dt>
+              <dd className="text-sm font-medium">
+                {orgs.find((org) => org.id === homeOrgId)?.name ?? "Personal"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted">Content</dt>
+              <dd className="text-sm">
+                {prepared.draft.files.length} files ·{" "}
+                <code>{prepared.draft.entry?.path ?? "No entry page"}</code>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted">Audience when published</dt>
+              <dd className="text-sm">{audienceLabel}</dd>
+            </div>
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                navigate({ to: "/canvases/$id/editor", params: { id: prepared.canvas.id } })
+              }
+            >
+              Continue editing
+            </Button>
+            <Button loading={busy} onClick={() => void reviewDraft()}>
+              Review and publish
+            </Button>
+          </div>
+        </div>
+        {audience.choice === "public" && audience.requirePassword && (
+          <Field
+            label="Password for publication"
+            type="password"
+            value={audience.password}
+            onChange={(event) =>
+              setAudience((current) => ({ ...current, password: event.target.value }))
+            }
+            autoComplete="new-password"
+          />
+        )}
+        <div className="h-[min(60dvh,36rem)] min-h-72">
+          <DraftPreview
+            canvasId={prepared.canvas.id}
+            refreshKey={previewKey}
+            onRefresh={() => setPreviewKey((key) => key + 1)}
+            fullscreen={previewFullscreen}
+            onToggleFullscreen={() => setPreviewFullscreen((open) => !open)}
+            usesScripts={draftUsesScripts(prepared.draft.files)}
+          />
+        </div>
+        <p className="text-sm text-muted">
+          Your draft stays unpublished until you confirm Publish. Signed-in backend features can
+          only run after publication.
+        </p>
+        {reviewOpen && (
+          <PublishReviewDialog
+            canvasId={prepared.canvas.id}
+            plannedAudience={audienceLabel}
+            onClose={() => setReviewOpen(false)}
+            onPublished={async () => {
+              const outcome = await applyCreateAudience(
+                prepared.canvas.id,
+                audience,
+                api.updateSettings,
+              );
+              setRevealed({
+                id: prepared.canvas.id,
+                url: prepared.canvas.url,
+                apiKey: prepared.canvas.apiKey ?? "",
+                audience: outcome.kind === "failed" ? "Sharing needs verification" : audienceLabel,
+                shareFailed: outcome.kind === "failed",
+              });
+            }}
+          />
+        )}
+      </div>
+    );
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="Create a canvas"
         description="Start with something you’ve made. Give it a home and a link."
       />
-      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      {error && (
+        <InlineNotice tone="danger" role="alert">
+          {error}
+          {pendingRef.current && (
+            <p className="mt-2">
+              The canvas exists as an unpublished draft. Retry the upload here, or{" "}
+              <a className="underline" href={`/canvases/${pendingRef.current.canvas.id}/editor`}>
+                open the saved draft
+              </a>{" "}
+              to recover it.
+            </p>
+          )}
+        </InlineNotice>
+      )}
       {meQuery.isError && (
-        <InlineNotice tone="danger">
+        <InlineNotice tone="danger" role="alert">
           Workspace information couldn’t load.{" "}
           <button type="button" className="underline" onClick={() => meQuery.refetch()}>
             Try again
           </button>
         </InlineNotice>
       )}
-      <fieldset disabled={busy} className="min-w-0 space-y-7 border-0 p-0" aria-busy={busy}>
+      {pendingRef.current && !busy && (
+        <Button onClick={() => pendingRef.current && void stageDraft(pendingRef.current.files)}>
+          Retry draft upload
+        </Button>
+      )}
+      <fieldset
+        disabled={busy || !!pendingRef.current}
+        className="min-w-0 space-y-7 border-0 p-0"
+        aria-busy={busy}
+      >
         <section aria-label="Creation method" className="space-y-5">
           <div className="flex flex-wrap gap-1 border-b border-border pb-2">
             {METHODS.map((m) => {
@@ -384,9 +628,9 @@ export default function CreateCanvas() {
                   </ul>
                   <p className="text-xs text-muted">
                     {upload.kind === "zip"
-                      ? "The archive will be checked and unpacked when you publish."
+                      ? "The archive will be checked and unpacked into an unpublished draft."
                       : "Files are staged here. Nothing has been uploaded yet."}{" "}
-                    Preview the full site in the editor after creating it.
+                    Preview the draft before publishing. Files stay in this tab only until uploaded.
                   </p>
                 </section>
               )}
@@ -412,15 +656,15 @@ export default function CreateCanvas() {
               placeholder="My prototype"
               maxLength={200}
             />
-            <label className="block space-y-1.5">
+            <label htmlFor={workspaceId} className="block space-y-1.5">
               <span className="text-sm font-medium text-fg">Workspace</span>
-              <select
+              <NativeSelect
+                id={workspaceId}
                 value={homeOrgId ?? ""}
                 onChange={(e) => {
                   setWorkspace(e.target.value === "" ? null : e.target.value);
                   setAudience(resetAudienceForDestination);
                 }}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
               >
                 <option value="">Personal</option>
                 {orgs.map((o) => (
@@ -428,7 +672,7 @@ export default function CreateCanvas() {
                     {o.name}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
               <span className="block text-xs text-muted">
                 Where this canvas lives. You can change sharing later; the workspace is fixed after
                 creation.
@@ -459,6 +703,9 @@ export default function CreateCanvas() {
           </summary>
           <div className="grid gap-6 lg:grid-cols-2">
             <SlugField
+              key={formKey}
+              canvasId={pendingRef.current?.canvas.id}
+              initialValue={formKey === 0 ? recovered?.slug : ""}
               instance={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
               onResolved={setSlug}
             />
@@ -470,7 +717,7 @@ export default function CreateCanvas() {
             />
           </div>
         </details>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-5">
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-4 border-t border-border bg-canvas py-4">
           <Button
             onClick={
               method === "api"
@@ -487,11 +734,11 @@ export default function CreateCanvas() {
             {method === "api" ? (
               <>
                 <Key size={16} aria-hidden />
-                Create key
+                Create canvas
               </>
             ) : (
               <>
-                Create and publish
+                Create draft
                 <ArrowRight size={16} aria-hidden />
               </>
             )}
@@ -518,6 +765,52 @@ export default function CreateCanvas() {
           </p>
         </div>
       </fieldset>
+      {hasInput && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
+          <p>
+            Preparation is kept while navigating this tab. Reloading requires reselecting files;
+            passwords are cleared when you leave.
+          </p>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={discardInput}>
+            Discard preparation
+          </Button>
+        </div>
+      )}
+      <Dialog
+        open={blocker.status === "blocked"}
+        onClose={() => blocker.reset?.()}
+        title="Leave this preparation?"
+        dismissable={!busy}
+      >
+        <p className="text-sm text-muted">
+          Your title, HTML and selected files stay in this tab until you return. Passwords are
+          cleared. Reloading or closing the tab loses this unsaved preparation.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" disabled={busy} onClick={() => blocker.reset?.()}>
+            Keep preparing
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              discardInput();
+              blocker.proceed?.();
+            }}
+          >
+            Discard and leave
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setAudience((current) => ({ ...current, password: "" }));
+              blocker.proceed?.();
+            }}
+          >
+            Keep preparation and leave
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
@@ -546,7 +839,7 @@ function CreateAudience({
   return (
     <section className="space-y-3">
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-fg">Audience</h3>
+        <h2 className="text-sm font-semibold text-fg">Audience</h2>
         <p className="text-xs text-muted">Choose who can open this canvas after it publishes.</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">

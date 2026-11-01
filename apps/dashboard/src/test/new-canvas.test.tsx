@@ -4,6 +4,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
+import { clearCreateRecovery } from "../lib/create-recovery.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
 
@@ -58,7 +59,10 @@ function renderNew() {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  clearCreateRecovery();
+  vi.restoreAllMocks();
+});
 
 describe("create flow — backend choice", () => {
   it("defaults the backend toggle to off", async () => {
@@ -73,7 +77,7 @@ describe("create flow — backend choice", () => {
 
   it("creating via paste with backend enabled sends backendEnabled:true", async () => {
     const calls = mockFetch({
-      "POST /api/canvases/paste": () =>
+      "POST /api/canvases": () =>
         json({ id: "c1", slug: "s", url: "http://x/c/s", apiKey: "cd_k", deploy: { version: 1 } }),
     });
     const user = userEvent.setup();
@@ -82,10 +86,10 @@ describe("create flow — backend choice", () => {
     await user.click(await screen.findByText("Optional settings"));
     await user.click(screen.getByRole("switch", { name: /enable backend/i }));
     await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
-    await user.click(screen.getByRole("button", { name: /create and publish/i }));
+    await user.click(screen.getByRole("button", { name: /create draft/i }));
 
     await vi.waitFor(() => {
-      const post = calls.find((c) => c.url === "/api/canvases/paste");
+      const post = calls.find((c) => c.url === "/api/canvases");
       expect(post?.body).toContain('"backendEnabled":true');
     });
   });
@@ -101,7 +105,7 @@ describe("create flow — backend choice", () => {
     await user.click(await screen.findByText("Optional settings"));
     await user.click(screen.getByRole("switch", { name: /enable backend/i }));
     await user.click(screen.getByRole("button", { name: /use the api/i }));
-    await user.click(screen.getByRole("button", { name: /create key/i }));
+    await user.click(screen.getByRole("button", { name: /create canvas/i }));
 
     await vi.waitFor(() => {
       const post = calls.find((c) => c.url === "/api/canvases");
@@ -112,17 +116,17 @@ describe("create flow — backend choice", () => {
 
   it("creating via paste without enabling backend sends backendEnabled:false", async () => {
     const calls = mockFetch({
-      "POST /api/canvases/paste": () =>
+      "POST /api/canvases": () =>
         json({ id: "c1", slug: "s", url: "http://x/c/s", apiKey: "cd_k", deploy: { version: 1 } }),
     });
     const user = userEvent.setup();
     renderNew();
 
     await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
-    await user.click(screen.getByRole("button", { name: /create and publish/i }));
+    await user.click(screen.getByRole("button", { name: /create draft/i }));
 
     await vi.waitFor(() => {
-      const post = calls.find((c) => c.url === "/api/canvases/paste");
+      const post = calls.find((c) => c.url === "/api/canvases");
       expect(post?.body).toContain('"backendEnabled":false');
     });
   });
@@ -181,7 +185,7 @@ describe("create flow — source-first ordering (U16)", () => {
     expect(preCreate).toContain("deploy");
 
     // Creating reveals the real one-time key + a working curl snippet.
-    await user.click(screen.getByRole("button", { name: /create key/i }));
+    await user.click(screen.getByRole("button", { name: /create canvas/i }));
     expect(await screen.findByText("cd_one_time_key")).toBeInTheDocument();
     await vi.waitFor(() => {
       const postCreate = document.body.textContent ?? "";
@@ -195,7 +199,7 @@ describe("create flow — source-first ordering (U16)", () => {
     const calls = mockFetch({
       // Slug availability check returns unavailable.
       "GET /api/canvases/slug-available": () => json({ available: false }),
-      "POST /api/canvases/paste": () =>
+      "POST /api/canvases": () =>
         json({ id: "c1", slug: "s", url: "http://x/c/s", apiKey: "cd_k", deploy: { version: 1 } }),
     });
     const user = userEvent.setup();
@@ -208,11 +212,11 @@ describe("create flow — source-first ordering (U16)", () => {
 
     // Wait for the availability check to resolve as unavailable, which blocks submit.
     await vi.waitFor(() => {
-      expect(screen.getByRole("button", { name: /create and publish/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /create draft/i })).toBeDisabled();
     });
 
-    await user.click(screen.getByRole("button", { name: /create and publish/i }));
+    await user.click(screen.getByRole("button", { name: /create draft/i }));
     // No create call fired while the slug is unavailable.
-    expect(calls.find((c) => c.url === "/api/canvases/paste")).toBeUndefined();
+    expect(calls.find((c) => c.url === "/api/canvases")).toBeUndefined();
   });
 });

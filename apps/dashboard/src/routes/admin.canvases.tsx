@@ -217,6 +217,33 @@ export default function AdminCanvases() {
   });
   // Owner drill-down label, derived from the rows (all share one owner).
   const ownerLabel = owner ? (rows[0]?.owner?.email ?? "this owner") : null;
+  const selectedRows = rows.filter((row) => selected.includes(row.id));
+  // A presentation hint only: the authoritative preview still checks every selected id.
+  const eligibleCount = (action: AdminCanvasOperation) =>
+    selectedRows.filter((row) => {
+      if (action === "delete") return row.status !== "deleted";
+      if (action === "restore")
+        return row.status === "deleted" && !row.purgeStartedAt && !row.purgedAt;
+      if (action === "purge")
+        return (
+          row.status === "deleted" &&
+          !row.purgedAt &&
+          row.deletedAt !== null &&
+          row.deletedAt + 30 * 86_400_000 <= Date.now()
+        );
+      return (
+        row.status ===
+        (
+          {
+            disable: "active",
+            enable: "disabled",
+            archive: "active",
+            unarchive: "archived",
+            restore: "deleted",
+          } as const
+        )[action]
+      );
+    }).length;
 
   return (
     <div className="space-y-6">
@@ -256,7 +283,6 @@ export default function AdminCanvases() {
         </div>
       )}
 
-      {/* Search + sort (member-parity: same primitives as Your canvases). */}
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput
           value={text}
@@ -271,52 +297,20 @@ export default function AdminCanvases() {
           onValueChange={setAccess}
         />
         <FilterSelect
-          label="Filter by context"
-          options={CONTEXT_OPTIONS}
-          value={context ?? "all"}
-          onValueChange={setContext}
-        />
-        <FilterSelect
-          label="Filter by expiry"
-          options={EXPIRY_OPTIONS}
-          value={expiry ?? "all"}
-          onValueChange={setExpiry}
-        />
-        <FilterSelect
           label="Sort canvases"
           options={ADMIN_SORT_OPTIONS}
           value={sort}
           onValueChange={setSort}
         />
-        <FilterSelect
-          label="Purge state"
-          value={search.purge ?? "all"}
-          options={[
-            { value: "all", label: "Any purge state" },
-            { value: "eligible", label: "Retention elapsed" },
-            { value: "retained", label: "Within retention" },
-            { value: "incomplete", label: "Cleanup incomplete" },
-            { value: "complete", label: "Purged" },
-          ]}
-          onValueChange={(value) =>
-            navigate({
-              to: "/admin/canvases",
-              search: (previous) => ({
-                ...previous,
-                page: 1,
-                status: value === "all" ? status : "deleted",
-                purge:
-                  value === "all"
-                    ? undefined
-                    : (value as "eligible" | "retained" | "incomplete" | "complete"),
-              }),
-            })
-          }
-        />
+        {me && (
+          <AdminSavedViews
+            key={me.id}
+            userId={me.id}
+            search={search}
+            onApply={(saved) => navigate({ to: "/admin/canvases", search: { ...saved, page: 1 } })}
+          />
+        )}
       </div>
-
-      {/* Facet chips, same vocabulary as Your canvases: single-select status tabs,
-          then the boolean gallery toggles (Template / Listed) set off by a hairline. */}
       <FilterBar>
         {STATUS_CHIPS.map((chip) => (
           <FilterChip
@@ -328,30 +322,59 @@ export default function AdminCanvases() {
           </FilterChip>
         ))}
         {filtering && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-          >
+          <Button size="sm" variant="ghost" onClick={clearFilters}>
             Clear all
-          </button>
+          </Button>
         )}
       </FilterBar>
-
-      <div className="space-y-3">
-        {me && (
-          <AdminSavedViews
-            key={me.id}
-            userId={me.id}
-            search={search}
-            onApply={(saved) => navigate({ to: "/admin/canvases", search: { ...saved, page: 1 } })}
-          />
-        )}
-        <p className="text-xs text-muted">
-          Match all conditions (AND). Effective public means published, unexpired, and permitted by
-          the owner and instance; a password can still be required.
-        </p>
+      <details className="space-y-3">
+        <summary className="cursor-pointer text-sm font-medium text-accent">
+          More filters (
+          {
+            conditions.filter(
+              ({ key }) => !["q", "status", "access", "owner", "person"].includes(key),
+            ).length
+          }
+          )
+        </summary>
         <div className="flex flex-wrap gap-2">
+          <FilterSelect
+            label="Filter by context"
+            options={CONTEXT_OPTIONS}
+            value={context ?? "all"}
+            onValueChange={setContext}
+          />
+          <FilterSelect
+            label="Filter by expiry"
+            options={EXPIRY_OPTIONS}
+            value={expiry ?? "all"}
+            onValueChange={setExpiry}
+          />
+          <FilterSelect
+            label="Purge state"
+            value={search.purge ?? "all"}
+            options={[
+              { value: "all", label: "Any purge state" },
+              { value: "eligible", label: "Retention elapsed" },
+              { value: "retained", label: "Within retention" },
+              { value: "incomplete", label: "Cleanup incomplete" },
+              { value: "complete", label: "Purged" },
+            ]}
+            onValueChange={(value) =>
+              navigate({
+                to: "/admin/canvases",
+                search: (previous) => ({
+                  ...previous,
+                  page: 1,
+                  status: value === "all" ? status : "deleted",
+                  purge:
+                    value === "all"
+                      ? undefined
+                      : (value as "eligible" | "retained" | "incomplete" | "complete"),
+                }),
+              })
+            }
+          />
           {CANVAS_BOOLEAN_FILTERS.map(({ key, label }) => (
             <AdminBooleanFilter
               key={key}
@@ -361,28 +384,32 @@ export default function AdminCanvases() {
             />
           ))}
         </div>
-        {conditions.length > 0 && (
-          <section className="flex flex-wrap gap-2" aria-label="Active conditions">
-            {conditions.map(({ key, label }) => (
-              <Button
-                key={key}
-                size="sm"
-                variant="ghost"
-                aria-label={`Remove ${label}`}
-                onClick={() => {
-                  if (key === "q") setText("");
-                  navigate({
-                    to: "/admin/canvases",
-                    search: (prev) => ({ ...prev, [key]: undefined, page: 1 }),
-                  });
-                }}
-              >
-                {label} ×
-              </Button>
-            ))}
-          </section>
-        )}
-      </div>
+        <p className="text-xs text-muted">
+          Match all conditions (AND). Effective public means published, unexpired, and permitted by
+          the owner and instance; a password can still be required.
+        </p>
+      </details>
+      {conditions.length > 0 && (
+        <section className="flex flex-wrap gap-2" aria-label="Active conditions">
+          {conditions.map(({ key, label }) => (
+            <Button
+              key={key}
+              size="sm"
+              variant="ghost"
+              aria-label={`Remove ${label}`}
+              onClick={() => {
+                if (key === "q") setText("");
+                navigate({
+                  to: "/admin/canvases",
+                  search: (prev) => ({ ...prev, [key]: undefined, page: 1 }),
+                });
+              }}
+            >
+              {label} ×
+            </Button>
+          ))}
+        </section>
+      )}
 
       {isLoading && <p className="text-sm text-muted">Loading canvases…</p>}
       {isError && (
@@ -425,17 +452,40 @@ export default function AdminCanvases() {
                 {selected.length} selected on this page. Other matches are excluded.
               </p>
               <div className="flex flex-wrap gap-2">
-                {(Object.keys(ADMIN_OPERATION_LABELS) as AdminCanvasOperation[]).map((action) => (
-                  <Button
-                    key={action}
-                    size="sm"
-                    variant="secondary"
-                    disabled={isPlaceholderData}
-                    onClick={() => setOperation({ action, ids: [...selected] })}
-                  >
-                    {ADMIN_OPERATION_LABELS[action]} selected
-                  </Button>
-                ))}
+                {(Object.keys(ADMIN_OPERATION_LABELS) as AdminCanvasOperation[])
+                  .filter((action) => eligibleCount(action) > 0)
+                  .map((action) => (
+                    <Button
+                      key={action}
+                      size="sm"
+                      variant={action === "purge" || action === "delete" ? "danger" : "secondary"}
+                      aria-label={`${ADMIN_OPERATION_LABELS[action]} selected`}
+                      disabled={isPlaceholderData}
+                      onClick={() => setOperation({ action, ids: [...selected] })}
+                    >
+                      {ADMIN_OPERATION_LABELS[action]} selected · {eligibleCount(action)}
+                    </Button>
+                  ))}
+                <details>
+                  <summary className="cursor-pointer rounded-md px-2 py-2 text-sm text-muted">
+                    Other lifecycle actions
+                  </summary>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(Object.keys(ADMIN_OPERATION_LABELS) as AdminCanvasOperation[])
+                      .filter((action) => eligibleCount(action) === 0)
+                      .map((action) => (
+                        <Button
+                          key={action}
+                          size="sm"
+                          variant="ghost"
+                          disabled
+                          title="No selected canvas has the required lifecycle state"
+                        >
+                          {ADMIN_OPERATION_LABELS[action]} · 0 eligible
+                        </Button>
+                      ))}
+                  </div>
+                </details>
                 <Button size="sm" variant="ghost" onClick={() => setSelected([])}>
                   Clear selection
                 </Button>

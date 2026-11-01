@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Canvas, CanvasCapabilitiesPatch } from "../lib/api.js";
 import {
   type Audience,
@@ -13,6 +13,7 @@ import {
   type RuntimePolicy,
 } from "../lib/runtime-policy.js";
 import { Button } from "./Button.js";
+import { NativeSelect } from "./NativeSelect.js";
 import { Section } from "./SettingsSection.js";
 
 const control =
@@ -29,10 +30,11 @@ function RightSelect({
   onChange: (value: Right) => void;
   audienceOnly?: boolean;
 }) {
+  const id = useId();
   return (
-    <label className="grid min-w-0 gap-1 text-sm text-muted">
+    <label htmlFor={id} className="grid min-w-0 gap-1 text-sm text-muted">
       {label}
-      <select className={control} value={value} onChange={(e) => onChange(e.target.value as Right)}>
+      <NativeSelect id={id} value={value} onChange={(e) => onChange(e.target.value as Right)}>
         {Object.entries(RIGHT_LABELS)
           .filter(([key]) => !audienceOnly || ["none", "editors", "viewers"].includes(key))
           .map(([key, text]) => (
@@ -40,7 +42,7 @@ function RightSelect({
               {text}
             </option>
           ))}
-      </select>
+      </NativeSelect>
     </label>
   );
 }
@@ -55,12 +57,13 @@ function DataSettings({
   onChange: (policy: DataPolicy) => void;
   files: boolean;
 }) {
+  const id = useId();
   return (
     <div className="space-y-3">
-      <label className="grid gap-1 text-sm">
+      <label htmlFor={id} className="grid gap-1 text-sm">
         Preset for {name}
-        <select
-          className={control}
+        <NativeSelect
+          id={id}
           value={policy.preset}
           onChange={(e) => onChange({ preset: e.target.value as Preset })}
         >
@@ -69,7 +72,7 @@ function DataSettings({
               {value.label}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <p className="text-sm text-muted">
         {Object.keys(policy.overrides ?? {}).length
@@ -114,17 +117,21 @@ export function RuntimePolicySettings({
   save,
   pending,
   connectionKeys,
+  onDirtyChange,
 }: {
   canvas: Canvas;
   save: (patch: CanvasCapabilitiesPatch) => Promise<unknown>;
   pending: boolean;
   connectionKeys: string[];
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const id = useId();
   const [edit, setEdit] = useState<{ policy: RuntimePolicy; revision: string | null } | null>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"collections" | "fileGroups" | "channels">("collections");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  useEffect(() => onDirtyChange?.(edit !== null), [edit, onDirtyChange]);
   const policy = edit?.policy ?? canvas.runtimePolicy ?? emptyPolicy();
   const change = (next: RuntimePolicy) => {
     setEdit({
@@ -196,11 +203,50 @@ export function RuntimePolicySettings({
         disabled={pending || !canvas.backendEnabled || canvas.status === "disabled"}
         className="min-w-0 space-y-4"
       >
-        <label className="grid gap-1 text-sm font-medium">
+        <section aria-label="Configured resources" className="space-y-2">
+          <h3 className="font-medium">Configured resources</h3>
+          {(["collections", "fileGroups", "channels"] as const).every(
+            (type) => Object.keys(policy[type]).length === 0,
+          ) ? (
+            <p className="text-sm text-muted">
+              No named resources yet. Add one below using the same name as your canvas code.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border text-sm">
+              {(["collections", "fileGroups"] as const).flatMap((type) =>
+                Object.entries(policy[type]).map(([key, value]) => (
+                  <li key={`${type}:${key}`} className="py-2">
+                    <p className="break-all font-medium">
+                      {type === "collections" ? "Collection" : "File group"}: {key}
+                    </p>
+                    <p className="text-muted">
+                      {!canvas.effective?.[type === "collections" ? "kv" : "files"]
+                        ? "Feature currently off. Saved permissions: "
+                        : ""}
+                      {value.overrides
+                        ? "Custom permissions; inspect operations below."
+                        : PRESETS[value.preset].summary}
+                    </p>
+                  </li>
+                )),
+              )}
+              {Object.entries(policy.channels).map(([key, value]) => (
+                <li key={`channel:${key}`} className="py-2">
+                  <p className="break-all font-medium">Channel: {key}</p>
+                  <p className="text-muted">
+                    Receive: {RIGHT_LABELS[value.subscribe]}. Publish: {RIGHT_LABELS[value.publish]}
+                    . Presence: {RIGHT_LABELS[value.participatePresence]}.
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <label htmlFor={`${id}-default`} className="grid gap-1 text-sm font-medium">
           Default for new resources
-          <select
+          <NativeSelect
+            id={`${id}-default`}
             aria-label="Default for new resources"
-            className={control}
             value={policy.defaultMode}
             onChange={(e) =>
               change({ ...policy, defaultMode: e.target.value as RuntimePolicy["defaultMode"] })
@@ -209,7 +255,7 @@ export function RuntimePolicySettings({
             <option value="read_only">Read only</option>
             <option value="participation">Participation</option>
             <option value="collaboration">Collaboration</option>
-          </select>
+          </NativeSelect>
         </label>
         <p className="text-sm text-muted">
           {PRESETS[defaultPreset(policy.defaultMode)].summary} Existing resource permissions stay
@@ -217,17 +263,17 @@ export function RuntimePolicySettings({
           controls.
         </p>
         <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <label className="grid gap-1 text-sm">
+          <label htmlFor={`${id}-kind`} className="grid gap-1 text-sm">
             Resource type
-            <select
-              className={control}
+            <NativeSelect
+              id={`${id}-kind`}
               value={kind}
               onChange={(e) => setKind(e.target.value as typeof kind)}
             >
               <option value="collections">Collection</option>
               <option value="fileGroups">File group</option>
               <option value="channels">Channel</option>
-            </select>
+            </NativeSelect>
           </label>
           <label className="grid gap-1 text-sm">
             Resource name
@@ -369,57 +415,59 @@ export function RuntimePolicySettings({
             </p>
           </div>
         </details>
-        {edit && (
-          <div className="space-y-2 rounded-lg border border-border p-3" aria-live="polite">
-            <p className="font-medium">Review permission changes</p>
-            <p className="text-sm text-muted">
-              {policy.defaultMode !== baseline.defaultMode
-                ? "The default changes for new resources only. "
-                : ""}
-              {changedResources.length
-                ? "These resources will use the settings shown above, including existing items:"
-                : "No existing resource permissions change."}
-            </p>
-            {changedResources.length > 0 && (
-              <ul className="list-inside list-disc break-all text-sm">
-                {changedResources.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                loading={pending}
-                onClick={async () => {
-                  try {
-                    await save({
-                      runtimePolicy: edit.policy,
-                      expectedRuntimePolicy: edit.revision,
-                    });
-                    setEdit(null);
-                    setSaved(true);
-                  } catch {
-                    setError(
-                      "Couldn't save permissions. Reload the latest settings before trying again; your proposed changes are still shown.",
-                    );
-                  }
-                }}
-              >
-                Save permissions
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setEdit(null);
-                  setError("");
-                }}
-              >
-                Discard changes
-              </Button>
-            </div>
-          </div>
-        )}
       </fieldset>
+      {edit && (
+        <div className="space-y-2 rounded-lg border border-border p-3" aria-live="polite">
+          <p className="font-medium">Review permission changes</p>
+          <p className="text-sm text-muted">
+            {policy.defaultMode !== baseline.defaultMode
+              ? "The default changes for new resources only. "
+              : ""}
+            {changedResources.length
+              ? "These resources will use the settings shown above, including existing items:"
+              : "No existing resource permissions change."}
+          </p>
+          {changedResources.length > 0 && (
+            <ul className="list-inside list-disc break-all text-sm">
+              {changedResources.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              loading={pending}
+              disabled={!canvas.backendEnabled || canvas.status === "disabled"}
+              onClick={async () => {
+                try {
+                  await save({
+                    runtimePolicy: edit.policy,
+                    expectedRuntimePolicy: edit.revision,
+                  });
+                  setEdit(null);
+                  setSaved(true);
+                } catch {
+                  setError(
+                    "Couldn't save permissions. Reload the latest settings before trying again; your proposed changes are still shown.",
+                  );
+                }
+              }}
+            >
+              Save permissions
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={pending}
+              onClick={() => {
+                setEdit(null);
+                setError("");
+              }}
+            >
+              Discard changes
+            </Button>
+          </div>
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}

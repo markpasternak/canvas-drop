@@ -9,7 +9,7 @@ import { canvasTitle, lastActivity, visibilityLabel } from "./CanvasList.js";
 import { coverType } from "./GenerativeCover.js";
 
 const actionBase =
-  "inline-flex h-9 w-full items-center justify-center gap-2 rounded-md px-3 text-[0.8125rem] " +
+  "cd-touch-target inline-flex h-9 w-full items-center justify-center gap-2 rounded-md px-3 text-[0.8125rem] " +
   "font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
   "outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
 
@@ -67,11 +67,15 @@ export function DetailPanel({
     : undefined;
 
   return (
-    <aside aria-label="Canvas details" className="flex h-full flex-col gap-4 overflow-y-auto">
+    <aside
+      aria-label="Canvas details"
+      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
+    >
       {/* Hero cover */}
       <div className="aspect-[3/2] w-full overflow-hidden rounded-lg border border-border/60 bg-surface-sunken">
         <CanvasCover
           seed={canvas.id}
+          plain
           title={title}
           type={coverType({
             templatable: canvas.galleryTemplatable,
@@ -85,7 +89,7 @@ export function DetailPanel({
 
       {/* Title + status */}
       <div className="flex flex-col gap-2">
-        <h2 className="font-display text-lg text-fg">{title}</h2>
+        <h2 className="break-words font-display text-lg text-fg">{title}</h2>
         <div className="flex flex-wrap items-center gap-1.5">
           <PublicationBadge state={canvas.publicationState} />
           <AccessBadge access={canvas.access} />

@@ -15,4 +15,30 @@ export const NAV_CLIENT_JS = `(() => {
     }
   });
 })();
+
+(() => {
+  document.querySelectorAll(".doc pre:not(.mermaid)").forEach((pre) => {
+    const code = pre.querySelector("code");
+    if (!code) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-command";
+    button.textContent = "Copy code";
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent || "");
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Copy failed — select code";
+      }
+    });
+    pre.before(button);
+  });
+  document.querySelectorAll(".page-outline a").forEach((link) => {
+    link.addEventListener("click", () => {
+      const target = document.getElementById(decodeURIComponent(link.hash.slice(1)));
+      target?.focus({ preventScroll: true });
+    });
+  });
+})();
 `;

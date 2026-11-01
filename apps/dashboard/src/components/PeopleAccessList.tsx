@@ -6,7 +6,6 @@ import {
   type Team,
   type TransferCandidate,
 } from "../lib/api.js";
-import { inputControl } from "../lib/input-styles.js";
 import { addPersonFeedback } from "../lib/invite-feedback.js";
 import { usePeopleSearch } from "../lib/queries.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
@@ -14,9 +13,10 @@ import { ApiKeyReveal } from "./ApiKeyReveal.js";
 import { Badge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+import { NativeSelect } from "./NativeSelect.js";
 import { PeopleEmailCombobox } from "./PeopleEmailCombobox.js";
+import { ReadError } from "./ReadError.js";
 import { Skeleton } from "./Skeleton.js";
-import { InlineNotice } from "./Surface.js";
 import { useToast } from "./Toast.js";
 
 export type AccessRole = "viewer" | "editor";
@@ -60,7 +60,11 @@ function entryLabel(e: AllowlistEntry): string {
  * are always viewers). The People/Teams tabs switch only the add form; the unified list
  * stays in place so changing input mode never changes the user's understanding of access.
  */
-export function PeopleAccessList({
+export function PeopleAccessList(props: PeopleAccessListProps) {
+  return <CanvasPeopleAccessList key={props.canvasId} {...props} />;
+}
+
+function CanvasPeopleAccessList({
   canvasId,
   teams,
   orgs,
@@ -78,6 +82,7 @@ export function PeopleAccessList({
   const [addMode, setAddMode] = useState<"people" | "teams">("people");
   // One flag per action (review #21): adding a person never greys out Add team.
   const [personBusy, setPersonBusy] = useState(false);
+  const [deliveryFeedback, setDeliveryFeedback] = useState<Record<string, string>>({});
   const [teamBusy, setTeamBusy] = useState(false);
   // KTD11 / AE19: after an editor leaves (removed or demoted), offer to rotate the deploy
   // key they may have copied. Declining removes only the grant.
@@ -90,6 +95,13 @@ export function PeopleAccessList({
   // A canvas change can leave the previous allowlist request in flight. Only the latest
   // request may update either this component or the parent's list-aware copy.
   const requestGeneration = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const peopleTab = useRef<HTMLButtonElement>(null);
   const teamsTab = useRef<HTMLButtonElement>(null);
   const tabsId = useId();
@@ -101,6 +113,7 @@ export function PeopleAccessList({
   );
 
   const reload = () => {
+    if (!mounted.current) return Promise.resolve();
     const generation = ++requestGeneration.current;
     setEntries(null);
     setLoadFailed(false);
@@ -109,7 +122,7 @@ export function PeopleAccessList({
     return api
       .listAllowlist(canvasId)
       .then((view) => {
-        if (generation !== requestGeneration.current) return;
+        if (!mounted.current || generation !== requestGeneration.current) return;
         setEntries(view.entries);
         setLoadFailed(false);
         onChanged?.(view.entries);
@@ -119,7 +132,7 @@ export function PeopleAccessList({
         onTransferCandidatesChanged?.(view.transferCandidates ?? directEditors);
       })
       .catch((err) => {
-        if (generation !== requestGeneration.current) return;
+        if (!mounted.current || generation !== requestGeneration.current) return;
         // Surface the failure instead of silently showing an empty list — an
         // inaccessible list must be distinguishable from a real-empty one.
         toast(err instanceof ApiError ? err.hint : "Couldn't load the access list", "error");
@@ -131,6 +144,7 @@ export function PeopleAccessList({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: load on canvas or parent refresh only
   useEffect(() => {
+    setDeliveryFeedback({});
     void reload();
     return () => {
       requestGeneration.current += 1;
@@ -145,18 +159,22 @@ export function PeopleAccessList({
 
   async function addPerson() {
     const value = email.trim();
-    if (!value) return;
+    if (!value || personBusy) return;
     setPersonBusy(true);
     try {
       const r = await api.addAllowlistMember(canvasId, value, personRole);
-      setEmail("");
+      if (!mounted.current) return;
+      setEmail((current) => (current.trim() === value ? "" : current));
       await reload();
+      if (!mounted.current) return;
       if (r.status === "role_changed") toast("Role updated");
       else {
         const feedback = addPersonFeedback("canvas", r.status, r.emailDelivery);
+        setDeliveryFeedback((current) => ({ ...current, [value.toLowerCase()]: feedback.message }));
         toast(feedback.message, feedback.tone);
       }
     } catch (err) {
+      if (!mounted.current) return;
       toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
     } finally {
       setPersonBusy(false);
@@ -164,14 +182,17 @@ export function PeopleAccessList({
   }
 
   async function addTeam() {
-    if (!teamId) return;
+    if (!teamId || teamBusy) return;
     setTeamBusy(true);
     try {
       await api.addAllowlistTeam(canvasId, teamId, teamRole);
-      setTeamId("");
+      if (!mounted.current) return;
+      setTeamId((current) => (current === teamId ? "" : current));
       await reload();
+      if (!mounted.current) return;
       toast(teamRole === "editor" ? "Team added as editors" : "Team added");
     } catch (err) {
+      if (!mounted.current) return;
       toast(err instanceof ApiError ? err.hint : "Couldn't add that team", "error");
     } finally {
       setTeamBusy(false);
@@ -181,9 +202,12 @@ export function PeopleAccessList({
   async function changeRole(e: AllowlistEntry, next: AccessRole) {
     try {
       await api.setAllowlistRole(canvasId, e.id, next);
+      if (!mounted.current) return;
       await reload();
+      if (!mounted.current) return;
       if (e.role === "editor" && next === "viewer") setKeyPrompt(entryLabel(e));
     } catch (err) {
+      if (!mounted.current) return;
       toast(err instanceof ApiError ? err.hint : "Couldn't change the role", "error");
     }
   }
@@ -192,10 +216,13 @@ export function PeopleAccessList({
     setRemoveBusy(true);
     try {
       await api.removeAllowlistEntry(canvasId, e.id);
+      if (!mounted.current) return;
       setRemoving(null);
       await reload();
+      if (!mounted.current) return;
       if (e.role === "editor") setKeyPrompt(entryLabel(e));
     } catch (err) {
+      if (!mounted.current) return;
       toast(err instanceof ApiError ? err.hint : "Couldn't remove", "error");
     } finally {
       setRemoveBusy(false);
@@ -206,9 +233,11 @@ export function PeopleAccessList({
     setRegenerating(true);
     try {
       const { apiKey } = await api.regenerateKey(canvasId);
+      if (!mounted.current) return;
       setKeyPrompt(null);
       setRevealedKey(apiKey);
     } catch (err) {
+      if (!mounted.current) return;
       toast(err instanceof ApiError ? err.hint : "Couldn't regenerate the key", "error");
     } finally {
       setRegenerating(false);
@@ -216,9 +245,10 @@ export function PeopleAccessList({
   }
 
   const roleSelect = (e: AllowlistEntry) => (
-    <select
+    <NativeSelect
       aria-label={`Role for ${entryLabel(e)}`}
-      className={`${inputControl} h-8 w-auto min-w-24 py-0 text-xs`}
+      controlSize="sm"
+      wrapperClassName="min-w-28"
       value={e.role === "editor" ? "editor" : "viewer"}
       onChange={(event) => {
         const next = event.target.value as AccessRole;
@@ -227,7 +257,7 @@ export function PeopleAccessList({
     >
       <option value="viewer">Viewer</option>
       <option value="editor">Editor</option>
-    </select>
+    </NativeSelect>
   );
 
   function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
@@ -315,17 +345,21 @@ export function PeopleAccessList({
               inputClassName="h-10"
             />
           </div>
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-fg">
+          <label
+            htmlFor={`${tabsId}-person-role`}
+            className="flex flex-col gap-1.5 text-sm font-medium text-fg"
+          >
             Role
-            <select
+            <NativeSelect
+              id={`${tabsId}-person-role`}
               aria-label="Role for the person to add"
-              className={`${inputControl} h-10 min-w-28 py-0`}
+              wrapperClassName="min-w-28"
               value={personRole}
               onChange={(event) => setPersonRole(event.target.value as AccessRole)}
             >
               <option value="viewer">Viewer</option>
               <option value="editor">Editor</option>
-            </select>
+            </NativeSelect>
           </label>
           <div className="flex flex-col gap-1.5">
             <span aria-hidden="true" className="invisible text-sm font-medium">
@@ -348,11 +382,14 @@ export function PeopleAccessList({
           aria-labelledby={`${tabsId}-teams-tab`}
           className="flex flex-wrap items-start gap-2"
         >
-          <label className="flex min-w-[12rem] flex-1 flex-col gap-1.5 text-sm font-medium text-fg">
+          <label
+            htmlFor={`${tabsId}-team`}
+            className="flex min-w-[12rem] flex-1 flex-col gap-1.5 text-sm font-medium text-fg"
+          >
             Team
-            <select
+            <NativeSelect
+              id={`${tabsId}-team`}
               aria-label="Team to add"
-              className={`${inputControl} h-10 py-0`}
               value={teamId}
               onChange={(event) => setTeamId(event.target.value)}
             >
@@ -363,19 +400,23 @@ export function PeopleAccessList({
                   {team.orgId === null ? " (personal)" : ""}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-fg">
+          <label
+            htmlFor={`${tabsId}-team-role`}
+            className="flex flex-col gap-1.5 text-sm font-medium text-fg"
+          >
             Role
-            <select
+            <NativeSelect
+              id={`${tabsId}-team-role`}
               aria-label="Role for the team to add"
-              className={`${inputControl} h-10 min-w-28 py-0`}
+              wrapperClassName="min-w-28"
               value={teamRole}
               onChange={(event) => setTeamRole(event.target.value as AccessRole)}
             >
               <option value="viewer">Viewer</option>
               <option value="editor">Editor</option>
-            </select>
+            </NativeSelect>
           </label>
           <div className="flex flex-col gap-1.5">
             <span aria-hidden="true" className="invisible text-sm font-medium">
@@ -391,15 +432,18 @@ export function PeopleAccessList({
       {entries === null ? (
         <Skeleton className="h-8" />
       ) : loadFailed ? (
-        <InlineNotice tone="warning" className="py-2 text-xs">
+        <ReadError title="Couldn't load the access list" onRetry={() => void reload()}>
           Couldn't load the access list. Try again before relying on who appears here.
-        </InlineNotice>
+        </ReadError>
       ) : (
         <ul className="divide-y divide-border" aria-label="People and teams">
           {entries.map((e) => (
-            <li key={e.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="truncate text-fg">{entryLabel(e)}</span>
+            <li
+              key={e.id}
+              className="grid grid-cols-1 items-start gap-2 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3"
+            >
+              <span className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="break-all text-fg">{entryLabel(e)}</span>
                 {e.kind === "team" && (
                   <TeamScopeBadge
                     team={{
@@ -410,11 +454,19 @@ export function PeopleAccessList({
                 )}
                 {e.kind === "team" && <span className="text-xs text-muted">team</span>}
                 {e.kind === "pending" && (
-                  <span className="text-xs text-muted">pending sign-in</span>
+                  <span className="basis-full text-xs text-muted">
+                    pending sign-in · Access activates only after signing in with this exact email.
+                    Share the canvas link.
+                  </span>
+                )}
+                {e.email && deliveryFeedback[e.email.toLowerCase()] && (
+                  <span className="basis-full text-xs text-muted" role="status">
+                    {deliveryFeedback[e.email.toLowerCase()]}
+                  </span>
                 )}
                 {e.kind === "guest" && <span className="text-xs text-muted">legacy guest</span>}
               </span>
-              <span className="flex shrink-0 items-center gap-1">
+              <span className="flex min-h-8 shrink-0 items-center justify-end gap-1">
                 {e.kind === "owner" ? (
                   <span className="text-xs font-medium text-fg">Owner</span>
                 ) : e.kind === "guest" ? (

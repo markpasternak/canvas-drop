@@ -95,7 +95,7 @@ function OwnerStrip({ item }: { item: GalleryItem }) {
       ) : (
         <span className="size-5 shrink-0 rounded-full bg-surface-sunken" aria-hidden />
       )}
-      <span className="truncate text-xs text-white/85">{item.owner.name}</span>
+      <span className="truncate text-xs text-muted">{item.owner.name}</span>
     </div>
   );
 }
@@ -226,7 +226,7 @@ function GalleryViewToggle({
 
 function CardSkeletonGrid() {
   return (
-    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
       {Array.from({ length: 8 }, (_, i) => i).map((i) => (
         <li
           key={i}
@@ -248,8 +248,6 @@ function CardSkeletonGrid() {
 /** Cap for the admin-curated Featured row (U17). Beyond 6 is silently dropped; the
  *  "see all featured" overflow view is the deferred follow-up. */
 const FEATURED_CAP = 6;
-/** How many of the most-recently-published canvases the discovery strip surfaces. */
-const RECENT_CAP = 6;
 /** How many top-tag shortcut chips to surface above the grid. */
 const TOP_TAG_CAP = 8;
 
@@ -273,7 +271,7 @@ function DiscoveryStrip({
         <h2 className="font-display text-sm text-fg">{heading}</h2>
         {description && <p className="text-xs text-subtle">{description}</p>}
       </div>
-      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {items.map((item) => (
           <GalleryCard key={item.id} item={item} />
         ))}
@@ -357,7 +355,13 @@ export default function Gallery() {
   // scanning aid on the default, unfiltered, grid view. Suppressed while filtering or
   // in list mode so they never duplicate or fight the focused result set.
   const showDiscovery =
-    view === "grid" && !q && selectedTags.length === 0 && !owner && !templatable;
+    view === "grid" &&
+    page === 1 &&
+    sort === "published" &&
+    !q &&
+    selectedTags.length === 0 &&
+    !owner &&
+    !templatable;
   const featuredQuery = useGallery(
     {
       featured: true,
@@ -367,17 +371,12 @@ export default function Gallery() {
     },
     showDiscovery,
   );
-  const recentQuery = useGallery({ sort: "recent", limit: RECENT_CAP, offset: 0 }, showDiscovery);
-  // Admin-curation can leave a stale-true flag on a now-unlisted canvas; the gallery
-  // visibility predicate already filters those at query time, so the row only ever
-  // carries live+listed+published+featured items. Cap defensively in case the server
-  // returns more than the requested limit.
   const featuredItems = (featuredQuery.data?.items ?? []).slice(0, FEATURED_CAP);
-  // A recency shelf only adds information when it is a slice of a larger gallery.
-  // At or below the shelf cap it merely repeats every Browse-all card (especially
-  // awkward for a one-item gallery), so let the main collection carry the page alone.
-  const recentItems =
-    (data?.total ?? 0) > RECENT_CAP ? (recentQuery.data?.items ?? []).slice(0, RECENT_CAP) : [];
+  const filterCount = selectedTags.length + Number(Boolean(owner)) + Number(templatable);
+  const [filtersOpen, setFiltersOpen] = useState(filterCount > 0);
+  useEffect(() => {
+    if (filterCount > 0) setFiltersOpen(true);
+  }, [filterCount]);
 
   // A fresh refetch that drops below the current page (e.g. an item was un-listed
   // while on the last page) snaps back to page 1 rather than showing an empty page.
@@ -505,66 +504,73 @@ export default function Gallery() {
           onValueChange={setSort}
         />
         <GalleryViewToggle value={view} onChange={setView} />
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-expanded={filtersOpen}
+          aria-controls="gallery-filters"
+          onClick={() => setFiltersOpen((value) => !value)}
+        >
+          Filters{filterCount > 0 ? ` (${filterCount})` : ""}
+        </Button>
+        {filtering && (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            Clear all
+          </Button>
+        )}
       </div>
 
-      <FilterBar>
-        {/* Multi-select tag filter — the shared control (mirrors the owner list), wired
+      <div
+        id="gallery-filters"
+        hidden={!filtersOpen}
+        className="space-y-3 border-y border-border py-4"
+      >
+        <FilterBar>
+          {/* Multi-select tag filter — the shared control (mirrors the owner list), wired
             to the same multi-value `?tag=` selection the popular-tag chips below drive.
             Sourced from the gallery-wide distinct tags (facets); hides itself when there
             are no tags. Leads the row, set off from the owner/template controls. */}
-        <TagFilter
-          availableTags={facets.data?.tags ?? []}
-          selected={selectedTags}
-          onChange={setTags}
-        />
-        {(facets.data?.tags?.length ?? 0) > 0 && (
-          <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
-        )}
-        <FilterSelect
-          label="Filter by owner"
-          options={ownerOptions}
-          value={owner ?? ""}
-          onValueChange={setOwner}
-          // Until facets resolve the only option is "All owners"; disable so a user
-          // can't open an incomplete list and think there are no other owners.
-          disabled={facets.isLoading && ownerOptions.length <= 1}
-        />
-        <FilterChip active={templatable} onClick={toggleTemplatable}>
-          Templates
-        </FilterChip>
-        {filtering && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-          >
-            Clear all
-          </button>
-        )}
-      </FilterBar>
+          <TagFilter
+            availableTags={facets.data?.tags ?? []}
+            selected={selectedTags}
+            onChange={setTags}
+          />
+          {(facets.data?.tags?.length ?? 0) > 0 && (
+            <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
+          )}
+          <FilterSelect
+            label="Filter by owner"
+            options={ownerOptions}
+            value={owner ?? ""}
+            onValueChange={setOwner}
+            // Until facets resolve the only option is "All owners"; disable so a user
+            // can't open an incomplete list and think there are no other owners.
+            disabled={facets.isLoading && ownerOptions.length <= 1}
+          />
+          <FilterChip active={templatable} onClick={toggleTemplatable}>
+            Templates
+          </FilterChip>
+        </FilterBar>
 
-      {/* Top-tag shortcut chips — quick one-click filters from the gallery-wide tag
+        {/* Top-tag shortcut chips — quick one-click filters from the gallery-wide tag
           facets, complementing the multi-select TagFilter control above. Both drive the
           same `?tag=` selection; an active tag reads as highlighted here too. */}
-      {(facets.data?.tags?.length ?? 0) > 0 && (
-        <TopTagChips tags={facets.data?.tags ?? []} active={selectedTags} onToggle={toggleTopTag} />
-      )}
+        {(facets.data?.tags?.length ?? 0) > 0 && (
+          <TopTagChips
+            tags={facets.data?.tags ?? []}
+            active={selectedTags}
+            onToggle={toggleTopTag}
+          />
+        )}
+      </div>
 
-      {/* Discovery rows (Featured, Recently published) — a curated/recency slice above
-          the main grid, only on the default unfiltered grid view. */}
+      {/* Curated discovery stays on the default unfiltered first page. */}
       {showDiscovery && (
-        <>
-          <DiscoveryStrip
-            heading="Featured"
-            description="Hand-picked by your admins."
-            items={featuredItems}
-          />
-          <DiscoveryStrip
-            heading="Recently published"
-            description="The latest canvases shared with your org."
-            items={recentItems}
-          />
-        </>
+        <DiscoveryStrip
+          heading="Featured"
+          description="Hand-picked by your admins."
+          items={featuredItems}
+        />
       )}
 
       {isLoading && <CardSkeletonGrid />}
@@ -584,7 +590,7 @@ export default function Gallery() {
       {data && items.length === 0 && !filtering && (
         <EmptyState
           title="No canvases in the gallery yet"
-          description="When a colleague shares a canvas and flips “List in the gallery” in its settings, it shows up here."
+          description="When a colleague shares a canvas and turns on “List in the gallery” in Share, it shows up here."
           action={
             <Link to="/" className="text-sm font-medium text-accent">
               Back to your canvases
@@ -613,11 +619,11 @@ export default function Gallery() {
 
       {items.length > 0 && (
         <section aria-label="All gallery canvases" className="space-y-4">
-          {showDiscovery && (featuredItems.length > 0 || recentItems.length > 0) && (
+          {showDiscovery && featuredItems.length > 0 && (
             <h2 className="font-display text-sm text-fg">Browse all</h2>
           )}
           {view === "grid" ? (
-            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               {items.map((item) => (
                 <GalleryCard key={item.id} item={item} />
               ))}

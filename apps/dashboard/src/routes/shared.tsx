@@ -1,5 +1,5 @@
 import { ArrowSquareOut, Copy, Rows, SquaresFour } from "@phosphor-icons/react";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Badge } from "../components/Badge.js";
@@ -81,7 +81,7 @@ function OwnerStrip({ item }: { item: SharedCanvas }) {
       ) : (
         <span className="size-5 shrink-0 rounded-full bg-surface-sunken" aria-hidden />
       )}
-      <span className="truncate text-xs text-white/85">{accessMeta(item)}</span>
+      <span className="truncate text-xs text-muted">{accessMeta(item)}</span>
     </div>
   );
 }
@@ -161,7 +161,7 @@ function SharedViewToggle({
 
 function CardSkeletonGrid() {
   return (
-    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
       {Array.from({ length: 8 }, (_, i) => i).map((i) => (
         <li
           key={i}
@@ -242,7 +242,7 @@ export default function Shared() {
     <div className="space-y-6">
       <PageHeader
         title="Shared"
-        description="Canvases other people shared with you. Find one and open it."
+        description="Canvases opened to you directly, through a team, or listed for your org. Gallery is the separate collection of canvases people chose to showcase."
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -291,7 +291,12 @@ export default function Shared() {
       {data && items.length === 0 && !filtering && (
         <EmptyState
           title="Nothing shared with you yet"
-          description="Canvases appear here when someone adds you directly, or lists a Team or Whole-org share you can access."
+          description="Ask a colleague for access to a canvas, or browse Gallery for canvases already available to you."
+          action={
+            <Link to="/gallery" className="text-sm font-medium text-accent hover:underline">
+              Browse Gallery
+            </Link>
+          }
         />
       )}
 
@@ -310,7 +315,7 @@ export default function Shared() {
       {items.length > 0 && (
         <section aria-label="Shared canvases" className="space-y-4">
           {view === "grid" ? (
-            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               {items.map((item) => (
                 <SharedCard key={item.id} item={item} />
               ))}

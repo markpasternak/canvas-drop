@@ -111,13 +111,18 @@ export function InlineNotice({
   tone = "neutral",
   className,
   children,
+  role,
 }: {
   tone?: NoticeTone;
   className?: string;
   children: ReactNode;
+  /** Opt in for dynamic results; static guidance must not interrupt reading. */
+  role?: "alert" | "status";
 }) {
   return (
     <div
+      role={role}
+      aria-atomic={role ? true : undefined}
       className={cn(
         "rounded-lg border px-3.5 py-3 text-sm leading-relaxed",
         noticeTones[tone],

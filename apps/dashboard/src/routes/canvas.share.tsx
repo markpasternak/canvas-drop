@@ -2,10 +2,12 @@ import { Buildings, Globe, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
+import { CanvasAudience } from "../components/CanvasAudience.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { Field } from "../components/Field.js";
 import { PasswordField } from "../components/PasswordField.js";
+import { PendingChangesGuard } from "../components/PendingChangesGuard.js";
 import { PeopleAccessList } from "../components/PeopleAccessList.js";
 import { PublishReviewDialog } from "../components/PublishReviewDialog.js";
 import { SettingsNav } from "../components/SettingsNav.js";
@@ -46,6 +48,10 @@ const ADVANCED_SECTION = { id: "advanced", label: "Advanced" } as const;
 
 export default function Share() {
   const { id } = useParams({ strict: false }) as { id: string };
+  return <ShareCanvas key={id} id={id} />;
+}
+
+function ShareCanvas({ id }: { id: string }) {
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
   const { data: me } = useMe();
@@ -53,10 +59,16 @@ export default function Share() {
   // (`mine`). Only meaningful under active tenancy; for a Personal-only caller this is [].
   const { data: teams } = useTeams();
   const update = useUpdateSettings(id);
+  const resetUpdate = update.reset;
   const transfer = useTransferCanvas(id);
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
-  const [description, setDescription] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
+  const [expiryDraft, setExpiryDraft] = useState<string | null>(null);
+  const [expiryError, setExpiryError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [descriptionError, setDescriptionError] = useState("");
+  const [saveState, setSaveState] = useState<"saved" | "failed" | null>(null);
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
   const [transferCandidates, setTransferCandidates] = useState<TransferCandidate[] | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -77,15 +89,24 @@ export default function Share() {
   const [people, setPeople] = useState<AllowlistEntry[] | null>(null);
   useEffect(() => {
     activeCanvasId.current = id;
+    resetUpdate();
     setPeople(null);
     setPublishedFromReview(null);
     setTransferCandidates(null);
     setTransferOpen(false);
     setTransferTo(null);
+    setPassword("");
+    setRevealPassword(false);
+    setExpiryDraft(null);
+    setExpiryError("");
+    setPasswordError("");
+    setDescriptionError("");
+    setDescriptionDraft(null);
+    setSaveState(null);
     return () => {
       if (activeCanvasId.current === id) activeCanvasId.current = null;
     };
-  }, [id]);
+  }, [id, resetUpdate]);
   const listLoaded = people !== null;
   // Who can open the canvas TODAY through the list: a pending invite has no user yet, so it
   // is not counted (review #4).
@@ -103,17 +124,16 @@ export default function Share() {
   const sectionIds = sections.map((s) => s.id);
   const { active: activeSection, select: selectSection } = useSectionNav(sectionIds, !!canvas);
 
-  // Seed local field mirrors on canvas identity only. Optimistic settings writes
-  // replace the cached canvas object; keying on id preserves in-progress edits.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: seed on identity change only
-  useEffect(() => {
-    if (!canvas) return;
-    setDescription(canvas.description ?? "");
-  }, [canvas?.id]);
-
   if (isLoading || !canvas) {
     return <Skeleton className="h-64" />;
   }
+
+  const description = descriptionDraft ?? canvas.description ?? "";
+  const savedExpiry = canvas.sharedExpiresAt ? toDatetimeLocal(canvas.sharedExpiresAt) : "";
+  const expiryDirty = expiryDraft !== null && expiryDraft !== savedExpiry;
+  const dirty = Boolean(
+    password || expiryDirty || description !== (canvas.description ?? "") || update.isPending,
+  );
 
   const save = async (patch: Parameters<typeof update.mutate>[0]) => {
     // Optimistic write (onError rolls the cache back). This is the shared handler for
@@ -122,16 +142,26 @@ export default function Share() {
     // notice on an access downgrade) as a toast.
     try {
       const { warning } = await update.mutateAsync(patch);
+      if (activeCanvasId.current !== id) return false;
+      setSaveState("saved");
       if (warning) toast(warning);
+      return true;
     } catch (err) {
+      if (activeCanvasId.current !== id) return false;
+      setSaveState("failed");
       toast(err instanceof ApiError ? err.hint : "Couldn't save that change", "error");
+      return false;
     }
   };
 
   const saveGallery = async (patch: Parameters<typeof update.mutate>[0]) => {
     try {
       await update.mutateAsync(patch);
+      if (activeCanvasId.current !== id) return;
+      setSaveState("saved");
     } catch (err) {
+      if (activeCanvasId.current !== id) return;
+      setSaveState("failed");
       toast(err instanceof ApiError ? err.hint : "Couldn't update the gallery setting", "error");
     }
   };
@@ -172,25 +202,33 @@ export default function Share() {
     canvas.access === "whole_org"
       ? "Anyone in your organization can discover and open this canvas."
       : canvas.access === "public_link"
-        ? "Anyone signed in can discover this canvas; anyone with the link can open it."
+        ? "Signed-in members of this canvas's organization can discover it in Gallery; anyone with its public link can open it."
         : "Show this canvas in the opt-in gallery with its title, description, and tags.";
   const galleryMetadataHint =
     canvas.access === "whole_org"
       ? "visible to your organization in the gallery when this canvas is listed"
-      : "shown publicly in the gallery when this canvas is listed";
+      : "visible to signed-in Gallery visitors when this canvas is listed";
   const galleryTagsGuidance =
     canvas.access === "whole_org"
       ? "They are visible to your organization once this canvas is listed."
-      : "They show here publicly once this canvas is listed.";
+      : "They are visible to signed-in Gallery visitors once this canvas is listed.";
 
   async function setOrClearPassword(next: string | null) {
     try {
       const { warning } = await update.mutateAsync({ password: next });
+      if (activeCanvasId.current !== id) return;
       setPassword("");
       setRevealPassword(false);
+      setPasswordError("");
+      setSaveState("saved");
       toast(next ? "Password set" : "Password cleared");
       if (warning) toast(warning);
     } catch (err) {
+      if (activeCanvasId.current !== id) return;
+      setPasswordError(
+        "Password change not saved. Your input is still here; try again or discard it.",
+      );
+      setSaveState("failed");
       toast(err instanceof ApiError ? err.hint : "Couldn't update password", "error");
     }
   }
@@ -205,12 +243,37 @@ export default function Share() {
   // place — no navigation, no manual reload.
   if (canvas.publicationState !== "published") {
     return (
-      <ShareLocked
-        canvasId={canvas.id}
-        onPublished={() => {
-          if (activeCanvasId.current === id) setPublishedFromReview(id);
-        }}
-      />
+      <div className="space-y-4">
+        <ShareLocked
+          canvasId={canvas.id}
+          onPublished={() => {
+            if (activeCanvasId.current === id) setPublishedFromReview(id);
+          }}
+        />
+        {dirty && (
+          <InlineNotice tone="warning" role="status">
+            This canvas is no longer published. Your unsaved sharing edits are retained on this
+            page. Publish again to continue editing, or discard them.
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={update.isPending}
+              onClick={() => {
+                setPassword("");
+                setRevealPassword(false);
+                setExpiryDraft(null);
+                setDescriptionDraft(null);
+                setPasswordError("");
+                setExpiryError("");
+                setDescriptionError("");
+              }}
+            >
+              Discard sharing edits
+            </Button>
+          </InlineNotice>
+        )}
+        <PendingChangesGuard dirty={dirty} />
+      </div>
     );
   }
 
@@ -219,6 +282,19 @@ export default function Share() {
   // the server re-checks via resolveTeamGrant, so an incompatible pick surfaces as a toast
   // rather than being silently hidden here.
   const shareableTeams = (teams ?? []).filter((t) => t.mine);
+  const saveExpiry = async (value: string) => {
+    const timestamp = value ? new Date(value).getTime() : null;
+    if (timestamp !== null && !Number.isFinite(timestamp)) {
+      setExpiryError("Choose a valid date and time.");
+      return;
+    }
+    const saved = await save({ sharedExpiresAt: timestamp });
+    if (activeCanvasId.current !== id) return;
+    if (saved) {
+      setExpiryDraft(null);
+      setExpiryError("");
+    } else setExpiryError("Expiry not saved. Try again or revert to the saved time.");
+  };
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <SettingsNav
@@ -239,6 +315,20 @@ export default function Share() {
           <p className="text-sm text-muted">
             Control who can open this canvas and what they can do.
           </p>
+          <CanvasAudience canvas={canvas} orgs={me?.orgs} isGuest={me?.isGuest} afterPublish />
+          {update.isPending ? (
+            <p role="status" className="text-sm text-muted">
+              Saving sharing settings…
+            </p>
+          ) : saveState === "saved" ? (
+            <p role="status" className="text-sm text-muted">
+              Sharing settings saved.
+            </p>
+          ) : saveState === "failed" ? (
+            <p role="alert" className="text-sm text-danger">
+              Change not saved. Review the field below and try again.
+            </p>
+          ) : null}
         </header>
 
         <Section
@@ -340,13 +430,18 @@ export default function Share() {
               autoComplete="new-password"
               placeholder={canvas.hasPassword ? "•••••••••• (a password is set)" : "No password"}
               value={password}
+              disabled={update.isPending}
               revealed={revealPassword}
               onRevealedChange={setRevealPassword}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordError("");
+              }}
               hint={
                 <button
                   type="button"
-                  className="text-accent hover:underline"
+                  disabled={update.isPending}
+                  className="text-accent hover:underline disabled:opacity-50"
                   onClick={() => {
                     setPassword(generatePassword());
                     setRevealPassword(true);
@@ -361,6 +456,11 @@ export default function Share() {
                   : "Non-owners who can open this canvas must enter this. We store it hashed and can't show it again, so copy it now if you need to share it."
               }
             />
+            {passwordError && (
+              <p role="alert" className="text-sm text-danger">
+                {passwordError}
+              </p>
+            )}
             {canvas.hasPassword && !canvas.shared && (
               <InlineNotice tone="neutral" className="py-2 text-xs">
                 {listLoaded && listedCount === 0
@@ -389,6 +489,20 @@ export default function Share() {
                   Clear
                 </Button>
               )}
+              {password && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={update.isPending}
+                  onClick={() => {
+                    setPassword("");
+                    setPasswordError("");
+                    setRevealPassword(false);
+                  }}
+                >
+                  Discard password
+                </Button>
+              )}
             </div>
           </div>
 
@@ -400,20 +514,48 @@ export default function Share() {
                   type="datetime-local"
                   min={toDatetimeLocal(Date.now())}
                   hint={canvas.sharedExpiresAt ? "Auto-unpublishes at this time" : "No expiry"}
-                  defaultValue={
-                    canvas.sharedExpiresAt ? toDatetimeLocal(canvas.sharedExpiresAt) : ""
-                  }
-                  onBlur={(e) => {
-                    const v = e.target.value ? new Date(e.target.value).getTime() : null;
-                    if (v !== canvas.sharedExpiresAt) save({ sharedExpiresAt: v });
+                  value={expiryDraft ?? savedExpiry}
+                  disabled={update.isPending}
+                  onChange={(e) => {
+                    setExpiryDraft(e.target.value);
+                    setExpiryError("");
                   }}
                 />
+                {expiryError && (
+                  <p role="alert" className="text-sm text-danger">
+                    {expiryError}
+                  </p>
+                )}
+                {expiryDirty && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-warning">Unsaved expiry</span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={update.isPending}
+                      onClick={() => void saveExpiry(expiryDraft ?? "")}
+                    >
+                      Save expiry
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={update.isPending}
+                      onClick={() => {
+                        setExpiryDraft(null);
+                        setExpiryError("");
+                      }}
+                    >
+                      Revert expiry
+                    </Button>
+                  </div>
+                )}
                 {canvas.sharedExpiresAt !== null && (
                   <Button
                     size="sm"
                     variant="secondary"
                     loading={update.isPending}
-                    onClick={() => save({ sharedExpiresAt: null })}
+                    onClick={() => void saveExpiry("")}
                   >
                     Remove expiry
                   </Button>
@@ -421,8 +563,8 @@ export default function Share() {
               </div>
               {canvas.sharedExpiresAt !== null && canvas.sharedExpiresAt <= Date.now() && (
                 <InlineNotice tone="warning" className="mt-3 py-2 text-xs">
-                  This share expired {relativeTime(canvas.sharedExpiresAt)}. Non-owners now get a
-                  404. Clear or extend the expiry to share it again.
+                  This share expired {relativeTime(canvas.sharedExpiresAt)}. Viewers can no longer
+                  open this canvas. Clear or extend the expiry to share it again.
                 </InlineNotice>
               )}
             </div>
@@ -472,7 +614,7 @@ export default function Share() {
           headingLevel={3}
           id="gallery"
           title="Gallery & templates"
-          description="Opt this canvas into discovery by colleagues."
+          description="Shared helps people find canvases already opened to them. Gallery is an optional showcase for your organization; templates let colleagues make their own copy."
         >
           <Toggle
             label="List in the gallery"
@@ -492,10 +634,47 @@ export default function Share() {
                 label="Description"
                 hint={galleryMetadataHint}
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                onBlur={() => save({ description: description || null })}
+                disabled={update.isPending}
+                onChange={(e) => {
+                  setDescriptionDraft(e.target.value);
+                  setDescriptionError("");
+                }}
                 maxLength={2000}
               />
+              {descriptionError && (
+                <p role="alert" className="text-sm text-danger">
+                  {descriptionError}
+                </p>
+              )}
+              {description !== (canvas.description ?? "") && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    loading={update.isPending}
+                    onClick={async () => {
+                      const saved = await save({ description: description || null });
+                      if (activeCanvasId.current !== id) return;
+                      if (saved) {
+                        setDescriptionDraft(null);
+                        setDescriptionError("");
+                      } else setDescriptionError("Description not saved. Your text is still here.");
+                    }}
+                  >
+                    Save description
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={update.isPending}
+                    onClick={() => {
+                      setDescriptionDraft(null);
+                      setDescriptionError("");
+                    }}
+                  >
+                    Revert description
+                  </Button>
+                </div>
+              )}
               <InlineNotice tone="neutral" className="py-2 text-xs">
                 Tags are set in{" "}
                 <Link
@@ -545,6 +724,7 @@ export default function Share() {
           </Section>
         )}
       </div>
+      <PendingChangesGuard dirty={dirty} />
 
       <ConfirmDialog
         open={confirm === "password-unlist"}

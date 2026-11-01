@@ -46,19 +46,38 @@ export function TagsEditor({
   const inputId = useId();
   const listId = useId();
   const [draft, setDraft] = useState("");
+  const [rejectedTag, setRejectedTag] = useState(false);
+  const invalidTag = rejectedTag || normalizeTag(draft).length > MAX_TAG_LEN;
   const atMax = value.length >= MAX_TAGS;
+
+  function appendTags(rawTags: string[]) {
+    // Paste produces one input event. Build one next value so React batching does
+    // not replace each segment with the last segment from the same render.
+    const next = [...value];
+    setRejectedTag(rawTags.some((raw) => normalizeTag(raw).length > MAX_TAG_LEN));
+    for (const raw of rawTags) {
+      const tag = normalizeTag(raw);
+      if (!tag || tag.length > MAX_TAG_LEN || next.includes(tag)) continue;
+      if (next.length >= MAX_TAGS) break;
+      next.push(tag);
+    }
+    if (next.length !== value.length) onChange(next);
+  }
 
   function commit(raw: string) {
     const tag = normalizeTag(raw);
     if (!tag) return;
     // Reject over-length and over-count consistently with the server schema.
-    if (tag.length > MAX_TAG_LEN) return;
+    if (tag.length > MAX_TAG_LEN) {
+      setRejectedTag(true);
+      return;
+    }
     if (value.length >= MAX_TAGS) return;
     if (value.includes(tag)) {
       setDraft("");
       return;
     }
-    onChange([...value, tag]);
+    appendTags([tag]);
     setDraft("");
   }
 
@@ -104,7 +123,8 @@ export function TagsEditor({
         className={cn(inputControl)}
         value={draft}
         disabled={disabled || atMax}
-        maxLength={MAX_TAG_LEN}
+        aria-invalid={invalidTag || undefined}
+        aria-describedby={invalidTag ? `${inputId}-error` : undefined}
         placeholder={atMax ? `Tag limit reached (${MAX_TAGS})` : "Add a tag, then press Enter"}
         list={datalistTags.length > 0 ? listId : undefined}
         onChange={(e) => {
@@ -114,10 +134,11 @@ export function TagsEditor({
             const parts = raw.split(",");
             const trailing = parts.pop() ?? "";
             // Commit every complete segment; keep the trailing fragment as the draft.
-            for (const part of parts) commit(part);
+            appendTags(parts);
             setDraft(trailing);
             return;
           }
+          setRejectedTag(false);
           setDraft(raw);
         }}
         onKeyDown={(e) => {
@@ -132,6 +153,11 @@ export function TagsEditor({
         }}
         onBlur={() => commit(draft)}
       />
+      {invalidTag && (
+        <p id={`${inputId}-error`} role="alert" className="text-xs text-danger">
+          Each tag can have up to {MAX_TAG_LEN} characters. Longer tags haven’t been added.
+        </p>
+      )}
       {datalistTags.length > 0 && (
         <datalist id={listId}>
           {datalistTags.map((t) => (

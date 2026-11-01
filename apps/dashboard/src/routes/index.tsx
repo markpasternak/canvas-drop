@@ -6,6 +6,7 @@ import {
   Rows,
   SquaresFour,
   Trash,
+  X,
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -82,7 +83,7 @@ const STATE_CHIPS: Array<{
   { key: "template", label: "Templates", countKey: "templates", concept: "templates" },
   {
     key: "undeployed",
-    label: "Never deployed",
+    label: "Never published",
     countKey: "neverDeployed",
     concept: "neverDeployed",
   },
@@ -407,10 +408,10 @@ function EmptyHome({ archivedCount }: { archivedCount: number }) {
 export default function CanvasList() {
   const search = useSearch({ strict: false }) as CanvasesSearch;
   const navigate = useNavigate();
-  // At `xl` the detail rail is the inline sticky column; below it, the slide-in
+  // At `2xl` the detail rail is the inline sticky column; below it, the slide-in
   // drawer. Tracking the breakpoint here keeps the drawer's focus-trap +
   // body-scroll-lock from firing while the inline rail is the one on screen.
-  const isXl = useMediaQuery("(min-width: 1280px)");
+  const isXl = useMediaQuery("(min-width: 1536px)");
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
@@ -741,7 +742,12 @@ export default function CanvasList() {
       // Yield to any higher-level overlay that already handled Escape (e.g. the
       // account menu calls preventDefault on its own Escape) so closing a popover
       // doesn't also clear the rail selection underneath.
-      if (e.key === "Escape" && !e.defaultPrevented) setFocused(undefined);
+      if (
+        e.key === "Escape" &&
+        !e.defaultPrevented &&
+        !document.querySelector('[aria-modal="true"]:not([data-state="closed"])')
+      )
+        setFocused(undefined);
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);
@@ -762,14 +768,14 @@ export default function CanvasList() {
         description="Pick up a draft or open something you've published."
       />
 
-      {/* Two-pane layout (U3): the library + an additive right rail. At `xl` the rail
+      {/* Two-pane layout (U3): the library + an additive right rail. At `2xl` the rail
           is an inline sticky column (~340px) shown only when a canvas is focused;
-          below `xl` it becomes the slide-in DetailDrawer further down. When nothing
+          below `2xl` it becomes the slide-in DetailDrawer further down. When nothing
           is focused the library is full width and nothing else changes. */}
       <div
         className={cn(
           "gap-6",
-          showRail ? "xl:grid xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start" : "",
+          showRail ? "2xl:grid 2xl:grid-cols-[minmax(0,1fr)_320px] 2xl:items-start" : "",
         )}
       >
         <div className="min-w-0 space-y-6">
@@ -817,54 +823,73 @@ export default function CanvasList() {
               {/* Attribute filters apply to the live set only. */}
               {!archivedView && (
                 <div id="canvas-library-filters" hidden={!filtersOpen}>
-                  <FilterBar>
-                    <FilterSelect
-                      label="Filter by access"
-                      options={ACCESS_FILTER_OPTIONS}
-                      value={access ?? "all"}
-                      onValueChange={setAccess}
-                    />
-                    {/* Tag filter (U9) leads the filter row — a richer multi-select that
-                      sits in the same hierarchy as the quick attribute toggles, set off
-                      by a hairline. Hidden when no tags exist; "Clear all" (trailing)
-                      wipes every param incl. ?tag=. */}
-                    <TagFilter availableTags={availableTags} selected={tags} onChange={setTags} />
-                    {availableTags.length > 0 && (
-                      <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
-                    )}
-                    {/* Owned / edited narrowing (editor-roles plan, R16) — shown only once the
-                      actor edits something that isn't theirs, so a solo owner's chip row is
-                      unchanged. */}
+                  <div className="grid gap-4 border-y border-border py-4 sm:grid-cols-2 2xl:grid-cols-3">
                     {summary.edited > 0 && (
-                      <>
-                        <FilterChip active={role === "owned"} onClick={() => setRole("owned")}>
-                          <span>Owned by me</span>
-                          <span className="text-xs tabular-nums text-subtle" aria-hidden>
-                            {summary.owned}
-                          </span>
-                        </FilterChip>
-                        <FilterChip active={role === "edited"} onClick={() => setRole("edited")}>
-                          <span>Editing</span>
-                          <span className="text-xs tabular-nums text-subtle" aria-hidden>
-                            {summary.edited}
-                          </span>
-                        </FilterChip>
-                      </>
+                      <fieldset className="min-w-0 space-y-2">
+                        <legend className="mb-2 text-sm font-medium text-muted">Your role</legend>
+                        <FilterBar>
+                          <FilterChip active={role === "owned"} onClick={() => setRole("owned")}>
+                            <span>Owned by me</span>
+                            <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                              {summary.owned}
+                            </span>
+                          </FilterChip>
+                          <FilterChip active={role === "edited"} onClick={() => setRole("edited")}>
+                            <span>Editing</span>
+                            <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                              {summary.edited}
+                            </span>
+                          </FilterChip>
+                        </FilterBar>
+                      </fieldset>
                     )}
-                    {STATE_CHIPS.map((chip) => (
-                      <FilterChip
-                        key={chip.key}
-                        active={Boolean(search[chip.key])}
-                        onClick={() => toggle(chip.key)}
-                        dotClassName={conceptColor(chip.concept).dot}
-                      >
-                        <span>{chip.label}</span>
-                        <span className="text-xs tabular-nums text-subtle" aria-hidden>
-                          {summary[chip.countKey]}
-                        </span>
-                      </FilterChip>
+                    {[
+                      { label: "Access", keys: ["shared", "protected"] },
+                      { label: "Discovery", keys: ["listed", "template"] },
+                      { label: "Publication", keys: ["undeployed"] },
+                    ].map((group) => (
+                      <fieldset key={group.label} className="min-w-0 space-y-2">
+                        <legend className="mb-2 text-sm font-medium text-muted">
+                          {group.label}
+                        </legend>
+                        <FilterBar>
+                          {group.label === "Access" && (
+                            <FilterSelect
+                              label="Filter by access"
+                              options={ACCESS_FILTER_OPTIONS}
+                              value={access ?? "all"}
+                              onValueChange={setAccess}
+                            />
+                          )}
+                          {STATE_CHIPS.filter((chip) => group.keys.includes(chip.key)).map(
+                            (chip) => (
+                              <FilterChip
+                                key={chip.key}
+                                active={Boolean(search[chip.key])}
+                                onClick={() => toggle(chip.key)}
+                                dotClassName={conceptColor(chip.concept).dot}
+                              >
+                                <span>{chip.label}</span>
+                                <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                                  {summary[chip.countKey]}
+                                </span>
+                              </FilterChip>
+                            ),
+                          )}
+                        </FilterBar>
+                      </fieldset>
                     ))}
-                  </FilterBar>
+                    {availableTags.length > 0 && (
+                      <fieldset className="min-w-0">
+                        <legend className="mb-2 text-sm font-medium text-muted">Tags</legend>
+                        <TagFilter
+                          availableTags={availableTags}
+                          selected={tags}
+                          onChange={setTags}
+                        />
+                      </fieldset>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -948,7 +973,7 @@ export default function CanvasList() {
                           // the 15rem left nav), a 4-col grid crushes cards to ~140px
                           // on 1280–1440px. Cap at 3 cols while the rail occupies the
                           // row; only go to 4 when the library spans full width.
-                          !showRail && "xl:grid-cols-4",
+                          !(showRail && isXl) && "xl:grid-cols-3 2xl:grid-cols-4",
                         )}
                       >
                         {items.map((c) =>
@@ -1047,25 +1072,36 @@ export default function CanvasList() {
           )}
         </div>
 
-        {/* Inline rail — `xl` and up only; the drawer below covers narrower widths.
+        {/* Inline rail — `2xl` and up only; the drawer below covers narrower widths.
             Pinned full-height (sticky + viewport height) so it stays in place while the
             library scrolls, with its own internal scroll for long detail. A flat
             hairline divides it from the library (no boxy card — the DetailPanel is
-            chrome-less). Gated on `isXl` (not just a `hidden xl:block` CSS class) so
-            below `xl` only the drawer renders the DetailPanel — one details region. */}
+            chrome-less). Gated on `isXl` (not just a `hidden 2xl:flex` CSS class) so
+            below `2xl` only the drawer renders the DetailPanel — one details region. */}
         {showRail && isXl && (
           <div
-            className="sticky top-6 hidden h-[calc(100dvh-3rem)] border-border border-l pl-6 xl:block"
+            className="sticky top-6 hidden h-[calc(100dvh-3rem)] flex-col border-border border-l pl-6 2xl:flex"
             data-detail-rail
           >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-muted">Canvas details</span>
+              <button
+                type="button"
+                aria-label="Close canvas details"
+                onClick={() => setFocused(undefined)}
+                className="cd-touch-target grid size-9 place-items-center rounded-md text-muted hover:bg-surface-hover hover:text-fg"
+              >
+                <X size={18} aria-hidden />
+              </button>
+            </div>
             <DetailPanel canvas={focusedCanvas} onDuplicate={() => setCloneOpen(true)} />
           </div>
         )}
       </div>
 
-      {/* Slide-in drawer — below `xl`. Opens when a canvas is focused; Escape, the
-          scrim, or the close button all clear the selection. Hidden at `xl` (the
-          inline rail takes over) via the drawer's own `xl:hidden`. */}
+      {/* Slide-in drawer — below `2xl`. Opens when a canvas is focused; Escape, the
+          scrim, or the close button all clear the selection. Hidden at `2xl` (the
+          inline rail takes over) via the drawer's own `2xl:hidden`. */}
       <DetailDrawer
         open={focusedCanvas !== null && !isXl}
         onClose={() => setFocused(undefined)}

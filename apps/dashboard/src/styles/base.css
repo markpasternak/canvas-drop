@@ -26,6 +26,7 @@
     -webkit-text-size-adjust: 100%;
     font-feature-settings: "cv01", "cv03", "ss03";
     scroll-behavior: smooth;
+    scrollbar-color: var(--muted) transparent;
   }
 
   body {
@@ -74,6 +75,7 @@
   a {
     color: inherit;
     text-decoration: none;
+    text-underline-offset: 0.2em;
   }
 
   button {
@@ -86,6 +88,7 @@
   select,
   textarea {
     font-family: inherit;
+    caret-color: var(--accent);
   }
 
   /* Always-visible, accent focus ring — never removed (§14.3, a11y). The outline
@@ -127,6 +130,22 @@
       clip-path: none;
       white-space: nowrap;
     }
+  }
+}
+
+/* Keep compact desktop controls while giving touch users a reliable target.
+ * Components opt in so this never stretches embedded canvas content. Switches
+ * keep their 40 × 24px track inside the larger transparent button. */
+@media (max-width: 639px), (pointer: coarse) {
+  .cd-touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (forced-colors: active) {
+  html {
+    scrollbar-color: auto;
   }
 }
 

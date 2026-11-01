@@ -36,6 +36,7 @@ export interface SlugFieldProps {
   optional?: boolean;
   /** The canvas being renamed or aliased: a slug it released recently counts as available. */
   canvasId?: string;
+  initialValue?: string;
 }
 
 /**
@@ -53,10 +54,11 @@ export function SlugField({
   disabled,
   optional = true,
   canvasId,
+  initialValue = "",
 }: SlugFieldProps) {
   const id = useId();
   const statusId = useId();
-  const [raw, setRaw] = useState("");
+  const [raw, setRaw] = useState(initialValue);
   const slug = cosmeticSlug(raw);
   const status = useSlugAvailability(slug, canvasId);
 

@@ -1157,6 +1157,8 @@ export interface AdminPendingGrant {
   id: string;
   targetType: "canvas" | "team";
   targetId: string;
+  targetName?: string | null;
+  role?: string | null;
   createdAt: number;
   invitedBy: string;
 }
@@ -1643,6 +1645,55 @@ export const api = {
   listVersions: (id: string) =>
     request<{ versions: VersionInfo[] }>(`/api/canvases/${id}/versions`).then((r) => r.versions),
 
+  /** Protected read-only export; shares the existing role-gated service with MCP. */
+  downloadVersion: async (id: string, version: number, signal?: AbortSignal) => {
+    const res = await fetch(`/api/canvases/${id}/versions/${version}/download`, {
+      credentials: "include",
+      cache: "no-store",
+      signal,
+    });
+    if (
+      res.status === 401 ||
+      res.redirected ||
+      (res.ok && res.headers.get("content-type")?.includes("text/html"))
+    ) {
+      onAuthExpired();
+      throw new ApiError("unauthorized", "Session expired", undefined, res.status);
+    }
+    if (!res.ok) throw await parseError(res);
+    // Limit the response while streaming, before a large archive fills browser memory.
+    const limit = 100 * 1024 * 1024;
+    if (Number(res.headers.get("content-length")) > limit) {
+      await res.body?.cancel();
+      throw new Error(
+        "Browser inspection is limited to 100 MB. Download the ZIP to inspect it locally.",
+      );
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return new Uint8Array(await res.arrayBuffer());
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        throw new Error(
+          "Browser inspection is limited to 100 MB. Download the ZIP to inspect it locally.",
+        );
+      }
+      chunks.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  },
+
   previewVersionPrune: (id: string, versions: number[]) =>
     request<VersionPrunePreview>(`/api/canvases/${id}/versions/prune-preview`, {
       method: "POST",
@@ -1674,9 +1725,10 @@ export const api = {
    * narrowed to 401 / a redirect to login — NOT the generic "2xx non-JSON" rule,
    * which would misread every successful file load as a session expiry.
    */
-  getDraftFile: async (id: string, path: string): Promise<string> => {
+  getDraftFile: async (id: string, path: string, signal?: AbortSignal): Promise<string> => {
     const res = await fetch(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       credentials: "include",
+      signal,
     });
     if (res.status === 401 || res.redirected) {
       onAuthExpired();
@@ -1687,8 +1739,8 @@ export const api = {
   },
 
   /** Write/replace a draft file (raw text body). Returns the refreshed draft view.
-   * `opts.signal` lets best-effort callers (e.g. the editor's unmount flush) bound the
-   * request so a hung server can't leave the PUT pending indefinitely.
+   * `opts.signal` may override the default 15-second deadline. The editor awaits
+   * this request before navigation and keeps its buffer if saving is not confirmed.
    * `opts.expectedHash` is the per-file precondition (editor-roles plan, KTD8): the hash
    * the editor loaded for this path (`none` for a path it believes absent). The server
    * rejects with 409 DRAFT_CONFLICT — naming the last writer and the current hash — if
@@ -1707,7 +1759,7 @@ export const api = {
         ...(opts?.expectedHash !== undefined ? { "If-Draft-File-Hash": opts.expectedHash } : {}),
       },
       body: content,
-      signal: opts?.signal,
+      signal: opts?.signal ?? AbortSignal.timeout(15_000),
     }),
 
   /**

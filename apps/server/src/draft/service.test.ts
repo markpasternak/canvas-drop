@@ -3,6 +3,7 @@ import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
+import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { canvasBlobPrefix } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
@@ -67,6 +68,33 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     expect(Object.keys(draft.manifest as object).sort()).toEqual(["app.js", "index.html"]);
     expect(draft.baseVersionId).toBe(live.currentVersionId);
   });
+  it.each(["whole_org", "public_link"] as const)(
+    "draft-first creation must publish before applying %s sharing",
+    async (access) => {
+      const { svc, canvas, owner, reload, canvases } = await setup();
+      const opts = {
+        publicLinksEnabled: true,
+        ownerCanPublishPublic: true,
+        actorIsOwner: true,
+        publicEdgeCacheTtlSec: 300,
+        now: Date.now(),
+        tenancyActive: false,
+      };
+      await svc.writeFile(canvas, "index.html", enc("<h1>Review me</h1>"));
+      expect((await reload()).currentVersionId).toBeNull();
+      expect(resolveSettingsUpdate(await reload(), { access }, opts)).toMatchObject({
+        ok: false,
+        code: "SHARE_REQUIRES_PUBLISH",
+      });
+      await svc.publish(await reload(), owner.id);
+      expect((await reload()).access).toBe("private");
+      const resolution = resolveSettingsUpdate(await reload(), { access }, opts);
+      expect(resolution.ok).toBe(true);
+      if (!resolution.ok) throw new Error(resolution.code);
+      await canvases.updateSettings(canvas.id, resolution.patch);
+      expect(await reload()).toMatchObject({ access, currentVersionId: expect.any(String) });
+    },
+  );
 
   it("describes added, changed and removed files against live, including an empty replacement", async () => {
     const { svc, canvas } = await setup();

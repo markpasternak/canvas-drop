@@ -6,20 +6,29 @@ import {
   Monitor,
   MoonStars,
   Plus,
+  ShareNetwork,
   ShieldCheck,
   SquaresFour,
   Sun,
+  UsersThree,
+  X,
 } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { ComponentType, ReactNode } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-import { keys, useMe } from "../lib/queries.js";
+import { useMe } from "../lib/queries.js";
 import { useTheme } from "../lib/theme.js";
 import { useExitTransition } from "../lib/use-exit-transition.js";
+import { useModalLayer } from "../lib/use-modal-layer.js";
 import { openShortcuts } from "./Shortcuts.js";
+
+const OPEN_EVENT = "canvas-drop:command-search";
+export function openCommandPalette() {
+  document.dispatchEvent(new Event(OPEN_EVENT));
+}
 
 /**
  * Case-insensitive subsequence match: every character of `query` appears in
@@ -70,54 +79,64 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const me = useMe();
   const { setChoice } = useTheme();
-  // Owner canvases for "Jump to a canvas…". Loaded lazily — only fetched while the
-  // palette is open (`enabled` keeps the query inert in this mount otherwise). Reuses
-  // the shared list query key so it dedupes with the library's own fetch.
-  const canvases = useQuery({
-    queryKey: keys.canvasesList({}),
-    queryFn: () => api.listCanvases({}),
-    enabled: open,
-  });
-
   const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), 180);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const canvases = useInfiniteQuery({
+    queryKey: ["command-canvases", search],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.listCanvases({ q: search, limit: 24, offset: pageParam }),
+    getNextPageParam: (last) => {
+      const next = last.offset + last.canvases.length;
+      return last.canvases.length > 0 && next < last.total ? next : undefined;
+    },
+    enabled: open && search.length > 0,
+  });
   const [active, setActive] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const restoreRef = useRef<HTMLElement | null>(null);
   const listId = useId();
   const labelId = useId();
   const { mounted, state } = useExitTransition(open);
 
   const close = () => setOpen(false);
+  const { isTop } = useModalLayer({ open, panelRef, onClose: close });
 
   // Global ⌘K / Ctrl-K toggles the palette. Lives at the shell so it works from
-  // any route. We intentionally don't gate on focus target — the palette is a
-  // global affordance and ⌘K isn't a browser/editor default we'd clobber.
+  // any route. An active modal owns the interaction until it closes, especially
+  // during a protected write; command navigation must not bypass that boundary.
   useEffect(() => {
+    const anotherModalIsOpen = () =>
+      Array.from(document.querySelectorAll('[aria-modal="true"]')).some(
+        (element) =>
+          element !== panelRef.current && element.getAttribute("data-state") !== "closed",
+      );
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
-        setOpen((v) => !v);
+        setOpen((value) => (value ? false : !anotherModalIsOpen()));
       }
     }
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    const show = () => {
+      if (!anotherModalIsOpen()) setOpen(true);
+    };
+    document.addEventListener(OPEN_EVENT, show);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener(OPEN_EVENT, show);
+    };
   }, []);
 
-  // Reset the query + highlight each time the palette opens, and move focus into
-  // the input. Restore focus to the opener on close (mirrors the Dialog trap).
+  // The shared modal layer owns focus, Escape and the body scroll lock.
   useEffect(() => {
     if (!open) return;
-    restoreRef.current = document.activeElement as HTMLElement | null;
     setQuery("");
     setActive(0);
-    // Focus after the panel mounts.
-    const t = setTimeout(() => inputRef.current?.focus(), 0);
-    return () => {
-      clearTimeout(t);
-      restoreRef.current?.focus?.();
-    };
   }, [open]);
 
   const themeCommands: Command[] = useMemo(
@@ -155,6 +174,20 @@ export function CommandPalette() {
         keywords: "home library your canvases",
         icon: Files,
         run: () => void navigate({ to: "/" }),
+      },
+      {
+        id: "nav-shared",
+        label: "Go to Shared",
+        keywords: "shared with you people",
+        icon: ShareNetwork,
+        run: () => void navigate({ to: "/shared" }),
+      },
+      {
+        id: "nav-teams",
+        label: "Go to Teams",
+        keywords: "teams members people",
+        icon: UsersThree,
+        run: () => void navigate({ to: "/teams" }),
       },
       {
         id: "nav-gallery",
@@ -203,29 +236,31 @@ export function CommandPalette() {
   // "Jump to a canvas…" — only contributes results once the query is non-empty,
   // so an empty palette stays a short command list rather than the whole library.
   const canvasCommands: Command[] = useMemo(() => {
-    if (query.trim() === "") return [];
-    const rows = canvases.data?.canvases ?? [];
+    if (query.trim() === "" || query.trim() !== search) return [];
+    const rows = canvases.data?.pages.flatMap((page) => page.canvases) ?? [];
     return rows.map((c) => ({
       id: `canvas-${c.id}`,
       label: c.title,
       keywords: `${c.slug} canvas jump open`,
-      hint: "Canvas",
+      hint: c.slug,
       icon: Files,
       run: () => void navigate({ to: "/canvases/$id", params: { id: c.id } }),
     }));
-  }, [query, canvases.data, navigate]);
+  }, [query, search, canvases.data, navigate]);
 
   const allCommands = useMemo(
-    () => [...navCommands, ...themeCommands, ...canvasCommands],
-    [navCommands, themeCommands, canvasCommands],
+    () => [...navCommands, ...themeCommands],
+    [navCommands, themeCommands],
   );
 
   const results = useMemo(
-    () =>
-      allCommands.filter(
+    () => [
+      ...allCommands.filter(
         (c) => fuzzyMatch(c.label, query.trim()) || fuzzyMatch(c.keywords ?? "", query.trim()),
       ),
-    [allCommands, query],
+      ...canvasCommands,
+    ],
+    [allCommands, query, canvasCommands],
   );
 
   // Keep the highlight in bounds as the filtered list shrinks/grows.
@@ -254,29 +289,20 @@ export function CommandPalette() {
   };
 
   function onPanelKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      return;
-    }
-    if (e.key === "ArrowDown") {
+    if (e.key === "ArrowDown" && e.target === inputRef.current) {
       e.preventDefault();
       setActive((a) => (results.length === 0 ? 0 : (a + 1) % results.length));
       return;
     }
-    if (e.key === "ArrowUp") {
+    if (e.key === "ArrowUp" && e.target === inputRef.current) {
       e.preventDefault();
       setActive((a) => (results.length === 0 ? 0 : (a - 1 + results.length) % results.length));
       return;
     }
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && e.target === inputRef.current) {
       e.preventDefault();
       runAt(active);
       return;
-    }
-    if (e.key === "Tab") {
-      // The input is the only tabbable control; keep focus from escaping the panel.
-      e.preventDefault();
     }
   }
 
@@ -288,18 +314,21 @@ export function CommandPalette() {
       className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]"
       role="presentation"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close();
+        if (isTop() && e.target === e.currentTarget) close();
       }}
     >
       <div
-        className="cd-anim-scrim absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
+        className="cd-anim-scrim pointer-events-none absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
         data-state={state}
         aria-hidden
       />
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: keyboard handled on the input/listbox combobox below */}
       <div
         ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelId}
         data-state={state}
+        tabIndex={-1}
         onKeyDown={onPanelKeyDown}
         className="cd-anim-pop relative flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-[var(--shadow-popover)]"
       >
@@ -310,6 +339,7 @@ export function CommandPalette() {
           <MagnifyingGlass size={18} weight="bold" aria-hidden className="shrink-0 text-muted" />
           <input
             ref={inputRef}
+            data-autofocus
             type="text"
             role="combobox"
             aria-expanded
@@ -325,6 +355,14 @@ export function CommandPalette() {
             }}
             className="h-12 w-full bg-transparent text-sm text-fg outline-none placeholder:text-subtle"
           />
+          <button
+            type="button"
+            aria-label="Close command search"
+            onClick={close}
+            className="cd-touch-target grid size-9 shrink-0 place-items-center rounded-md text-muted hover:bg-surface-hover hover:text-fg"
+          >
+            <X size={18} aria-hidden />
+          </button>
         </div>
         <ul
           ref={listRef}
@@ -334,9 +372,10 @@ export function CommandPalette() {
           aria-labelledby={labelId}
           className="max-h-[min(60vh,22rem)] overflow-y-auto p-1.5"
         >
-          {results.length === 0 ? (
+          {results.length === 0 &&
+          (!query.trim() || (search === query.trim() && canvases.isSuccess)) ? (
             <li className="px-3 py-6 text-center text-muted text-sm" role="presentation">
-              No matching commands
+              No matching commands or canvases
             </li>
           ) : (
             results.map((cmd, i) => (
@@ -351,6 +390,45 @@ export function CommandPalette() {
             ))
           )}
         </ul>
+        {query.trim() && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm text-muted">
+            <p role={canvases.isError ? "alert" : "status"}>
+              {query.trim() !== search || canvases.isLoading
+                ? "Searching your canvases…"
+                : canvases.isError
+                  ? "Couldn't load canvas results."
+                  : `${canvases.data?.pages[0]?.total ?? 0} matching canvases`}
+            </p>
+            {canvases.isError ? (
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-accent hover:bg-surface-hover"
+                onClick={() => {
+                  inputRef.current?.focus();
+                  void (canvases.isFetchNextPageError
+                    ? canvases.fetchNextPage()
+                    : canvases.refetch());
+                }}
+              >
+                Retry canvas search
+              </button>
+            ) : (
+              canvases.hasNextPage && (
+                <button
+                  type="button"
+                  disabled={canvases.isFetchingNextPage}
+                  className="rounded-md px-2 py-1 text-accent hover:bg-surface-hover disabled:opacity-50"
+                  onClick={() => {
+                    inputRef.current?.focus();
+                    void canvases.fetchNextPage();
+                  }}
+                >
+                  {canvases.isFetchingNextPage ? "Loading…" : "Load more canvases"}
+                </button>
+              )
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -387,7 +465,7 @@ function CommandRow({
     >
       <Icon size={16} weight="bold" aria-hidden />
       <span className="min-w-0 flex-1 truncate text-fg">{cmd.label}</span>
-      {cmd.hint && <span className="shrink-0 text-subtle text-xs">{cmd.hint}</span>}
+      {cmd.hint && <span className="max-w-[40%] truncate text-subtle text-xs">{cmd.hint}</span>}
     </li>
   );
 }

@@ -7,12 +7,13 @@ export const activityLabel = (value: string) =>
 export function AdminActivityList({
   events,
   showTarget = true,
+  emptyMessage = "No administrative changes in this view.",
 }: {
   events: AdminActivityEvent[];
   showTarget?: boolean;
+  emptyMessage?: string;
 }) {
-  if (!events.length)
-    return <p className="text-sm text-muted">No administrative changes in this view.</p>;
+  if (!events.length) return <p className="text-sm text-muted">{emptyMessage}</p>;
   return (
     <ol className="divide-y divide-border rounded-lg border border-border bg-surface">
       {events.map((event) => (

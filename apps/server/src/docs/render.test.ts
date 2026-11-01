@@ -28,6 +28,16 @@ describe("docs render", () => {
     expect(html).toContain('[data-theme="dark"]');
   });
 
+  it("provides an in-page outline with focusable destinations for long documents", () => {
+    const html = renderDocPage("self-hosting/install") ?? "";
+    expect(html).toContain("<summary>On this page</summary>");
+    const page = DOC_PAGES.find((entry) => entry.path === "self-hosting/install");
+    for (const heading of page?.headings ?? []) {
+      expect(html).toContain(`href="#${heading.id}"`);
+      expect(html).toContain(`tabindex="-1" id="${heading.id}"`);
+    }
+  });
+
   it("marks the current page with aria-current and renders prev/next", () => {
     const html = renderDocPage("sdk/kv") ?? "";
     expect(html).toContain('href="/docs/sdk/kv" aria-current="page"');

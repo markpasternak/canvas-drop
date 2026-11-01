@@ -1,11 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspacePane } from "../components/Surface.js";
 import { ToastProvider } from "../components/Toast.js";
-import type { DraftView } from "../lib/api.js";
 import { keys } from "../lib/queries.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -86,6 +85,7 @@ function renderEditor() {
   });
   return {
     qc,
+    router,
     ...render(
       <ThemeProvider>
         <QueryClientProvider client={qc}>
@@ -172,11 +172,9 @@ describe("Editor route", () => {
     expect(await screen.findByText("index.html")).toBeInTheDocument();
     const editor = await screen.findByTestId("code-editor");
     await waitFor(() => expect((editor as HTMLTextAreaElement).value).toContain("hi"));
-    // The Editor tab shows two distinct publish affordances: the editor bar's
-    // "Publish" (publishes the draft) and the global header "New version" (uploads
-    // fresh files as a new version), shown on every tab.
+    // Working context gives the draft publish action priority over direct upload.
     expect(screen.getByRole("button", { name: "Review and publish" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload new version" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload new version" })).toBeNull();
   });
 
   it("shows the stale notice when a newer version was published under the draft", async () => {
@@ -248,7 +246,8 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByRole("button", { name: "Page text" })).toBeEnabled();
-    // Static canvas keeps the sandboxed live inline preview frame.
+    await userEvent.click(screen.getByRole("button", { name: "Show preview" }));
+    // Static canvas keeps the sandboxed inline preview frame.
     expect(document.querySelector('iframe[title="Draft preview"]')).not.toBeNull();
     expect(screen.queryByTestId("preview-scripts-notice")).toBeNull();
   });
@@ -271,6 +270,7 @@ describe("Editor route", () => {
     // Page-text editing is meaningless for JS-rendered content — gated off with the hint.
     expect(await screen.findByRole("button", { name: "Page text" })).toBeDisabled();
     // Preview swaps to the notice + full-preview CTA; no sandboxed frame.
+    await userEvent.click(await screen.findByRole("button", { name: "Show preview" }));
     expect(await screen.findByTestId("preview-scripts-notice")).toBeInTheDocument();
     expect(document.querySelector('iframe[title="Draft preview"]')).toBeNull();
   });
@@ -659,50 +659,102 @@ describe("Editor route", () => {
     );
   });
 
-  it("flushes a pending autosave on unmount, so leaving the tab mid-edit isn't lost", async () => {
+  it("waits for an acknowledged exit-save before navigating", async () => {
+    let complete!: (value: Response) => void;
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "GET /api/canvases/c1/draft": () => json(draftView()),
-      "GET /api/canvases/c1/draft/file": () => new Response("<h1>orig</h1>", { status: 200 }),
-      "PUT /api/canvases/c1/draft/file": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>orig</h1>"),
+      "PUT /api/canvases/c1/draft/file": () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+      "GET /api/canvases/c1/versions": () => json({ versions: [] }),
     });
-    const { unmount } = renderEditor();
-    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
-    await waitFor(() => expect(editor.value).toContain("orig"));
-    // Edit, then leave before the 700ms debounce would fire — no PUT yet.
+    const { router } = renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("<h1>orig</h1>"));
     fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
-    expect(calls.some((c) => c.method === "PUT")).toBe(false);
-    unmount();
-    // The unmount flush must have dispatched the save with the edited content, pinned
-    // to the file's hash so a flush landing after another editor's save is rejected.
-    await waitFor(() => {
-      const put = calls.find(
-        (c) => c.method === "PUT" && c.url.startsWith("/api/canvases/c1/draft/file"),
-      );
-      expect(put?.body).toContain("edited");
-      expect(put?.headers?.["If-Draft-File-Hash"]).toBe("h1");
+    void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+    await waitFor(() => expect(complete).toBeTypeOf("function"));
+    expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+    expect(calls.find((call) => call.method === "PUT")?.headers?.["If-Draft-File-Hash"]).toBe("h1");
+    await act(async () => {
+      complete(json(draftView({ dirty: true })));
     });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/versions"));
   });
 
-  it("marks the draft dirty on unmount so an in-window edit can't bypass the restore confirm", async () => {
+  it("keeps a failed exit-save mounted, exportable and retryable", async () => {
+    let fails = true;
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
-      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
-      "GET /api/canvases/c1/draft/file": () => new Response("<h1>orig</h1>", { status: 200 }),
-      "PUT /api/canvases/c1/draft/file": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("original"),
+      "PUT /api/canvases/c1/draft/file": () =>
+        fails ? json({ error: "offline" }, 503) : json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/versions": () => json({ versions: [] }),
     });
-    const { unmount, qc } = renderEditor();
-    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
-    await waitFor(() => expect(editor.value).toContain("orig"));
-    // The draft cache starts clean (the restore fast-path would skip confirmation).
-    expect(qc.getQueryData<DraftView>(keys.draft("c1"))?.dirty).toBe(false);
-    // Edit inside the debounce window, then leave the tab.
-    fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
-    unmount();
-    // Synchronously after unmount the shared draft cache is flagged dirty, so the
-    // Versions tab's `draft.dirty` confirm-gate fires before discarding this edit.
-    expect(qc.getQueryData<DraftView>(keys.draft("c1"))?.dirty).toBe(true);
+    const { router } = renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("original"));
+    fireEvent.change(editor, { target: { value: "only local copy" } });
+    void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+    const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+    expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+    expect(editor).toHaveValue("only local copy");
+    expect(within(dialog).getByRole("link", { name: "Download my edits" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("only%20local%20copy"),
+    );
+    fails = false;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Retry save and leave" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/versions"));
   });
+
+  it.each(["Keep editing", "Retry save and leave"])(
+    "closes fullscreen for visible failed-save recovery and supports %s",
+    async (action) => {
+      let fails = true;
+      mockFetch({
+        "GET /api/canvases/c1": () => json(CANVAS),
+        "GET /api/canvases/c1/draft": () => json(draftView()),
+        "GET /api/canvases/c1/draft/file": () => new Response("original"),
+        "PUT /api/canvases/c1/draft/file": () =>
+          fails ? json({ error: "offline" }, 503) : json(draftView({ dirty: true })),
+        "GET /api/canvases/c1/versions": () => json({ versions: [] }),
+      });
+      const { router } = renderEditor();
+      const editor = await screen.findByTestId("code-editor");
+      await waitFor(() => expect(editor).toHaveValue("original"));
+      fireEvent.change(editor, { target: { value: "only local copy" } });
+      fireEvent.click(screen.getByRole("button", { name: "Show preview" }));
+      fireEvent.click(screen.getByRole("button", { name: "Full screen preview" }));
+      expect(screen.getByRole("dialog", { name: "Draft preview (full screen)" })).toBeVisible();
+
+      void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+      const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+      expect(dialog).toBeVisible();
+      expect(dialog).toHaveFocus();
+      // Visibility alone cannot detect sibling overlays in jsdom: the preview
+      // must be removed so it cannot paint over recovery at the same z-index.
+      expect(screen.queryByRole("dialog", { name: "Draft preview (full screen)" })).toBeNull();
+      expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+      expect(within(dialog).getByRole("link", { name: "Download my edits" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("only%20local%20copy"),
+      );
+      fails = false;
+      await userEvent.click(within(dialog).getByRole("button", { name: action }));
+      if (action === "Keep editing") {
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+        expect(editor).toHaveValue("only local copy");
+      } else {
+        await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/versions"));
+      }
+    },
+  );
 
   it("renders an image preview (with Download) instead of the text editor", async () => {
     mockFetch({
@@ -837,7 +889,8 @@ describe("Editor route", () => {
     });
     renderEditor();
     await screen.findByText("a.html");
-    fireEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "File actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename file" }));
     const field = await screen.findByDisplayValue("a.html");
     fireEvent.change(field, { target: { value: "b.html" } });
     expect(await screen.findByText(/already exists at that path/i)).toBeInTheDocument();
@@ -912,7 +965,7 @@ describe("editor — stale-save conflicts (editor-roles plan U10)", () => {
     expect(puts).toBe(putsBefore);
 
     fireEvent.click(screen.getByRole("button", { name: /use their version/i }));
-    await waitFor(() => expect(editor.value).toBe("<h1>theirs</h1>"));
+    await waitFor(() => expect(screen.getByTestId("code-editor")).toHaveValue("<h1>theirs</h1>"));
     expect(screen.queryByTestId("draft-conflict")).not.toBeInTheDocument();
   });
 });
@@ -1003,7 +1056,8 @@ describe("editor — hash bookkeeping after the review (#6/#12/#13)", () => {
     fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
     // Rename while the autosave is still in its debounce window: flush() runs first and
     // the rename must then pin h2 (the hash the server just reported), not h1.
-    fireEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "File actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename file" }));
     const field = await screen.findByDisplayValue("index.html");
     fireEvent.change(field, { target: { value: "home.html" } });
     fireEvent.click(screen.getByRole("button", { name: "Rename" }));
@@ -1036,5 +1090,359 @@ describe("editor — hash bookkeeping after the review (#6/#12/#13)", () => {
     unmount();
     await new Promise((r) => setTimeout(r, 50));
     expect(calls.filter((c) => c.method === "PUT").length).toBe(putsBefore);
+  });
+});
+
+describe("editor exit revision and Page text recovery", () => {
+  it.each(["newer revision", "original"])(
+    "does not leave on an older acknowledgment while %s is unsaved",
+    async (latest) => {
+      const pending: Array<(value: Response) => void> = [];
+      const calls = mockFetch({
+        "GET /api/canvases/c1": () => json(CANVAS),
+        "GET /api/canvases/c1/draft": () => json(draftView()),
+        "GET /api/canvases/c1/draft/file": () => new Response("original"),
+        "PUT /api/canvases/c1/draft/file": () =>
+          new Promise((resolve) => {
+            pending.push(resolve);
+          }),
+        "GET /api/canvases/c1/versions": () => json({ versions: [] }),
+      });
+      const { router } = renderEditor();
+      const editor = await screen.findByTestId("code-editor");
+      await waitFor(() => expect(editor).toHaveValue("original"));
+      fireEvent.change(editor, { target: { value: "first revision" } });
+      void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+      await waitFor(() => expect(pending).toHaveLength(1));
+      fireEvent.change(editor, { target: { value: latest } });
+      await act(async () => {
+        pending[0]?.(
+          json(
+            draftView({
+              dirty: true,
+              files: [{ path: "index.html", size: 10, mime: "text/html", hash: "h2" }],
+            }),
+          ),
+        );
+      });
+      await waitFor(() => expect(pending).toHaveLength(2));
+      expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+      expect(editor).toHaveValue(latest);
+      expect(calls.filter((call) => call.method === "PUT")[1]).toMatchObject({
+        body: latest,
+        headers: { "If-Draft-File-Hash": "h2" },
+      });
+      await act(async () => {
+        pending[1]?.(json(draftView({ dirty: true })));
+      });
+      await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/versions"));
+    },
+  );
+  it.each([409, 404])(
+    "retains the local buffer on a %s exit refusal and cancellation",
+    async (status) => {
+      mockFetch({
+        "GET /api/canvases/c1": () => json(CANVAS),
+        "GET /api/canvases/c1/draft": () => json(draftView()),
+        "GET /api/canvases/c1/draft/file": () => new Response("server original"),
+        "PUT /api/canvases/c1/draft/file": () =>
+          json(
+            {
+              code: status === 409 ? "DRAFT_CONFLICT" : "NOT_FOUND",
+              message: "refused",
+              currentHash: "h2",
+            },
+            status,
+          ),
+      });
+      const { router } = renderEditor();
+      const editor = await screen.findByTestId("code-editor");
+      await waitFor(() => expect(editor).toHaveValue("server original"));
+      fireEvent.change(editor, { target: { value: "keep my version" } });
+      void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+      const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+      expect(within(dialog).getByRole("link", { name: "Download my edits" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("keep%20my%20version"),
+      );
+      await userEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+      expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+      expect(editor).toHaveValue("keep my version");
+    },
+  );
+  it.each([503, 409, 404])(
+    "buffers Page text before a %s save refusal and exports it on exit",
+    async (status) => {
+      mockFetch({
+        "GET /api/canvases/c1": () => json(CANVAS),
+        "GET /api/canvases/c1/draft": () => json(draftView()),
+        "GET /api/canvases/c1/draft/file": () => new Response("<h1>Original</h1>"),
+        "PUT /api/canvases/c1/draft/file": () =>
+          json(
+            { code: status === 409 ? "DRAFT_CONFLICT" : status === 404 ? "NOT_FOUND" : "offline" },
+            status,
+          ),
+      });
+      const { router } = renderEditor();
+      await screen.findByTestId("code-editor");
+      await userEvent.click(screen.getByRole("button", { name: "Page text" }));
+      const iframe = screen.getByTitle("On-page editor") as HTMLIFrameElement;
+      const event = new MessageEvent("message", {
+        data: { type: "cd-onpage", html: "<h1>My page edit</h1>" },
+      });
+      Object.defineProperty(event, "source", { value: iframe.contentWindow });
+      act(() => window.dispatchEvent(event));
+      void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+      const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+      expect(within(dialog).getByRole("link", { name: "Download my edits" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("My%20page%20edit"),
+      );
+      await userEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+      expect(screen.getByTitle("On-page editor")).toBe(iframe);
+      // A further page edit after refusal remains recoverable; it must not disappear
+      // merely because autosave is paused by the role/conflict guard.
+      const next = new MessageEvent("message", {
+        data: { type: "cd-onpage", html: "<h1>Latest page edit</h1>" },
+      });
+      Object.defineProperty(next, "source", { value: iframe.contentWindow });
+      act(() => window.dispatchEvent(next));
+      void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+      const nextDialog = await screen.findByRole("dialog", {
+        name: "Your edits haven’t been saved",
+      });
+      expect(within(nextDialog).getByRole("link", { name: "Download my edits" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("Latest%20page%20edit"),
+      );
+    },
+  );
+  it("keeps local content and its stale hash when a background read sees someone else's save", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(
+          draftView({ files: [{ path: "index.html", size: 20, mime: "text/html", hash: "h1" }] }),
+        ),
+      "GET /api/canvases/c1/draft/file": () => new Response("original"),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json({ code: "DRAFT_CONFLICT", currentHash: "h2" }, 409),
+    });
+    const { router, qc } = renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("original"));
+    fireEvent.change(editor, { target: { value: "my local edit" } });
+    act(() => {
+      qc.setQueryData(
+        keys.draft("c1"),
+        draftView({ files: [{ path: "index.html", size: 20, mime: "text/html", hash: "h2" }] }),
+      );
+      qc.setQueryData(keys.draftFile("c1", "index.html"), "someone else's edit");
+    });
+    expect(editor).toHaveValue("my local edit");
+    void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+    await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+    expect(calls.find((call) => call.method === "PUT")).toMatchObject({
+      body: "my local edit",
+      headers: { "If-Draft-File-Hash": "h1" },
+    });
+  });
+});
+
+describe("oversized Page text recovery", () => {
+  it("keeps the iframe mounted and blocks navigation without offering a stale download", async () => {
+    let readFails = false;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        readFails ? json({ code: "OFFLINE" }, 503) : json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>Original</h1>"),
+    });
+    const { router, qc } = renderEditor();
+    await screen.findByTestId("code-editor");
+    await userEvent.click(screen.getByRole("button", { name: "Page text" }));
+    const iframe = screen.getByTitle("On-page editor") as HTMLIFrameElement;
+    const event = new MessageEvent("message", { data: { type: "cd-onpage-too-large" } });
+    Object.defineProperty(event, "source", { value: iframe.contentWindow });
+    act(() => window.dispatchEvent(event));
+    expect(screen.getByText(/exceeds the 2 MB Page text limit/)).toBeVisible();
+    readFails = true;
+    void qc.refetchQueries({ queryKey: keys.draft("c1"), exact: true });
+    await screen.findByText("Couldn't refresh the draft");
+    expect(screen.getByTitle("On-page editor")).toBe(iframe);
+    act(() =>
+      qc.setQueryData(
+        keys.draft("c1"),
+        draftView({
+          files: [
+            { path: "index.html", size: 20, mime: "text/html", hash: "h2" },
+            { path: "another.html", size: 20, mime: "text/html", hash: "h3" },
+          ],
+        }),
+      ),
+    );
+    expect(screen.getByTitle("On-page editor")).toBe(iframe);
+    void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+    const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+    expect(
+      within(dialog).queryByRole("link", { name: "Download my edits" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByTitle("On-page editor")).toBe(iframe);
+    expect(calls.some((call) => call.method === "PUT")).toBe(false);
+  });
+});
+
+describe("reviewed recovery races", () => {
+  it("keeps the prior hash when a background manifest deletes the dirty file", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("original"),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json({ code: "DRAFT_CONFLICT", currentHash: "none" }, 409),
+    });
+    const { router, qc } = renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("original"));
+    fireEvent.change(editor, { target: { value: "local edit" } });
+    act(() => qc.setQueryData(keys.draft("c1"), draftView({ files: [] })));
+    void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+    const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+    expect(calls.find((call) => call.method === "PUT")).toMatchObject({
+      body: "local edit",
+      headers: { "If-Draft-File-Hash": "h1" },
+    });
+    expect(within(dialog).getByRole("link", { name: "Download my edits" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("local%20edit"),
+    );
+    expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+  });
+  it("keeps a reverted buffer dirty after the server committed but its response was lost", async () => {
+    let rejectFirst: ((reason: Error) => void) | undefined;
+    let server = "original";
+    let attempts = 0;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response(server),
+      "PUT /api/canvases/c1/draft/file": (init) => {
+        attempts++;
+        if (attempts === 1) {
+          server = String(init?.body);
+          return new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          });
+        }
+        return json({ code: "DRAFT_CONFLICT", currentHash: "h2" }, 409);
+      },
+    });
+    const { router } = renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("original"));
+    fireEvent.change(editor, { target: { value: "committed newer text" } });
+    void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+    await waitFor(() => expect(rejectFirst).toBeDefined());
+    fireEvent.change(editor, { target: { value: "original" } });
+    act(() => rejectFirst?.(new Error("Response lost")));
+    const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+    expect(editor).toHaveValue("original");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Retry save and leave" }));
+    await screen.findByTestId("draft-conflict");
+    expect(calls.filter((call) => call.method === "PUT")[1]).toMatchObject({
+      body: "original",
+      headers: { "If-Draft-File-Hash": "h1" },
+    });
+    expect(router.state.location.pathname).toBe("/canvases/c1/editor");
+    expect(server).toBe("committed newer text");
+  });
+  it("does not create or select index.html when the CSS buffer cannot be saved", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(
+          draftView({ files: [{ path: "styles.css", size: 10, mime: "text/css", hash: "h1" }] }),
+        ),
+      "GET /api/canvases/c1/draft/file": () => new Response("body {}"),
+      "PUT /api/canvases/c1/draft/file": () => json({ code: "OFFLINE" }, 503),
+    });
+    renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("body {}"));
+    fireEvent.change(editor, { target: { value: "body { color: red }" } });
+    await userEvent.click(screen.getByRole("button", { name: "Add index.html" }));
+    await screen.findByRole("button", { name: "Retry save" });
+    expect(editor).toHaveValue("body { color: red }");
+    expect(calls.some((call) => call.url.includes("mode=create"))).toBe(false);
+  });
+  it("opens recovery immediately when the optional conflict comparison read hangs", async () => {
+    let reads = 0;
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () =>
+        ++reads === 1 ? new Response("original") : new Promise(() => {}),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json({ code: "DRAFT_CONFLICT", currentHash: "h2" }, 409),
+    });
+    const { router } = renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect(editor).toHaveValue("original"));
+    fireEvent.change(editor, { target: { value: "local edit" } });
+    void router.navigate({ to: "/canvases/$id/versions", params: { id: "c1" } });
+    const dialog = await screen.findByRole("dialog", { name: "Your edits haven’t been saved" });
+    expect(within(dialog).getByRole("link", { name: "Download my edits" })).toBeVisible();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByRole("button", { name: "Retry comparison" })).toBeVisible();
+    expect(editor).toHaveValue("local edit");
+  });
+});
+
+describe("editor canvas identity", () => {
+  it("keeps delayed writes and selected-file state scoped to the old canvas", async () => {
+    let completeCreate: ((response: Response) => void) | undefined;
+    const bDraft = draftView({
+      files: [{ path: "b.html", mime: "text/html", size: 4, hash: "b1" }],
+    });
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("canvas A"),
+      "PUT /api/canvases/c1/draft/file": () =>
+        new Promise((resolve) => {
+          completeCreate = resolve;
+        }),
+      "GET /api/canvases/c2": () => json({ ...CANVAS, id: "c2", title: "Canvas B" }),
+      "GET /api/canvases/c2/draft": () => json(bDraft),
+      "GET /api/canvases/c2/draft/file": () => new Response("canvas B"),
+    });
+    const { router, qc } = renderEditor();
+    await waitFor(() => expect(screen.getByTestId("code-editor")).toHaveValue("canvas A"));
+    fireEvent.click(screen.getByRole("button", { name: "Add file" }));
+    fireEvent.change(await screen.findByPlaceholderText("e.g. styles/main.css"), {
+      target: { value: "new.css" },
+    });
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Add a file" })).getByRole("button", {
+        name: "Add file",
+      }),
+    );
+    await waitFor(() => expect(completeCreate).toBeDefined());
+    act(() => {
+      qc.setQueryData(keys.canvas("c2"), { ...CANVAS, id: "c2", title: "Canvas B" });
+      qc.setQueryData(keys.draft("c2"), bDraft);
+      qc.setQueryData(keys.draftFile("c2", "b.html"), "canvas B");
+    });
+    void router.navigate({ to: "/canvases/$id/editor", params: { id: "c2" } });
+    await waitFor(() => expect(screen.getByTestId("code-editor")).toHaveValue("canvas B"));
+    await act(async () =>
+      completeCreate?.(
+        json(draftView({ files: [{ path: "new.css", mime: "text/css", size: 0, hash: "a2" }] })),
+      ),
+    );
+    expect(screen.getByTestId("code-editor")).toHaveValue("canvas B");
+    expect(qc.getQueryData(keys.draft("c2"))).toEqual(bDraft);
+    expect(screen.queryByRole("dialog", { name: "Add a file" })).not.toBeInTheDocument();
   });
 });

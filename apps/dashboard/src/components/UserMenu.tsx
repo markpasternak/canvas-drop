@@ -229,7 +229,7 @@ export function UserMenu({
         aria-controls={open ? menuId : undefined}
         aria-label={`Account: ${label(me)}`}
         className={cn(
-          "flex h-9 items-center rounded-lg border border-border bg-surface-sunken text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg active:translate-y-px",
+          "cd-touch-target flex h-9 items-center rounded-lg border border-border bg-surface-sunken text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg active:translate-y-px",
           // Expanded (rail) trigger is a real full-width row: avatar · name · caret.
           // Compact trigger (mobile bar / collapsed rail) stays avatar + caret only.
           expanded ? "w-full gap-2.5 px-1.5" : "gap-1.5 pr-1.5 pl-1",

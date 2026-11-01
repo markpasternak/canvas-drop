@@ -206,39 +206,43 @@ function NeedsAttention({ overview }: { overview: AdminOverviewData }) {
           </Link>
         ))}
       </CollapsibleSection>
-      <CollapsibleSection title="Routine reviews" storageKey="admin:section:routine" flush>
-        <p className="px-4 py-3 text-xs text-muted">
-          These are ordinary administrative states, not evidence of a fault. Public-link exposure is
-          intentional when sharing is approved.
-        </p>
-        {overview.publicLinkCount > 0 ? (
-          <AttentionRow
-            icon={<Globe size={18} />}
-            label="Public-link canvases"
-            detail="Review configured public sharing and protection"
-            count={overview.publicLinkCount}
-            search={{ status: "active", access: "public_link" }}
-          />
-        ) : null}
-        {data && data.purgeEligibleCount > 0 ? (
-          <AttentionRow
-            icon={<Trash size={18} />}
-            label="Retention elapsed"
-            detail="Deleted at least 30 days ago. Review before permanently removing files."
-            count={data.purgeEligibleCount}
-            search={{ status: "deleted", purge: "eligible" }}
-          />
-        ) : null}
-        {(overview.canvasCountByStatus.disabled ?? 0) > 0 ? (
-          <AttentionRow
-            icon={<Prohibit size={18} />}
-            label="Disabled canvases"
-            detail="Review the recorded reason and decide whether to re-enable"
-            count={overview.canvasCountByStatus.disabled}
-            search={{ status: "disabled" }}
-          />
-        ) : null}
-      </CollapsibleSection>
+      {(overview.publicLinkCount > 0 ||
+        (data?.purgeEligibleCount ?? 0) > 0 ||
+        (overview.canvasCountByStatus.disabled ?? 0) > 0) && (
+        <CollapsibleSection title="Routine reviews" storageKey="admin:section:routine" flush>
+          <p className="px-4 py-3 text-xs text-muted">
+            These are ordinary administrative states, not evidence of a fault. Public-link exposure
+            is intentional when sharing is approved.
+          </p>
+          {overview.publicLinkCount > 0 ? (
+            <AttentionRow
+              icon={<Globe size={18} />}
+              label="Public-link canvases"
+              detail="Review configured public sharing and protection"
+              count={overview.publicLinkCount}
+              search={{ status: "active", access: "public_link" }}
+            />
+          ) : null}
+          {data && data.purgeEligibleCount > 0 ? (
+            <AttentionRow
+              icon={<Trash size={18} />}
+              label="Retention elapsed"
+              detail="Deleted at least 30 days ago. Review before permanently removing files."
+              count={data.purgeEligibleCount}
+              search={{ status: "deleted", purge: "eligible" }}
+            />
+          ) : null}
+          {(overview.canvasCountByStatus.disabled ?? 0) > 0 ? (
+            <AttentionRow
+              icon={<Prohibit size={18} />}
+              label="Disabled canvases"
+              detail="Review the recorded reason and decide whether to re-enable"
+              count={overview.canvasCountByStatus.disabled}
+              search={{ status: "disabled" }}
+            />
+          ) : null}
+        </CollapsibleSection>
+      )}
     </div>
   );
 }

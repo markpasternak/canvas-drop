@@ -115,6 +115,6 @@ export function siteFooter(current?: "/docs" | "/privacy" | "/terms"): string {
   ] as const;
   return `<footer class="site-footer"><div class="site-width">
     <div class="site-footer-row">${siteBrand()}<nav class="site-links" aria-label="Footer">${links.map(([url, label]) => `<a href="${escapeHtml(url)}"${url === current ? ' aria-current="page"' : ""}${url === BRAND.githubUrl ? ' target="_blank" rel="noopener noreferrer"' : ""}>${label}</a>`).join("")}</nav></div>
-    <p class="site-colophon">Small web tools, built by your team. Open source under the MIT license. Inspired by Shopify's Quick; not affiliated with Shopify.</p>
+    <p class="site-colophon">Canvases your team can use and build on. Open source under the MIT license. Inspired by Shopify's Quick; not affiliated with Shopify.</p>
   </div></footer>`;
 }

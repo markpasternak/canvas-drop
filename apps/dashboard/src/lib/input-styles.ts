@@ -20,6 +20,21 @@ export const inputControlBase =
 /** Standard text-input control: the shared appearance with symmetric `px-3` padding. */
 export const inputControl = `${inputControlBase} px-3`;
 
+/** Shared single-choice trigger appearance. Native forms and custom filter menus
+ * use the same surface, focus treatment and spacing; only their popup behavior differs. */
+export const selectControl =
+  "cd-touch-target min-w-0 rounded-md border border-border-strong bg-surface-raised text-fg " +
+  "transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
+  "hover:border-accent/60 focus-visible:outline-2 " +
+  "focus-visible:outline-offset-2 focus-visible:outline-accent " +
+  "disabled:cursor-not-allowed disabled:opacity-50";
+
+export const selectSizes = {
+  sm: "h-8 text-xs",
+  md: "h-9 text-sm",
+  lg: "h-10 text-sm",
+} as const;
+
 /**
  * The list/filter search-box recipe (5 byte-identical copies before consolidation):
  * a 36px pill with left padding for the leading magnifier icon. Kept verbatim so the

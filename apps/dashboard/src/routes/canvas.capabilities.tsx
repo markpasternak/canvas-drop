@@ -1,6 +1,10 @@
 import { useParams } from "@tanstack/react-router";
+import { useId, useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { NativeSelect } from "../components/NativeSelect.js";
+import { PendingChangesGuard } from "../components/PendingChangesGuard.js";
+import { ReadError } from "../components/ReadError.js";
 import { RuntimePolicySettings } from "../components/RuntimePolicySettings.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
@@ -30,12 +34,13 @@ const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: st
   {
     key: "ai",
     label: "AI",
-    description: "Server-side LLM proxy (no provider keys in the browser).",
+    description:
+      "Use AI through the server, for example to summarize text. Provider keys stay on the server.",
   },
   {
     key: "realtime",
     label: "Realtime",
-    description: "Ephemeral pub/sub + presence over WebSockets.",
+    description: "Live updates and presence, for example shared cursors or a live poll.",
   },
   {
     key: "authoring",
@@ -53,10 +58,16 @@ const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: st
  */
 export default function Capabilities() {
   const { id } = useParams({ strict: false }) as { id: string };
+  return <CanvasCapabilities key={id} id={id} />;
+}
+
+function CanvasCapabilities({ id }: { id: string }) {
+  const controlsId = useId();
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
   const connections = useCanvasConnections(id);
   const update = useUpdateCapabilities(id);
+  const [policyDirty, setPolicyDirty] = useState(false);
 
   if (isLoading || !canvas) {
     return <Skeleton className="h-64" />;
@@ -71,12 +82,58 @@ export default function Capabilities() {
   // so warn rather than block: the combination is valid but surprising.
   const publicBackendInert = canvas.access === "public_link" && backendOn;
 
+  if (!backendOn && !policyDirty)
+    return (
+      <TabContentFrame>
+        <Section
+          id="backend"
+          title="This canvas is static"
+          description="Pages, images and scripts work without a backend. Enable it when your canvas needs saved data, uploads, AI or live updates."
+        >
+          <Toggle
+            label="Enable backend"
+            checked={false}
+            disabled={update.isPending || canvas.status === "disabled"}
+            onChange={(next) => update.mutate({ backendEnabled: next }, { onError: onSaveError })}
+          />
+          <a href="/docs" className="text-sm text-accent hover:underline">
+            SDK docs
+          </a>
+          <details className="space-y-4">
+            <summary className="cursor-pointer text-sm text-accent">
+              Review saved configuration
+            </summary>
+            <p className="text-sm text-muted">
+              These preferences are retained while Backend is off. They take effect only after
+              Backend and the relevant feature are enabled.
+            </p>
+            <dl className="grid gap-2 text-sm sm:grid-cols-2">
+              {BACKEND_FEATURES.map((feature) => (
+                <div key={feature.key}>
+                  <dt className="font-medium">{feature.label}</dt>
+                  <dd className="text-muted">
+                    {canvas.capabilities[feature.key] ? "Saved as on" : "Saved as off"}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <RuntimePolicySettings
+              canvas={canvas}
+              save={(patch) => update.mutateAsync(patch)}
+              pending={update.isPending}
+              connectionKeys={connections.data?.map((connection) => connection.key) ?? []}
+            />
+          </details>
+        </Section>
+      </TabContentFrame>
+    );
+
   return (
     <TabContentFrame>
       <Section
         id="backend"
         title="Backend"
-        description="Give this canvas server-side primitives. You can change these any time."
+        description="Choose the features this canvas can use, then who can use them."
       >
         <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs leading-relaxed text-muted">
           Canvas code can use enabled primitives without browser secrets. Read the{" "}
@@ -89,37 +146,78 @@ export default function Capabilities() {
           <InlineNotice tone="warning" className="py-2 text-xs">
             This canvas is shared as a public link, which serves static files only. The backend
             primitives below run only for the canvas owner and editors. Public-link viewers have
-            static access.
+            static access, except for a Connection grant explicitly opened to public visitors by an
+            administrator.
           </InlineNotice>
         )}
         <Toggle
           label="Enable backend"
           description="Off by default. A canvas is static until you turn this on."
           checked={backendOn}
+          disabled={(policyDirty && backendOn) || update.isPending || canvas.status === "disabled"}
           onChange={(next) => update.mutate({ backendEnabled: next }, { onError: onSaveError })}
         />
+        {policyDirty && (
+          <p className="text-sm text-warning">
+            {backendOn
+              ? "Save or discard permission changes before turning Backend off."
+              : "Backend was turned off. Your pending permissions are still shown. Turn Backend on to save them, or discard your changes."}
+          </p>
+        )}
         <RowDivider />
 
         {BACKEND_FEATURES.map((f) => {
           const storedOn = canvas.capabilities[f.key];
           const gatedByOperator = backendOn && storedOn && !canvas.effective[f.key];
+          const audience =
+            f.key === "ai" ? "aiAudience" : f.key === "authoring" ? "authoringAudience" : null;
           return (
-            <Toggle
+            <div
               key={f.key}
-              label={f.label}
-              description={
-                gatedByOperator ? (
-                  <span className="text-warning">
-                    Disabled by your administrator for this instance.
-                  </span>
-                ) : (
-                  f.description
-                )
-              }
-              checked={storedOn}
-              disabled={!backendOn}
-              onChange={(next) => update.mutate({ [f.key]: next }, { onError: onSaveError })}
-            />
+              className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0"
+            >
+              <Toggle
+                label={f.label}
+                description={
+                  gatedByOperator ? (
+                    <span className="text-warning">
+                      Disabled by your administrator for this instance.
+                    </span>
+                  ) : (
+                    f.description
+                  )
+                }
+                checked={storedOn}
+                disabled={!backendOn || update.isPending || canvas.status === "disabled"}
+                onChange={(next) => update.mutate({ [f.key]: next }, { onError: onSaveError })}
+              />
+              {audience && (
+                <label
+                  htmlFor={`${controlsId}-${f.key}`}
+                  className="grid gap-1 text-sm text-muted sm:max-w-sm"
+                >
+                  {f.key === "ai" ? "AI access" : "Authoring access"}
+                  <NativeSelect
+                    id={`${controlsId}-${f.key}`}
+                    aria-label={f.key === "ai" ? "AI access" : "Authoring access"}
+                    value={canvas[audience] ?? (f.key === "authoring" ? "viewers" : "editors")}
+                    disabled={update.isPending || canvas.status === "disabled"}
+                    onChange={(event) =>
+                      update.mutate(
+                        { [audience]: event.target.value as "editors" | "viewers" },
+                        { onError: onSaveError },
+                      )
+                    }
+                  >
+                    <option value="editors">Owners and editors</option>
+                    <option value="viewers">All signed-in viewers</option>
+                  </NativeSelect>
+                  {f.key === "ai"
+                    ? "Requests use this canvas's AI budget."
+                    : "People create canvases as themselves, within their existing account permissions."}
+                </label>
+              )}
+            </div>
           );
         })}
         <RowDivider />
@@ -132,66 +230,41 @@ export default function Capabilities() {
         </Row>
       </Section>
       <Section
-        id="runtime-permissions"
-        title="Who can use the backend"
-        description="Choose who can use AI, external services and page-driven authoring. Resource permissions below control participation in data, files and realtime."
-      >
-        {(
-          [
-            {
-              key: "aiAudience",
-              title: "AI access",
-              description: "AI requests use the canvas's budget.",
-            },
-            {
-              key: "connectionsAudience",
-              title: "Connection access",
-              description:
-                "Connections can send requests and trigger actions in external services. Admin grants and allowed methods still apply.",
-            },
-            {
-              key: "authoringAudience",
-              title: "Authoring access",
-              description:
-                "Who may create and manage new canvases from this page, as themselves, while Authoring is on. Every admitted signed-in viewer by default.",
-            },
-          ] as const
-        ).map((setting) => (
-          <Row key={setting.key} title={setting.title} description={setting.description}>
-            <select
-              aria-label={setting.title}
-              value={
-                canvas[setting.key] ?? (setting.key === "authoringAudience" ? "viewers" : "editors")
-              }
-              disabled={!backendOn || update.isPending || canvas.status === "disabled"}
-              className="max-w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg"
-              onChange={(event) =>
-                update.mutate(
-                  { [setting.key]: event.target.value as "editors" | "viewers" },
-                  { onError: onSaveError },
-                )
-              }
-            >
-              <option value="editors">Owners and editors</option>
-              <option value="viewers">All signed-in viewers</option>
-            </select>
-          </Row>
-        ))}
-        <p className="text-xs text-muted">
-          Private file submissions are visible to their uploader and the canvas's owners and
-          editors. Public visitors have no backend access.
-        </p>
-      </Section>
-      <Section
         id="connections"
         title="Connections"
         description="Third-party origins an administrator has granted to this canvas."
       >
+        <label
+          htmlFor={`${controlsId}-connections`}
+          className="grid gap-1 text-sm text-muted sm:max-w-sm"
+        >
+          Connection access
+          <NativeSelect
+            id={`${controlsId}-connections`}
+            aria-label="Connection access"
+            value={canvas.connectionsAudience ?? "editors"}
+            disabled={update.isPending || canvas.status === "disabled"}
+            onChange={(event) =>
+              update.mutate(
+                { connectionsAudience: event.target.value as "editors" | "viewers" },
+                { onError: onSaveError },
+              )
+            }
+          >
+            <option value="editors">Owners and editors</option>
+            <option value="viewers">All signed-in viewers</option>
+          </NativeSelect>
+          A resource policy may narrow this further. Administrator grants and methods always apply.
+        </label>
         {connections.isLoading ? <p className="text-sm text-muted">Loading connections…</p> : null}
         {connections.isError ? (
-          <InlineNotice tone="danger">Connection grants could not be loaded.</InlineNotice>
+          <ReadError
+            title="Connection grants could not be loaded"
+            onRetry={() => void connections.refetch()}
+            retrying={connections.isFetching}
+          />
         ) : null}
-        {connections.data?.length === 0 ? (
+        {!connections.isError && connections.data?.length === 0 ? (
           <p className="text-sm text-muted">
             No outbound connections are granted. Ask an administrator to attach a connection profile
             if this canvas needs third-party data.
@@ -230,7 +303,9 @@ export default function Capabilities() {
         save={(patch) => update.mutateAsync(patch)}
         pending={update.isPending}
         connectionKeys={connections.data?.map((connection) => connection.key) ?? []}
+        onDirtyChange={setPolicyDirty}
       />
+      <PendingChangesGuard dirty={policyDirty} />
     </TabContentFrame>
   );
 }

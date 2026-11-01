@@ -345,17 +345,16 @@ function renderErrorPage(input: ErrorPageDetails, recovery?: RecoveryContext): s
   let pageTitle = title;
   let heading = title;
   let lede = `<p class="message">${message}</p>`;
-  let meta = `<dl class="meta">
+  let meta = `<details class="technical"><summary>Technical details</summary><dl class="meta">
+        <dt>Status</dt><dd>HTTP ${status}</dd>
         <dt>Code</dt><dd>${code}</dd>
         ${path ? `<dt>Path</dt><dd>${path}</dd>` : ""}
-      </dl>`;
-  let kicker = `<p class="kicker">HTTP ${status}</p>`;
+      </dl></details>`;
   let accountCard = "";
   let actions = `${dashboard}${signIn}`;
   if (identity && other) {
     const current = escapeHtml(identity.email);
     const href = escapeAttribute(other.href);
-    kicker = "";
     meta = "";
     if (other.accessibleAs) {
       const email = escapeHtml(other.accessibleAs);
@@ -387,13 +386,9 @@ function renderErrorPage(input: ErrorPageDetails, recovery?: RecoveryContext): s
 ${SYSTEM_THEME_INIT}
 <style>
 ${SYSTEM_PAGE_STYLES}
-  .kicker {
-    margin: 0 0 1rem;
-    color: var(--subtle);
-    font: 700 .75rem/1 ui-monospace, "SF Mono", Menlo, monospace;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-  }
+  .technical { margin-top: 1.5rem; color: var(--muted); font-size: .875rem; }
+  .technical summary { cursor: pointer; }
+  .technical summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   h1 {
     margin: 0;
     max-width: 14ch;
@@ -416,7 +411,7 @@ ${SYSTEM_PAGE_STYLES}
   .meta {
     display: grid;
     grid-template-columns: minmax(5rem, auto) 1fr;
-    margin: 2rem 0 0;
+    margin: .75rem 0 0;
     border-top: 1px solid var(--border);
   }
   dt {
@@ -500,7 +495,7 @@ ${SYSTEM_PAGE_STYLES}
   }
 ${accountAvatarCss(".avatar-h")}
   .who { display: flex; min-width: 0; flex-direction: column; font-size: .875rem; }
-  .who strong { overflow: hidden; color: var(--fg); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .who strong { overflow-wrap: anywhere; color: var(--fg); font-weight: 600; }
   .who span { color: var(--accent); font-size: .8125rem; font-weight: 600; }
 </style>
 </head>
@@ -508,14 +503,13 @@ ${accountAvatarCss(".avatar-h")}
   <main>
 ${SYSTEM_PAGE_BRAND}
     <section class="content" aria-labelledby="error-title">
-      ${kicker}
       <h1 id="error-title"${accountCard || (identity && other) ? ' class="account"' : ""}>${heading}</h1>
       ${lede}
-      ${meta}
       ${hint ? `<p class="hint">${hint}</p>` : ""}
       ${accountCard}
       <div class="actions">${actions}</div>
       ${identityLine}
+      ${meta}
     </section>
   </main>
 </body>
@@ -592,6 +586,9 @@ function titleFor(status: number, code: string, statusText: string): string {
 
 function fallbackMessage(status: number, code: string, statusText: string): string {
   if (status === 500) return "The server hit an unexpected problem. Please try again.";
+  if (status === 404)
+    return "This link isn't available. Check the address or ask the person who shared it.";
+  if (status === 503) return "This service is temporarily unavailable. Please try again shortly.";
   const human = humanizeCode(code);
   if (human) return `${human}.`;
   return statusText || "Request failed.";

@@ -39,16 +39,25 @@ describe("onboarding — on-brand structure (U20)", () => {
     // The paths picker is a labeled region rendered as an on-brand boxed panel
     // (rounded border + surface), not a loose transparent list.
     const paths = await screen.findByRole("region", { name: /creation paths/i });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Ship your first canvas" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Connect your agent" }),
+    ).toBeInTheDocument();
     expect(paths.className).toMatch(/rounded-xl/);
     expect(paths.className).toMatch(/border-border/);
     expect(paths.className).toMatch(/bg-surface/);
   });
 
-  it("offers the three creation paths and the agent-snippet panel", async () => {
+  it("offers agent connection, paste and upload with optional API details", async () => {
     renderOnboarding();
     expect(await screen.findByRole("button", { name: /paste/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /upload/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /get a key/i })).toBeInTheDocument();
-    expect(screen.getByText(/build with an ai agent/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /connect your agent/i })).toHaveAttribute(
+      "href",
+      "/docs/agents/mcp",
+    );
+    expect(screen.getByText(/Deploy from a script or CI/)).toBeVisible();
   });
 });

@@ -49,3 +49,25 @@ describe("OnPageEditor message → save round-trip", () => {
     expect(second).toHaveBeenCalledWith("<p>x</p>");
   });
 });
+
+describe("Page text size signals", () => {
+  it("accepts the bounded oversized signal only from the editor frame", () => {
+    const onTooLarge = vi.fn();
+    const onSave = vi.fn();
+    render(
+      <OnPageEditor
+        canvasId="c1"
+        htmlPath="index.html"
+        saving={false}
+        onSave={onSave}
+        onTooLarge={onTooLarge}
+      />,
+    );
+    const iframe = document.querySelector("iframe") as HTMLIFrameElement;
+    postFrom(window, { type: "cd-onpage-too-large" });
+    expect(onTooLarge).not.toHaveBeenCalled();
+    postFrom(iframe.contentWindow, { type: "cd-onpage-too-large" });
+    expect(onTooLarge).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});

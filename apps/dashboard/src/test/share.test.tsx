@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -75,8 +75,7 @@ function mockFetch(handlers: Record<string, () => Response | Promise<Response>>)
   return calls;
 }
 
-function renderShare() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderShare(qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/canvases/c1/share"] }),
@@ -101,6 +100,251 @@ afterEach(() => {
 });
 
 describe("share route", () => {
+  it("keeps the next email while an Add person request settles and ignores repeated Enter", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "POST /api/canvases/c1/allowlist": () => pending,
+    });
+    renderShare();
+    const user = userEvent.setup();
+    const input = await screen.findByLabelText("Person's email");
+    await user.type(input, "first@example.com");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.clear(input);
+    await user.type(input, "next@example.com");
+    await user.keyboard("{Enter}");
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    await act(async () => {
+      finish?.(json({ ok: true, status: "pending", emailDelivery: { status: "sent" } }));
+      await pending;
+    });
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Add" })).toBeEnabled());
+    expect(input).toHaveValue("next@example.com");
+  });
+
+  it.each([true, false])(
+    "keeps cached canvas B's identity and permissions after canvas A's delayed password result (success: %s)",
+    async (success) => {
+      let finish: ((response: Response) => void) | undefined;
+      const pending = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      const a = {
+        ...CANVAS,
+        title: "Canvas A",
+        publicationState: "published",
+        currentVersionId: "v1",
+        role: "owner",
+      };
+      const b = {
+        ...a,
+        id: "c2",
+        title: "Canvas B",
+        access: "whole_org",
+        shared: true,
+        role: "editor",
+      };
+      mockFetch({
+        "GET /api/canvases/c1": () => json(a),
+        "GET /api/canvases/c2": () => json(b),
+        "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+        "GET /api/canvases/c2/allowlist": () => json({ entries: [] }),
+        "PATCH /api/canvases/c1/settings": () => pending,
+      });
+      const qc = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+      });
+      qc.setQueryData(["canvas", "c1"], a);
+      qc.setQueryData(["canvas", "c2"], b);
+      const router = renderShare(qc);
+      const user = userEvent.setup();
+      await user.type(await screen.findByLabelText("Password"), "a-password");
+      await user.click(screen.getByRole("button", { name: "Set password" }));
+      void router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+      await user.click(await screen.findByRole("button", { name: "Discard and leave" }));
+      await screen.findByRole("heading", { name: "Canvas B" });
+      await act(async () => {
+        finish?.(success ? json({ ...a, hasPassword: true }) : json({ error: "unavailable" }, 503));
+        await pending;
+      });
+      await vi.waitFor(() => expect(qc.isMutating()).toBe(0));
+      expect(qc.getQueryData(["canvas", "c2"])).toEqual(b);
+      expect(qc.getQueryData(["canvas", "c1"])).toMatchObject({ id: "c1", hasPassword: success });
+      expect(screen.getByRole("heading", { name: "Canvas B" })).toBeVisible();
+      expect(screen.getByRole("radio", { name: /Whole org/ })).toBeChecked();
+      expect(screen.queryByRole("button", { name: /Transfer ownership/ })).not.toBeInTheDocument();
+    },
+  );
+
+  it("ignores a delayed Add person on A after cached navigation to B, including roster and transfer candidates", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const a = {
+      ...CANVAS,
+      title: "Canvas A",
+      publicationState: "published",
+      currentVersionId: "v1",
+    };
+    const b = { ...a, id: "c2", title: "Canvas B" };
+    const entry = (id: string, name: string) => ({
+      id,
+      kind: "member",
+      role: "editor",
+      userId: id,
+      name,
+      email: `${id}@example.com`,
+      teamId: null,
+      createdAt: 1,
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(a),
+      "GET /api/canvases/c2": () => json(b),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [entry("editor-a", "Editor A")] }),
+      "GET /api/canvases/c2/allowlist": () => json({ entries: [entry("editor-b", "Editor B")] }),
+      "POST /api/canvases/c1/allowlist": () => pending,
+    });
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    qc.setQueryData(["canvas", "c1"], a);
+    qc.setQueryData(["canvas", "c2"], b);
+    const router = renderShare(qc);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Person's email"), "pending-a@example.com");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+    await screen.findByText("editor-b@example.com");
+    await user.type(screen.getByLabelText("Person's email"), "unfinished-b@example.com");
+    await act(async () => {
+      finish?.(json({ ok: true, status: "pending", emailDelivery: { status: "sent" } }));
+      await pending;
+    });
+    expect(screen.getByLabelText("Person's email")).toHaveValue("unfinished-b@example.com");
+    expect(screen.getByText("editor-b@example.com")).toBeVisible();
+    expect(screen.queryByText("editor-a@example.com")).not.toBeInTheDocument();
+    expect(
+      calls.filter((c) => c.url === "/api/canvases/c1/allowlist" && c.method === "GET"),
+    ).toHaveLength(1);
+    expect(screen.queryByText(/access pending until sign-in/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Transfer ownership/ }));
+    expect(await screen.findByLabelText(/Editor B/)).toBeVisible();
+    expect(screen.queryByLabelText(/Editor A/)).not.toBeInTheDocument();
+  });
+
+  it("does not let an old password response clear a new canvas's draft after deliberate navigation", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    const request = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "PATCH /api/canvases/c1/settings": () => request,
+      "GET /api/canvases/c2": () => json({ ...published, id: "c2", title: "Second canvas" }),
+      "GET /api/canvases/c2/allowlist": () => json({ entries: [] }),
+    });
+    const router = renderShare();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Password"), "first-password");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    expect(screen.getByLabelText("Password")).toBeDisabled();
+    void router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+    await user.click(await screen.findByRole("button", { name: "Discard and leave" }));
+    await screen.findByRole("heading", { name: "Second canvas" });
+    await user.type(screen.getByLabelText("Password"), "second-password");
+    await act(async () => {
+      finish?.(json({ ...published, hasPassword: true }));
+      await request;
+    });
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Password")).toHaveValue("second-password"),
+    );
+    expect(screen.queryByText("Password set")).not.toBeInTheDocument();
+  });
+
+  it("keeps sharing drafts guarded across a background unpublish, without inventing a description draft", async () => {
+    let published = true;
+    let description = "Original description";
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: published ? "published" : "draft",
+          currentVersionId: published ? "v1" : null,
+          galleryListed: true,
+          description,
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderShare(qc);
+    const user = userEvent.setup();
+    expect(await screen.findByLabelText("Description")).toHaveValue("Original description");
+    description = "Changed in another session";
+    await qc.invalidateQueries({ queryKey: ["canvas", "c1"] });
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Description")).toHaveValue("Changed in another session"),
+    );
+    expect(screen.queryByRole("button", { name: "Save description" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Password"), "retained-secret");
+    published = false;
+    await qc.invalidateQueries({ queryKey: ["canvas", "c1"] });
+    expect(await screen.findByText(/Your unsaved sharing edits are retained/)).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Settings" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Leave with unsaved changes?" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    published = true;
+    await qc.invalidateQueries({ queryKey: ["canvas", "c1"] });
+    expect(await screen.findByLabelText("Password")).toHaveValue("retained-secret");
+  });
+
+  it("retains failed password and expiry drafts across invalidation and canceled navigation", async () => {
+    const published = {
+      ...CANVAS,
+      publicationState: "published",
+      currentVersionId: "v1",
+      shared: true,
+    };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "PATCH /api/canvases/c1/settings": () => json({ error: "unavailable" }, 503),
+    });
+    renderShare();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Password"), "local-password-draft");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    expect(await screen.findByText(/Password change not saved/)).toBeVisible();
+    expect(screen.getByLabelText("Password")).toHaveValue("local-password-draft");
+    fireEvent.change(screen.getByLabelText("Share expiry"), {
+      target: { value: "2030-11-01T12:00" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save expiry" }));
+    expect(await screen.findByText(/Expiry not saved/)).toBeVisible();
+    expect(screen.getByLabelText("Share expiry")).toHaveValue("2030-11-01T12:00");
+    await user.click(screen.getByRole("link", { name: "Settings" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Leave with unsaved changes?" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Password")).toHaveValue("local-password-draft");
+    expect(screen.getByLabelText("Share expiry")).toHaveValue("2030-11-01T12:00");
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2);
+    expect(JSON.stringify(localStorage)).not.toContain("local-password-draft");
+    expect(JSON.stringify(sessionStorage)).not.toContain("local-password-draft");
+  });
+
   it("sets a password via PATCH", async () => {
     const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
     const calls = mockFetch({
@@ -1065,7 +1309,7 @@ describe("share route", () => {
     renderShare();
 
     expect(await screen.findByText(/this share expired/i)).toBeInTheDocument();
-    expect(screen.getByText(/non-owners now get a 404/i)).toBeInTheDocument();
+    expect(screen.getByText(/viewers can no longer open/i)).toBeInTheDocument();
   });
 
   it("shows no expiry warning when the expiry is still in the future", async () => {
@@ -1208,7 +1452,9 @@ describe("share route", () => {
     renderShare();
 
     await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(screen.getByText(/anyone signed in can discover this canvas/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/members of this canvas.s organization can discover it in Gallery/i),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: /list for people with access/i })).toBeNull();
   });
 

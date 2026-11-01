@@ -9,6 +9,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn.js";
+import { useModalLayer } from "../lib/use-modal-layer.js";
 import { IconButton, IconLink } from "./IconButton.js";
 import { PaneHeader, WorkspacePane } from "./Surface.js";
 
@@ -69,27 +70,9 @@ export function DraftPreview({
     if (!usesScripts) setRanScripted(false);
   }, [usesScripts]);
 
-  // Fullscreen is a modal overlay: save the trigger, focus the overlay on open,
-  // restore focus on close, and let Escape exit (mirrors Dialog.tsx). Read the
-  // latest onToggleFullscreen from a ref so a fresh arrow each render doesn't tear
-  // down and re-run the effect.
+  // Fullscreen participates in the same focus/Escape/scroll stack as dialogs.
   const overlayRef = useRef<HTMLDivElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
-  const toggleFullscreenRef = useRef(onToggleFullscreen);
-  toggleFullscreenRef.current = onToggleFullscreen;
-  useEffect(() => {
-    if (!fullscreen) return;
-    restoreFocusRef.current = document.activeElement as HTMLElement | null;
-    overlayRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") toggleFullscreenRef.current();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      restoreFocusRef.current?.focus?.();
-    };
-  }, [fullscreen]);
+  useModalLayer({ open: fullscreen, panelRef: overlayRef, onClose: onToggleFullscreen });
   // The sandboxed frame is shown for a static draft, or once the owner runs a scripted one.
   const showFrame = !usesScripts || ranScripted;
 

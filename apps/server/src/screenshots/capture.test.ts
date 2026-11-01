@@ -1,17 +1,21 @@
 import sharp from "sharp";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CAPTURE_FALLBACK_VIEWPORT,
+  CAPTURE_VIEWPORT,
   type CaptureContext,
   type CapturePage,
   type CaptureRoute,
   captureCanvas,
   encodeRenditions,
+  FALLBACK_RESIZE_DEADLINE_MS,
+  LAYOUT_PROBE_DEADLINE_MS,
   RENDITION_SIZES,
   SETTLE_DEADLINE_MS,
 } from "./capture.js";
 import { CAPTURE_TOKEN_HEADER } from "./capture-token.js";
 
-/** A real PNG at the capture viewport size so the sharp pipeline runs for real. */
+/** A real PNG so the rendition pipeline runs through sharp. */
 const masterPng = (): Promise<Buffer> =>
   sharp({ create: { width: 1200, height: 630, channels: 3, background: { r: 12, g: 34, b: 56 } } })
     .png()
@@ -22,10 +26,12 @@ function fakePage(over: Partial<CapturePage> = {}): {
   routeHandler: () => (route: CaptureRoute) => unknown;
   headers: () => Record<string, string>;
   closed: () => boolean;
+  viewports: () => Array<{ width: number; height: number }>;
 } {
   let handler: (route: CaptureRoute) => unknown = () => {};
   let headers: Record<string, string> = {};
   let closed = false;
+  const viewports: Array<{ width: number; height: number }> = [];
   const page: CapturePage = {
     async setExtraHTTPHeaders(h) {
       headers = h;
@@ -34,7 +40,9 @@ function fakePage(over: Partial<CapturePage> = {}): {
       handler = h;
     },
     on() {},
-    async setViewportSize() {},
+    async setViewportSize(size) {
+      viewports.push(size);
+    },
     async goto() {
       return null;
     },
@@ -50,10 +58,36 @@ function fakePage(over: Partial<CapturePage> = {}): {
     },
     ...over,
   };
-  return { page, routeHandler: () => handler, headers: () => headers, closed: () => closed };
+  return {
+    page,
+    routeHandler: () => handler,
+    headers: () => headers,
+    closed: () => closed,
+    viewports: () => viewports,
+  };
 }
 
 const ctxFor = (page: CapturePage): CaptureContext => ({ newPage: async () => page });
+const capture = (page: CapturePage) =>
+  captureCanvas({
+    context: ctxFor(page),
+    url: "https://cv.example.test/",
+    token: "tok",
+    timeoutMs: 5000,
+  });
+
+function stubLayout(rootWidth = 900, bodyWidth = 900) {
+  vi.stubGlobal("innerWidth", 900);
+  vi.stubGlobal("document", {
+    documentElement: { scrollWidth: rootWidth },
+    body: { scrollWidth: bodyWidth },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 const route = (
   url: string,
@@ -101,6 +135,99 @@ describe("encodeRenditions (U4)", () => {
 });
 
 describe("captureCanvas (U4)", () => {
+  it.each([900, 901])(
+    "keeps the compact desktop viewport when content width is %ipx",
+    async (width) => {
+      stubLayout(width, width);
+      const f = fakePage();
+      const screenshot = vi.spyOn(f.page, "screenshot");
+      await capture(f.page);
+      expect(CAPTURE_VIEWPORT).toEqual({ width: 900, height: 600 });
+      expect(f.viewports()).toEqual([{ width: 900, height: 600 }]);
+      expect(screenshot).toHaveBeenCalledExactlyOnceWith({
+        type: "png",
+        timeout: 5000,
+        animations: "disabled",
+      });
+      expect(f.closed()).toBe(true);
+    },
+  );
+
+  it.each([
+    [902, 900],
+    [900, 1440],
+  ])("uses the original desktop viewport for root/body overflow (%i/%i)", async (root, body) => {
+    stubLayout(root, body);
+    const f = fakePage();
+    const evaluate = vi.spyOn(f.page, "evaluate");
+    const screenshot = vi.spyOn(f.page, "screenshot");
+    await capture(f.page);
+    expect(CAPTURE_FALLBACK_VIEWPORT).toEqual({ width: 1440, height: 960 });
+    expect(f.viewports()).toEqual([CAPTURE_VIEWPORT, CAPTURE_FALLBACK_VIEWPORT]);
+    expect(evaluate).toHaveBeenCalledTimes(3); // settle, probe, settle after resize
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(evaluate.mock.invocationCallOrder[2]).toBeLessThan(
+      screenshot.mock.invocationCallOrder[0] as number,
+    );
+    expect(f.closed()).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    { body: { scrollWidth: 900 } },
+    { documentElement: { scrollWidth: 900 } },
+    { documentElement: { scrollWidth: Number.NaN }, body: { scrollWidth: 900 } },
+  ])("falls back when layout metrics are unavailable or invalid: %j", async (document) => {
+    vi.stubGlobal("innerWidth", 900);
+    vi.stubGlobal("document", document);
+    const f = fakePage();
+    await capture(f.page);
+    expect(f.viewports()).toEqual([CAPTURE_VIEWPORT, CAPTURE_FALLBACK_VIEWPORT]);
+    expect(f.closed()).toBe(true);
+  });
+
+  it("falls back when evaluating layout fails, then settles the resized page", async () => {
+    const f = fakePage();
+    const evaluate = vi
+      .spyOn(f.page, "evaluate")
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Execution context was destroyed"))
+      .mockResolvedValueOnce(undefined);
+    await capture(f.page);
+    expect(f.viewports()).toEqual([CAPTURE_VIEWPORT, CAPTURE_FALLBACK_VIEWPORT]);
+    expect(evaluate).toHaveBeenCalledTimes(3);
+    expect(f.closed()).toBe(true);
+  });
+
+  it("a hung layout probe falls back within its Node deadline and cannot change a later capture", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const f = fakePage();
+    let completeProbe: ((value: boolean) => void) | undefined;
+    vi.spyOn(f.page, "evaluate")
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            completeProbe = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const screenshot = vi.spyOn(f.page, "screenshot");
+    const done = capture(f.page);
+    await vi.advanceTimersByTimeAsync(LAYOUT_PROBE_DEADLINE_MS - 1);
+    expect(f.viewports()).toEqual([CAPTURE_VIEWPORT]);
+    expect(screenshot).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.viewports()).toEqual([CAPTURE_VIEWPORT, CAPTURE_FALLBACK_VIEWPORT]);
+    vi.useRealTimers();
+    await done;
+    completeProbe?.(true);
+    await Promise.resolve();
+    expect(f.viewports()).toEqual([CAPTURE_VIEWPORT, CAPTURE_FALLBACK_VIEWPORT]);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(f.closed()).toBe(true);
+  });
+
   it("sets the capture token header, captures, returns renditions, and closes the page", async () => {
     const f = fakePage();
     const out = await captureCanvas({
@@ -115,7 +242,31 @@ describe("captureCanvas (U4)", () => {
     expect(f.closed()).toBe(true);
   });
 
-  it("a settle step that never finishes cannot hold the capture past its deadline", async () => {
+  it("a hung fallback resize fails within its Node deadline and closes the page", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const f = fakePage();
+    const resize = vi
+      .spyOn(f.page, "setViewportSize")
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const evaluate = vi
+      .spyOn(f.page, "evaluate")
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(false);
+    const screenshot = vi.spyOn(f.page, "screenshot");
+    const failed = expect(capture(f.page)).rejects.toThrow(/fallback resize.*timed out/i);
+    await vi.advanceTimersByTimeAsync(FALLBACK_RESIZE_DEADLINE_MS - 1);
+    expect(f.closed()).toBe(false);
+    expect(screenshot).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await failed;
+    expect(resize).toHaveBeenNthCalledWith(2, CAPTURE_FALLBACK_VIEWPORT);
+    expect(evaluate).toHaveBeenCalledTimes(2);
+    expect(screenshot).not.toHaveBeenCalled();
+    expect(f.closed()).toBe(true);
+  });
+
+  it("hung initial/fallback settles and layout probe are each bounded before capture", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const f = fakePage({
@@ -127,7 +278,7 @@ describe("captureCanvas (U4)", () => {
         token: "tok",
         timeoutMs: 5000,
       });
-      await vi.advanceTimersByTimeAsync(SETTLE_DEADLINE_MS + 10);
+      await vi.advanceTimersByTimeAsync(SETTLE_DEADLINE_MS * 2 + LAYOUT_PROBE_DEADLINE_MS + 10);
       vi.useRealTimers();
       const out = await done;
       expect(Object.keys(out).sort()).toEqual(["card", "og", "thumb"]);
@@ -200,6 +351,17 @@ describe("captureCanvas (U4)", () => {
         timeoutMs: 5000,
       }),
     ).rejects.toThrow(/timeout/i);
+    expect(f.closed()).toBe(true);
+  });
+
+  it("propagates a screenshot timeout after fallback and still closes the page", async () => {
+    const f = fakePage({
+      async screenshot() {
+        throw new Error("Screenshot timeout 5000ms exceeded");
+      },
+    });
+    await expect(capture(f.page)).rejects.toThrow(/screenshot timeout/i);
+    expect(f.viewports()).toEqual([CAPTURE_VIEWPORT, CAPTURE_FALLBACK_VIEWPORT]);
     expect(f.closed()).toBe(true);
   });
 });

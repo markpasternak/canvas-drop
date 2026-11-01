@@ -8,7 +8,7 @@ type Tone = "default" | Extract<SurfaceTone, "accent" | "danger">;
 type Size = Extract<ControlSize, "sm" | "md">;
 
 const base =
-  "inline-grid place-items-center rounded-md border font-medium transition-all duration-100 " +
+  "cd-touch-target inline-grid place-items-center rounded-md border font-medium transition-all duration-100 " +
   "[transition-timing-function:var(--ease-out)] active:translate-y-px " +
   "disabled:pointer-events-none disabled:opacity-40";
 

@@ -104,7 +104,8 @@ describe("editor: dialogs over a live CodeMirror editor don't freeze", () => {
     mockFetch();
     renderEditor();
     await screen.findByText("index.html");
-    await userEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    await userEvent.click(await screen.findByRole("button", { name: "File actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename file" }));
     await waitFor(() => expect(screen.getByText("Rename file")).toBeInTheDocument());
   });
 });

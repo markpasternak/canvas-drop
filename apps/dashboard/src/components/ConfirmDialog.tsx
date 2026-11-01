@@ -38,7 +38,7 @@ export function ConfirmDialog({
     <Dialog open={open} onClose={onClose} title={title} dismissable={!loading}>
       <div className="space-y-4">
         {children && <div className="text-sm text-muted">{children}</div>}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={loading}>
             Cancel
           </Button>

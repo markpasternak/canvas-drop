@@ -21,20 +21,20 @@ const OUT = join(ASSETS_DIR, "tour.webp");
 const FRAMES = [
   "landing-dashboard.webp",
   "tour-editor.webp",
-  "tour-shared.webp",
-  "landing-gallery.webp",
   "tour-sharing.webp",
   "tour-people.webp",
-  "tour-teams.webp",
   "tour-capabilities.webp",
+  "tour-shared.webp",
+  "landing-gallery.webp",
   "tour-usage.webp",
-  "tour-preview.webp",
+  "tour-teams.webp",
   "tour-admin.webp",
+  "tour-preview.webp",
 ];
 
-// Near-native resolution (the capture viewport is 1440x900) so text stays crisp.
-const W = 1440;
-const H = 900;
+// Preserve the 2x captures (1280x800 CSS pixels) for sharp README display.
+const W = 2560;
+const H = 1600;
 const DELAY_MS = 3000;
 const QUALITY = 86;
 

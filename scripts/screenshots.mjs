@@ -1,6 +1,7 @@
 // Capture optimized screenshots of the dashboard, driving headless Chromium
 // (Playwright) against a RUNNING dev dashboard in dev auth mode (auto-login),
-// then resizing + re-encoding to WebP with sharp into docs/site/assets/.
+// then re-encoding to WebP with sharp into docs/site/assets/. A 1280x800 CSS
+// viewport at 2x density keeps controls readable and text sharp at display size.
 //
 // Two modes (the only differences are settle time, populated-vs-empty data, and
 // which screens map to which asset names — both capture in LIGHT theme):
@@ -29,7 +30,7 @@ import { launchChromiumWithChromeFallback } from "./playwright-launch.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(root, "docs/site/assets");
-const MAX_WIDTH = 1600;
+const MAX_WIDTH = 2560;
 
 // Where the dev dashboard is reachable. Override for a non-default port pair.
 const BASE = process.env.CANVAS_DROP_DASHBOARD_URL ?? "http://localhost:5173";
@@ -38,7 +39,7 @@ const LANDING = process.argv.includes("--landing");
 // Both docs and landing shots capture in LIGHT theme — the marketing/landing
 // imagery reads soft + editorial in light mode (owner preference, 2026-06-19).
 const COLOR_SCHEME = "light";
-const WEBP_QUALITY = LANDING ? 82 : 80;
+const WEBP_QUALITY = 88;
 // The canvas list / gallery / admin views load data after first paint; networkidle
 // can fire before rows render, so the landing (populated) shots wait a beat.
 const SETTLE_MS = LANDING ? 1800 : 0;
@@ -48,7 +49,9 @@ const SETTLE_MS = LANDING ? 1800 : 0;
  *  code-rich demo app) and falls back to the first one. Returns null if none is
  *  seeded (the tour capture then fails). */
 async function discoverCanvasId(page, preferTitle) {
-  await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
+  // Volume fixtures can share the demo title but have no files. Match the same
+  // showcase set used in the tour's library shot so the editor has real content.
+  await page.goto(`${BASE}/?tag=showcase`, { waitUntil: "networkidle", timeout: 20000 });
   await page.waitForTimeout(SETTLE_MS || 1200);
   return page.evaluate((title) => {
     const links = Array.from(document.querySelectorAll("a[href]")).filter((a) =>
@@ -103,9 +106,30 @@ async function resolveShots(page) {
         if ((await filters.getAttribute("aria-expanded")) === "true") await filters.click();
       },
     },
-    { path: "/shared?sort=owner", name: "tour-shared.webp" },
-    { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
-    { path: "/admin/canvases?public=true&password=false", name: "tour-admin.webp" },
+    {
+      path: "/shared?sort=owner",
+      name: "tour-shared.webp",
+      async prepare(page) {
+        await page.getByRole("button", { name: "List view", exact: true }).click();
+      },
+    },
+    {
+      path: "/gallery?tag=showcase",
+      name: "landing-gallery.webp",
+      async prepare(page) {
+        const filters = page.getByRole("button", { name: /^Filters/ });
+        if ((await filters.getAttribute("aria-expanded")) === "true") await filters.click();
+      },
+    },
+    {
+      path: "/admin/canvases?public=true&password=false",
+      name: "tour-admin.webp",
+      async prepare(page) {
+        const inspect = page.getByRole("button", { name: /^Inspect / }).first();
+        await inspect.click();
+        await page.getByRole("region", { name: "Canvas metadata", exact: true }).waitFor();
+      },
+    },
     // Teams & invites (plan 003): expand the personal "Family" team's roster so the shot
     // tells the invite story — a member plus a not-yet-signed-in Pending row. Seed a team
     // first (seed-canvases creates a personal + org team with a pending invite).
@@ -115,7 +139,7 @@ async function resolveShots(page) {
       async prepare(page) {
         const members = page
           .locator("li", { hasText: "Family" })
-          .getByRole("button", { name: /^Members$/ })
+          .getByRole("button", { name: /^Members(?:\s|$)/ })
           .first();
         if (await members.count()) {
           await members.click();
@@ -128,13 +152,30 @@ async function resolveShots(page) {
   const id = await discoverCanvasId(page, "Pricing Calculator");
   if (id) {
     shots.push(
-      { path: `/canvases/${id}/editor`, name: "tour-editor.webp" },
+      {
+        path: `/canvases/${id}/editor`,
+        name: "tour-editor.webp",
+        async prepare(page) {
+          await page
+            .getByRole("textbox", { name: "Source code for index.html", exact: true })
+            .waitFor();
+          await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
+          await page.getByRole("button", { name: "Show preview", exact: true }).click();
+        },
+      },
       // General access (Restricted / Whole org / Public link), followed by Protection.
       { path: `/canvases/${id}/share`, name: "tour-sharing.webp", scrollTo: "#access" },
       // Direct access: add-mode tabs, owner row, direct editor, viewer, editor team, and
       // pending editor invite — seeded by `pnpm seed:collaborators`.
       { path: `/canvases/${id}/share`, name: "tour-people.webp", scrollTo: "#people" },
-      { path: `/canvases/${id}/capabilities`, name: "tour-capabilities.webp" },
+      {
+        path: `/canvases/${id}/capabilities`,
+        name: "tour-capabilities.webp",
+        async prepare(page) {
+          const saved = page.getByText("Review saved configuration", { exact: true });
+          if (await saved.count()) await saved.click();
+        },
+      },
       { path: `/canvases/${id}/usage`, name: "tour-usage.webp" },
       // The per-canvas preview control (auto/off + custom cover). Scroll the Preview
       // section into view so the framed shot shows the control, not the page top.
@@ -165,7 +206,8 @@ async function main() {
   const browser = await launchChromiumWithChromeFallback(chromium);
   try {
     const page = await browser.newPage({
-      viewport: { width: 1440, height: 900 },
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 2,
       colorScheme: COLOR_SCHEME,
     });
 
@@ -185,16 +227,27 @@ async function main() {
         if (SETTLE_MS) await page.waitForTimeout(SETTLE_MS);
         await page.locator("main h1").first().waitFor({ state: "visible" });
         await page.evaluate(() => document.fonts.ready);
+        const expandSidebar = page.getByRole("button", { name: "Expand sidebar", exact: true });
+        if (await expandSidebar.count()) await expandSidebar.click();
         // Optionally run a per-shot prep step (expand a roster, open a section) before framing.
         if (shot.prepare) await shot.prepare(page);
         // Optionally scroll a specific section into view (e.g. the Preview control, which
         // sits below the fold on the settings page) before framing the shot.
         if (shot.scrollTo) {
           await page.evaluate((sel) => {
-            document.querySelector(sel)?.scrollIntoView({ block: "start" });
+            const section = document.querySelector(sel);
+            if (section) {
+              // Frame the section itself, without a clipped row or heading from
+              // the preceding section above the app's navigation scroll margin.
+              window.scrollTo({
+                top: section.getBoundingClientRect().top + window.scrollY - 24,
+                behavior: "instant",
+              });
+            }
           }, shot.scrollTo);
           await page.waitForTimeout(500);
         }
+        await page.mouse.move(0, 0);
         const png = await page.screenshot({ fullPage: false });
         const out = join(OUT_DIR, shot.name);
         await sharp(png)

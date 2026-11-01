@@ -68,6 +68,80 @@ afterEach(() => {
 });
 
 describe("teams page", () => {
+  it("distinguishes a failed team list and roster from empty data and retries each", async () => {
+    let listFailed = true;
+    let rosterFailed = true;
+    mockFetch({
+      "GET /api/teams": () =>
+        listFailed
+          ? json({ error: "unavailable" }, 503)
+          : json({
+              teams: [
+                {
+                  id: "t1",
+                  orgId: null,
+                  name: "Design",
+                  slug: "design",
+                  mine: true,
+                  canManage: true,
+                },
+              ],
+            }),
+      "GET /api/teams/t1/members": () =>
+        rosterFailed
+          ? json({ error: "unavailable" }, 503)
+          : json({
+              members: [{ userId: "u2", email: "ada@example.com", name: "Ada" }],
+              pending: [],
+            }),
+    });
+    renderTeams();
+    const user = userEvent.setup();
+    expect(await screen.findByText("Couldn't load your teams")).toBeVisible();
+    expect(screen.queryByText("No teams yet")).not.toBeInTheDocument();
+    listFailed = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await user.click(await screen.findByRole("button", { name: /^Members/ }));
+    expect(await screen.findByText("Couldn't load this team's members")).toBeVisible();
+    rosterFailed = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Ada")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Hide members" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("names the member and access impact before removing a team member", async () => {
+    const calls = mockFetch({
+      "GET /api/teams": () =>
+        json({
+          teams: [
+            { id: "t1", orgId: null, name: "Design", slug: "design", mine: true, canManage: true },
+          ],
+        }),
+      "GET /api/teams/t1/members": () =>
+        json({ members: [{ userId: "u2", email: "ada@example.com", name: "Ada" }], pending: [] }),
+      "DELETE /api/teams/t1/members/u2": () => json({ ok: true }),
+    });
+    renderTeams();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /^Members/ }));
+    await user.click(
+      within((await screen.findByText("Ada")).closest("li") as HTMLElement).getByRole("button", {
+        name: /Remove/,
+      }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Remove Ada from Design?" }),
+    ).toHaveTextContent(/access/);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Remove member" }));
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/members/u2"))).toBe(true),
+    );
+  });
+
   it("a no-org user can create a PERSONAL team (no org id in the POST)", async () => {
     const calls = mockFetch({
       "GET /api/me": () => json({ ...ME, orgs: [] }),
@@ -146,7 +220,7 @@ describe("teams page", () => {
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
     // The pending invitee appears with a Pending sign-in badge (not yet a member).
     expect(await screen.findByText("waiting@example.com")).toBeInTheDocument();
-    expect(screen.getByText(/pending sign-in/i)).toBeInTheDocument();
+    expect(screen.getByText("Pending sign-in")).toBeInTheDocument();
 
     await user.type(await screen.findByLabelText(/person's email/i), "new@example.com");
     await user.click(screen.getByRole("button", { name: /^add person$/i }));

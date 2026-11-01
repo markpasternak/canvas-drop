@@ -5,10 +5,11 @@ You have HTML, a folder of static files, or a build directory, and you want a li
 The shortest path, from a signed-in dashboard:
 
 1. Open `/new` and pick **Paste HTML**.
-2. Paste your markup and review the document preview. Give it a title, choose its workspace and audience, then click **Create and publish**.
-3. Copy the link or choose **Open canvas**. Save the optional deploy key if you plan to publish through the API; it is shown once. The **Overview** tab also has the URL: `{base}/c/{slug}/` in `path` mode, `https://{slug}.canvases.example.com/` in `subdomain` mode.
+2. Paste your markup and review the document preview. Give it a title, choose its workspace and audience, then click **Create draft**.
+3. Review **Your draft is ready**: check the entry page, file count, destination and intended audience. Choose **Continue editing** to open the editor, or **Review and publish**, then **Publish canvas** to make it live.
+4. Copy the link or choose **Open canvas**. Save the optional deploy key if you plan to publish through the API; it is shown once. The **Overview** tab also has the URL: `{base}/c/{slug}/` in `path` mode, `https://{slug}.canvases.example.com/` in `subdomain` mode.
 
-![Create a canvas: HTML, document preview, title, workspace, and audience](/docs/assets/new-canvas.webp)
+![Create a canvas draft with an HTML preview, title, workspace, and audience](/docs/assets/new-canvas.webp)
 
 The same from a terminal, with the canvas id and key shown when you create a canvas:
 
@@ -23,9 +24,10 @@ curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
 
 | Source | Where | What it does |
 |---|---|---|
-| **Paste HTML** | `/new`, or **Upload new version** on a canvas | Stores your markup as `index.html` and publishes it in one step |
-| **Files or folder** | `/new`, or **Upload new version** | Uploads with relative paths preserved and publishes |
-| **Upload ZIP** | `/new`, or **Upload new version** | Extracts the archive server-side and publishes |
+| **Paste HTML** | `/new` | Stores your markup as `index.html` in an unpublished draft for review |
+| **Files or folder** | `/new` | Uploads to an unpublished draft with relative paths preserved |
+| **Upload ZIP** | `/new` | Prepares the archive files as an unpublished draft for review |
+| **Upload new version** | An existing canvas’s **Overview** | Publishes pasted HTML, files/folders or a ZIP directly to live |
 | **Use the API** | `/new` | Mints an empty canvas plus its key; the first `PUT …/deploy` publishes |
 | **Editor** | The **Editor** tab | Autosaves a **draft**; you choose **Review and publish** when ready |
 | **Deploy API / MCP** | Scripts and agents | Publishes directly to live with a key or over MCP |
@@ -39,11 +41,11 @@ flowchart TD
       API[Deploy API / MCP]
       Ed[Editor]
     end
-    DnD --> Pub{Publish}
-    Zip --> Pub
-    Paste --> Pub
-    API --> Pub
-    Ed --> Draft[(Draft, autosaved)]
+    DnD --> Draft[(Draft)]
+    Zip --> Draft
+    Paste --> Draft
+    API --> Pub{Publish}
+    Ed --> Draft
     Draft -->|keep editing| Draft
     Draft -->|Publish when ready| Pub
     Pub --> V[Immutable version N, content-addressed]
@@ -54,7 +56,7 @@ flowchart TD
 
 Every publish writes an **immutable version**: files are stored by content hash, and the live URL is a pointer at one version. Rolling back re-points; nothing is rewritten. The last 10 versions are kept.
 
-The editor is the one source with a draft step. Everything else publishes the moment it succeeds. Two words for the same event: the dashboard says **publish**, the API and code say **deploy**.
+Dashboard creation and the editor use a draft step. **Upload new version** on an existing canvas and the Deploy API publish the moment they succeed. Two words for the same event: the dashboard says **publish**, the API and code say **deploy**.
 
 Owners and editors can do everything on this page. A viewer opens the canvas but cannot change it; only the owner can delete it. See [Sharing & access](/docs/authoring/sharing).
 
@@ -65,10 +67,10 @@ After you pick a source, `/new` asks for:
 - **Title** (optional, up to 200 characters). Rename later from the **Overview** tab.
 - **Slug** (under **Optional settings**). Leave it empty for a readable random slug, or choose your own; availability is checked as you type. See [Custom slug](#custom-slug).
 - **Workspace**, always visible. **Personal** means only you and the people you specifically add. Picking your org homes the canvas there so it can later open to the **Whole org** rung. This choice is fixed once the canvas exists: a Personal canvas cannot be opened to Whole org later. Accounts without an org can select only Personal.
-- **Audience** (not shown for **Use the API**). **Restricted** is the default: only you and people or teams you add can open it. A workspace canvas offers **Everyone in {workspace}** with a **List in Shared** toggle (off by default) so members can find it. A Personal canvas offers **Public link**, when the instance and your account allow public links, with an optional **Require password**. Changing the Workspace resets the audience to Restricted. The audience is applied after the first publish; if that request fails, the published result says sharing could not be confirmed and offers a route to Share after you save or explicitly skip the key. The full ladder, named people, teams, and expiry live on the **Share** tab.
+- **Audience** (not shown for **Use the API**). **Restricted** is the default: only you and people or teams you add can open it. A workspace canvas offers **Everyone in {workspace}** with a **List in Shared** toggle (off by default) so members can find it. A Personal canvas offers **Public link**, when the instance and your account allow public links, with an optional **Require password**. Changing the Workspace resets the audience to Restricted. Creation saves an unpublished, Restricted draft. **Review and publish** shows the planned audience in the final confirmation: publication happens first, then the selected sharing settings are applied. If sharing fails or its response is lost, the result stays **Your canvas is published**, with **Sharing needs verification** and **Check sharing**. Review access there; do not republish or delete the canvas to retry sharing. The full ladder, named people, teams, and expiry live on the **Share** tab.
 - **Enable backend** (under **Optional settings**, off by default). Turns on identity and, subject to what your instance allows, KV, files, AI, and realtime. Change it any time on the **Backend** tab. See [Capabilities](/docs/authoring/capabilities).
 
-The **Upload files** source accepts files, a folder, or one ZIP. Selection stays in your browser until you click **Create and publish**; review the file paths or archive summary first. If publishing fails after creation, Canvas Drop attempts to remove the temporary canvas and keeps your selection available to retry.
+The **Upload files** source accepts files, a folder, or one ZIP. Selection stays in your browser until you click **Create draft**; review the file paths or archive summary first. If an upload fails after creation, the partial canvas stays unpublished. **Retry draft upload** retries the retained files; **Open saved draft** lets you inspect what arrived. Your original preparation remains available. Navigation protects unsubmitted input; after a full page reload, files must be selected again.
 
 The published result leads with your canvas link and audience. Open the canvas or manage sharing in a new tab while the result stays available. The deploy key is optional for dashboard use: expand **Save your deploy key (shown once)** to copy it, or explicitly continue without saving it. It is never stored in your browser.
 
@@ -76,19 +78,19 @@ Pasted HTML gets a layout-only document preview, with scripts, navigation, and e
 
 ## Files or folder
 
-Drop individual files or a whole folder, or use the file and folder pickers. Relative paths are preserved at the canvas root, so an `index.html` at the folder root is served at the canvas URL. On Create, select and review first, then click **Create and publish**. Progress appears while files transfer.
+Drop individual files or a whole folder, or use the file and folder pickers. Relative paths are preserved at the canvas root, so an `index.html` at the folder root is served at the canvas URL. On Create, select and review first, then click **Create draft**. Progress appears while files transfer.
 
 ## Upload a ZIP
 
-Upload a `.zip` (not a tar) and the server extracts it. Extraction is path-safe: entries that escape the canvas root are rejected (`ZIP_SLIP_REJECTED`, `INVALID_PATH`), an entry that declares more than 25 MB, or inflates past it, is rejected before it can fill memory (`ZIP_BOMB_REJECTED`), and an unreadable archive is `INVALID_ZIP`. As with a folder, an `index.html` at the archive root is the home page.
+Upload a `.zip` (not a tar). New-canvas creation prepares its files in a draft; **Upload new version** and the Deploy API extract it server-side and publish directly. Extraction is path-safe: entries that escape the canvas root are rejected (`ZIP_SLIP_REJECTED`, `INVALID_PATH`), an entry that declares more than 25 MB, or inflates past it, is rejected before it can fill memory (`ZIP_BOMB_REJECTED`), and an unreadable archive is `INVALID_ZIP`. As with a folder, an `index.html` at the archive root is the home page.
 
 ## Paste HTML
 
-For a one-file canvas, paste HTML directly. canvas-drop stores it as a single `index.html` and publishes it. From `/new` this creates and publishes in one request; on an existing canvas it publishes the next version.
+For a one-file canvas, paste HTML directly. Canvas Drop stores it as a single `index.html`. From `/new` this creates an unpublished draft; review and publish when ready. **Upload new version** on an existing canvas publishes the next version directly.
 
 ## Upload a new version on an existing canvas
 
-The **Upload new version** button sits on every tab of a canvas you own or edit. It opens the same three sources (**Paste HTML**, **Files or folder**, **ZIP**) and publishes the next version to everyone as soon as it succeeds. Use it when your files are built elsewhere. An archived canvas refuses new versions (`NOT_ACTIVE`) until you unarchive it.
+Find **Upload new version** on the **Overview** tab of a canvas you own or edit. It opens the same three sources (**Paste HTML**, **Files or folder**, **ZIP**) and publishes the next version to everyone as soon as it succeeds. Use it when your files are built elsewhere. An archived canvas refuses new versions (`NOT_ACTIVE`) until you unarchive it.
 
 ## Editor
 

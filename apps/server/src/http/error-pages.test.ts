@@ -185,6 +185,17 @@ describe("errorPageMiddleware", () => {
 });
 
 describe("error-page recovery actions", () => {
+  it("puts diagnostics in a disclosure after safe recovery without identifying the unavailable canvas", async () => {
+    const html = await htmlOf(recoveryApp(subdomainConfig("dev")), "/missing");
+    expect(html).toContain(
+      "This link isn&#39;t available. Check the address or ask the person who shared it.",
+    );
+    expect(html).toContain('<details class="technical"><summary>Technical details</summary>');
+    expect(html.indexOf('class="actions"')).toBeLessThan(
+      html.indexOf('<details class="technical">'),
+    );
+    expect(html).not.toContain('<p class="kicker">');
+  });
   it("links the dashboard ABSOLUTELY (not relative `/`) so it escapes a canvas subdomain", async () => {
     const html = await htmlOf(
       recoveryApp(subdomainConfig("oidc"), { email: "a@example.com" }),

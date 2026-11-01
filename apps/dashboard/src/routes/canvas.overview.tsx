@@ -1,24 +1,23 @@
-import { ArrowSquareOut, Info, WarningCircle } from "@phosphor-icons/react";
+import { Info, WarningCircle } from "@phosphor-icons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import { accessRungLabel, PublicationBadge } from "../components/Badge.js";
-import { CanvasAudience } from "../components/CanvasAudience.js";
+import { Button } from "../components/Button.js";
 import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
-import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
+import { Dialog } from "../components/Dialog.js";
 import { Field, TextareaField } from "../components/Field.js";
-import { IconLink } from "../components/IconButton.js";
+import { ReadError } from "../components/ReadError.js";
 import { flatBandClass } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
 import { TagsEditor } from "../components/TagsEditor.js";
-import { useToast } from "../components/Toast.js";
 import { ApiError, type Canvas, type RootEntry, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
+import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useUpdateSettings } from "../lib/mutations.js";
-import { useCanvas, useDraft, useMe, useVersions } from "../lib/queries.js";
+import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
+import { useUnsavedChanges } from "../lib/use-unsaved-changes.js";
 
 function rootWorks(entry?: RootEntry): boolean {
   return entry?.reason === "index" || entry?.reason === "single";
@@ -31,19 +30,6 @@ function galleryLabel(canvas: Canvas): string {
   if (canvas.currentVersionId === null) return "Not listed. Publish first";
   if (canvas.hasPassword) return "Not listed. Remove password first";
   return "Not listed";
-}
-
-function accessLabel(canvas: Canvas): string {
-  const base = accessRungLabel(canvas.access);
-  const head = canvas.sharedExpiresAt ? `${base} (${expiryLabel(canvas.sharedExpiresAt)})` : base;
-  const parts = [head];
-  if (canvas.hasPassword) parts.push("password");
-  return parts.join(", ");
-}
-
-function currentVersionLabel(current?: VersionInfo): string {
-  if (!current) return "Not published";
-  return `v${current.number} via ${sourceLabel(current.source)}, ${relativeTime(current.createdAt)}`;
 }
 
 function HealthCard({
@@ -228,10 +214,9 @@ function Fact({
 export default function Overview() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { live } = useSearch({ strict: false }) as { live?: boolean };
-  const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
-  const { data: me } = useMe();
-  const { data: versions, isSuccess: versionsReady } = useVersions(id);
+  const versionQuery = useVersions(id);
+  const { data: versions, isSuccess: versionsReady } = versionQuery;
   const update = useUpdateSettings(id);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -240,13 +225,32 @@ export default function Overview() {
   // Total disk footprint = every kept (ready) version's bytes, not just the live one.
   const totalBytes = versions?.reduce((sum, v) => sum + v.totalBytes, 0) ?? 0;
   const deployCount = versions?.length ?? 0;
-  const hasHomePageFact = current?.entry.path !== null && current?.entry.path !== undefined;
+  const [baseline, setBaseline] = useState<{
+    title: string;
+    description: string;
+    tags: string[];
+  } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const dirty =
+    baseline !== null &&
+    (title !== baseline.title ||
+      description !== baseline.description ||
+      JSON.stringify(tags) !== JSON.stringify(baseline.tags));
+  const blocker = useUnsavedChanges({ dirty: dirty || update.isPending });
 
   // Seed editable identity fields on canvas identity only so optimistic writes
   // elsewhere don't clobber an in-progress title/description edit.
   // biome-ignore lint/correctness/useExhaustiveDependencies: seed on identity change only
   useEffect(() => {
     if (!canvas) return;
+    setBaseline({
+      title: canvas.title,
+      description: canvas.description ?? "",
+      tags: canvas.tags ?? [],
+    });
+    setSaveError(null);
+    setSaved(false);
     setTitle(canvas.title);
     setDescription(canvas.description ?? "");
     setTags(canvas.tags ?? []);
@@ -261,31 +265,63 @@ export default function Overview() {
     );
   }
 
-  // Basics save (title/description/tags). The cache rolls back on a server reject
-  // (useUpdateSettings onError), but the local mirrors here would NOT — leaving the
-  // input showing a value the server rejected with no feedback. So await the write,
-  // surface an error toast, and on failure snap the local mirrors back to the
-  // server-truth canvas values (the optimistic UX still holds on success).
-  const save = async (patch: Parameters<typeof update.mutate>[0]) => {
+  const revert = () => {
+    if (!baseline) return;
+    setTitle(baseline.title);
+    setDescription(baseline.description);
+    setTags(baseline.tags);
+    setSaveError(null);
+    setSaved(false);
+  };
+  const save = async () => {
+    if (!baseline || update.isPending) return false;
+    const patch = {
+      ...(title !== baseline.title ? { title } : {}),
+      ...(description !== baseline.description ? { description: description || null } : {}),
+      ...(JSON.stringify(tags) !== JSON.stringify(baseline.tags) ? { tags } : {}),
+    };
+    setSaveError(null);
     try {
-      await update.mutateAsync(patch);
+      const result = await update.mutateAsync(patch);
+      const next = {
+        title: result.title,
+        description: result.description ?? "",
+        tags: result.tags ?? [],
+      };
+      setBaseline(next);
+      setTitle(next.title);
+      setDescription(next.description);
+      setTags(next.tags);
+      setSaved(true);
+      return true;
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't save that change", "error");
-      setTitle(canvas.title);
-      setDescription(canvas.description ?? "");
-      setTags(canvas.tags ?? []);
+      setSaveError(
+        err instanceof ApiError
+          ? err.hint
+          : "Couldn't save these details. Your changes are still here.",
+      );
+      return false;
     }
   };
 
   return (
     <TabContentFrame>
-      {live && (
+      {live && versionsReady && (
         <InlineNotice tone={rootWorks(current?.entry) ? "success" : "warning"}>
           Published.{" "}
           {rootWorks(current?.entry)
             ? "Review the link before sharing."
             : "Fix the root page before sharing."}
         </InlineNotice>
+      )}
+
+      <HealthCard canvas={canvas} current={current} versionsReady={versionsReady} />
+      {versionQuery.isError && (
+        <ReadError
+          title="Couldn’t load version details"
+          onRetry={() => void versionQuery.refetch()}
+          retrying={versionQuery.isFetching}
+        />
       )}
 
       <section
@@ -318,15 +354,14 @@ export default function Overview() {
         )}
         <div className="min-w-0 space-y-5">
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted">
-              {canvas.currentVersionId ? "Published version" : "Your canvas"}
-            </p>
             <h2 className="font-display text-h2 leading-tight tracking-tight">
               {current
-                ? `Version ${current.number}`
+                ? `Published version ${current.number}`
                 : canvas.currentVersionId
                   ? "Published version"
-                  : "Ready when you are"}
+                  : versionsReady
+                    ? "Ready when you are"
+                    : "Canvas overview"}
             </h2>
             {canvas.description && (
               <p className="line-clamp-3 text-sm leading-relaxed text-muted">
@@ -334,10 +369,11 @@ export default function Overview() {
               </p>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <PublicationBadge state={canvas.publicationState} />
-            <span className="text-muted">{accessLabel(canvas)}</span>
-          </div>
+          {current && (
+            <p className="text-sm text-muted" title={fullTime(current.createdAt)}>
+              Published {relativeTime(current.createdAt)} via {sourceLabel(current.source)}.
+            </p>
+          )}
           {canvas.status === "active" && <DraftSummary id={id} />}
           {canvas.status === "active" && (
             <div className="flex flex-wrap items-center gap-4">
@@ -354,15 +390,8 @@ export default function Overview() {
         </div>
       </section>
 
-      <HealthCard canvas={canvas} current={current} versionsReady={versionsReady} />
-
       <section className={flatBandClass}>
-        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-          <Fact label="Current version">
-            <span title={current ? fullTime(current.createdAt) : undefined}>
-              {versionsReady ? currentVersionLabel(current) : "Version details unavailable"}
-            </span>
-          </Fact>
+        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-3">
           <Fact label="Gallery">
             <span className={canvas.galleryListed ? "text-fg" : "text-muted"}>
               {galleryLabel(canvas)}
@@ -378,41 +407,13 @@ export default function Overview() {
       </section>
 
       <section className={flatBandClass}>
-        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
-          <Fact label="Canvas URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
-            <div className="flex min-w-0 items-center gap-2">
-              {canvas.status === "active" && canvas.currentVersionId ? (
-                <a
-                  href={canvas.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="min-w-0 flex-1 truncate font-mono text-xs text-accent hover:underline"
-                >
-                  {canvas.url}
-                </a>
-              ) : (
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">
-                  {canvas.url}
-                </span>
-              )}
-              <CopyButton value={canvas.url} label="Copy link" toastMessage="Link copied" />
-              {canvas.status === "active" && canvas.currentVersionId && (
-                <IconLink
-                  href={canvas.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  label="Open live canvas"
-                >
-                  <ArrowSquareOut size={15} weight="bold" aria-hidden />
-                </IconLink>
-              )}
-            </div>
-            <div className="mt-2">
-              <CanvasAudience canvas={canvas} orgs={me?.orgs} isGuest={me?.isGuest} />
-            </div>
-          </Fact>
+        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
           <Fact label="Files">
-            {current ? (
+            {!versionsReady ? (
+              <span className="text-muted">
+                {versionQuery.isError ? "Unavailable" : "Loading…"}
+              </span>
+            ) : current ? (
               <span className="flex flex-wrap gap-x-2 gap-y-1">
                 <span>{formatBytes(current.totalBytes)}</span>
                 <span className="text-muted">
@@ -424,7 +425,11 @@ export default function Overview() {
             )}
           </Fact>
           <Fact label="Versions">
-            {deployCount > 0 ? (
+            {!versionsReady ? (
+              <span className="text-muted">
+                {versionQuery.isError ? "Unavailable" : "Loading…"}
+              </span>
+            ) : deployCount > 0 ? (
               <Link
                 to="/canvases/$id/versions"
                 params={{ id }}
@@ -437,8 +442,14 @@ export default function Overview() {
             )}
           </Fact>
           <Fact label="Storage">
-            <span title="Across all kept versions (newest 10)">
-              {totalBytes > 0 ? formatBytes(totalBytes) : "None"}
+            <span title="Across all kept versions">
+              {!versionsReady
+                ? versionQuery.isError
+                  ? "Unavailable"
+                  : "Loading…"
+                : totalBytes > 0
+                  ? formatBytes(totalBytes)
+                  : "None"}
             </span>
           </Fact>
           {current?.entry.path && (
@@ -459,16 +470,17 @@ export default function Overview() {
           Edit details
         </summary>
         <p className="mt-2 text-sm text-muted">
-          Title, description, and tags. Changes save when you leave a field.
+          Title, description, and tags help people identify this canvas. Save them together when
+          ready.
         </p>
-        <fieldset disabled={canvas.status === "disabled"} className="mt-5 max-w-3xl space-y-4">
+        <fieldset
+          disabled={canvas.status === "disabled" || update.isPending}
+          className="mt-5 max-w-3xl space-y-4"
+        >
           <Field
             label="Title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => {
-              if (title !== canvas.title) void save({ title });
-            }}
             maxLength={200}
           />
           <TextareaField
@@ -476,24 +488,80 @@ export default function Overview() {
             value={description}
             rows={3}
             onChange={(e) => setDescription(e.target.value)}
-            onBlur={() => {
-              if ((description || null) !== canvas.description) {
-                void save({ description: description || null });
-              }
-            }}
             maxLength={2000}
           />
           <TagsEditor
             value={tags}
-            onChange={(next) => {
-              setTags(next);
-              void save({ tags: next });
-            }}
+            onChange={setTags}
             hint="Enter or comma to add"
             description="Tags help you filter your canvases here, and appear publicly in the gallery once this canvas is listed."
           />
         </fieldset>
+        {saveError && (
+          <InlineNotice tone="danger" role="alert">
+            {saveError} Your attempted details are retained. Retry or revert below.
+          </InlineNotice>
+        )}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            disabled={!dirty || canvas.status === "disabled"}
+            loading={update.isPending}
+            onClick={() => void save()}
+          >
+            {saveError ? "Retry save" : "Save details"}
+          </Button>
+          {dirty && (
+            <Button variant="ghost" size="sm" disabled={update.isPending} onClick={revert}>
+              Revert changes
+            </Button>
+          )}
+          <p role="status" className="text-sm text-muted">
+            {update.isPending
+              ? "Saving details…"
+              : dirty
+                ? "Unsaved changes"
+                : saved
+                  ? "Details saved"
+                  : ""}
+          </p>
+        </div>
       </details>
+      <Dialog
+        open={blocker.status === "blocked"}
+        onClose={() => blocker.reset?.()}
+        title="Save your canvas details?"
+        description="Your title, description or tags have unsaved changes."
+      >
+        <div className="flex flex-wrap gap-2">
+          <Button
+            loading={update.isPending}
+            onClick={async () => {
+              if (await save()) blocker.proceed?.();
+            }}
+          >
+            Save and leave
+          </Button>
+          <Button variant="secondary" disabled={update.isPending} onClick={() => blocker.reset?.()}>
+            Keep editing
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={update.isPending}
+            onClick={() => {
+              revert();
+              blocker.proceed?.();
+            }}
+          >
+            Discard and leave
+          </Button>
+        </div>
+        {saveError && (
+          <p role="alert" className="mt-3 text-sm text-danger">
+            {saveError}
+          </p>
+        )}
+      </Dialog>
     </TabContentFrame>
   );
 }

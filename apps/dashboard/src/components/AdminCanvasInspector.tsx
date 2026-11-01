@@ -126,6 +126,7 @@ export function AdminCanvasInspector({
   return (
     <Dialog
       placement="side"
+      closeLabel="Close inspector"
       open
       onClose={onClose}
       title={data?.canvas.title || "Canvas inspector"}
@@ -141,14 +142,11 @@ export function AdminCanvasInspector({
           >
             Refresh
           </Button>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close inspector
-          </Button>
         </div>
         {query.isLoading && <p role="status">Loading canvas details…</p>}
         {query.isError && (
           <p role="alert" className="text-danger">
-            Could not load this canvas. It may no longer exist.
+            Could not load this canvas. Try Refresh to check again.
           </p>
         )}
         {data && (
@@ -161,7 +159,9 @@ export function AdminCanvasInspector({
                 <Badge tone={data.canvas.publicLinkEffective ? "success" : "neutral"}>
                   {data.canvas.publicLinkEffective
                     ? "Public link available"
-                    : "Public link unavailable"}
+                    : data.canvas.access === "public_link"
+                      ? "Public link unavailable"
+                      : "No public link"}
                 </Badge>
               </div>
               <dl className="grid grid-cols-2 gap-3 text-sm">
@@ -194,8 +194,10 @@ export function AdminCanvasInspector({
               )}
             </section>
             <AccessCheck key={canvasId} canvasId={canvasId} />
-            <section className="space-y-2" aria-label="Runtime permissions">
-              <h3 className="font-semibold">Runtime permissions</h3>
+            <details className="space-y-2" aria-label="Runtime permissions">
+              <summary className="cursor-pointer font-semibold">
+                Runtime permissions {data.canvas.backendEnabled ? "" : "· Backend off"}
+              </summary>
               <p className="text-sm text-muted">
                 Owners and editors manage shared content. Authored resources use their configured
                 policies.
@@ -251,29 +253,35 @@ export function AdminCanvasInspector({
                 Policy changes belong to the canvas's Backend tab. Admin status does not grant
                 permission to read private participant records.
               </p>
-            </section>
+            </details>
             <section className="space-y-2" aria-label="People and teams">
               <h3 className="font-semibold">People and teams</h3>
               {!data.people.length && !data.teams.length && !data.pending.length && (
                 <p className="text-sm text-muted">No additional grants or pending invitations.</p>
               )}
-              <ul className="space-y-2 text-sm text-muted">
-                {data.people.map((p) => (
-                  <li key={`${p.userId}:${p.email}`}>
-                    {p.email ?? p.userId} · {p.role}
-                  </li>
-                ))}
-                {data.teams.map((team) => (
-                  <li key={team.id}>
-                    {team.name} · {team.role}
-                  </li>
-                ))}
-                {data.pending.map((p) => (
-                  <li key={p.id}>
-                    {p.email} · pending {p.role ?? "viewer"} · {p.via}
-                  </li>
-                ))}
-              </ul>
+              <details open={data.people.length + data.teams.length + data.pending.length <= 5}>
+                <summary className="cursor-pointer text-sm text-muted">
+                  {data.people.length} people · {data.teams.length} teams · {data.pending.length}{" "}
+                  pending
+                </summary>
+                <ul className="mt-3 space-y-2 text-sm text-muted">
+                  {data.people.map((p) => (
+                    <li key={`${p.userId}:${p.email}`}>
+                      {p.email ?? p.userId} · {p.role}
+                    </li>
+                  ))}
+                  {data.teams.map((team) => (
+                    <li key={team.id}>
+                      {team.name} · {team.role}
+                    </li>
+                  ))}
+                  {data.pending.map((p) => (
+                    <li key={p.id}>
+                      {p.email} · pending {p.role ?? "viewer"} · {p.via}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             </section>
             <section className="space-y-2" aria-label="Canvas usage">
               <h3 className="font-semibold">Usage</h3>
@@ -310,7 +318,7 @@ export function AdminCanvasInspector({
                 <Link
                   className="text-sm text-accent hover:underline"
                   to="/admin/activity"
-                  search={{ canvasId }}
+                  search={{ canvasId, canvasTitle: data.canvas.title || data.canvas.slug }}
                 >
                   All activity
                 </Link>

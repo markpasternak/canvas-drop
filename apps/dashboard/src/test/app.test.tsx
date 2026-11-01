@@ -71,6 +71,23 @@ beforeEach(() => {
 });
 
 describe("dashboard app", () => {
+  it("keeps Canvases active with query filters and exposes command search", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    renderApp("/?q=budget&selected=c1");
+    const home = await screen.findByRole("link", { name: "Canvases" });
+    expect(home).toHaveAttribute("aria-current", "page");
+    await userEvent.click(screen.getByRole("button", { name: "Search commands and canvases" }));
+    expect(await screen.findByRole("combobox", { name: "Command palette" })).toBeInTheDocument();
+  });
   it("renders the shell and, with zero canvases, the onboarding first-run page", async () => {
     vi.stubGlobal(
       "fetch",
@@ -88,7 +105,19 @@ describe("dashboard app", () => {
     expect((await screen.findAllByText("canvas-drop")).length).toBeGreaterThanOrEqual(1);
     // empty list → onboarding
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
-    expect(screen.getByText(/paste html/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Your canvases" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Ship your first canvas" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Connect your agent" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Paste HTML/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect your agent" })).toHaveAttribute(
+      "href",
+      "/docs/agents/mcp",
+    );
   });
 
   it("exposes a skip-to-content link that targets the main landmark", async () => {
@@ -582,7 +611,8 @@ describe("dashboard app", () => {
       await screen.findByRole("heading", { name: "Dashboard view failed" }),
     ).toBeInTheDocument();
     expect(screen.getByText("route_error")).toBeInTheDocument();
-    expect(screen.getByText("render exploded")).toBeInTheDocument();
+    expect(screen.queryByText("render exploded")).not.toBeInTheDocument();
+    expect(screen.getByText("Technical details").parentElement).not.toHaveAttribute("open");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

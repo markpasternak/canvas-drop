@@ -22,19 +22,17 @@ const SITE = {
   name: "canvas-drop",
   domain: "canvas-drop.com",
   /** Hero promise: one line, product-true. */
-  tagline: "Deploy and share your org's small web tools, behind your sign-in.",
-  /** Short eyebrow above the headline. */
-  eyebrow: "Self-hosted canvases for your org",
+  tagline: "Publish what you make with AI as a canvas for your team.",
   /** Big headline. Two short clauses read well at display scale. */
-  headline: "Drop it in. Share it out.",
+  headline: "Make it with AI. Share it as a canvas.",
   /** Sub-headline beneath the H1. */
   subhead:
-    "Made in a chat, a cloud workspace, or on your laptop. Useful work shouldn’t stay trapped where it was created. Give it a home your team can access, improve, and use together.",
+    "Give your report, prototype, or app a stable link your team can open through your organization’s sign-in. Each canvas is a live web page or app, with named viewers and editors and a history of published versions.",
   /** Open-source project URL. */
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
   metaDescription:
-    "Deploy and share your org's small web tools. Static canvases, live in seconds, behind your sign-in. AI agents deploy over MCP. Open source, self-hosted.",
+    "Publish web tools as canvases with stable links, organization sign-in and version history. Open source and self-hosted, with MCP for your AI agent.",
 } as const;
 
 /** The six runtime primitives (BUILD_BRIEF §11) plus the separately gated authoring capability. */
@@ -47,45 +45,45 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
   viewBox?: string;
 }> = [
   {
-    name: "Key-value",
+    name: "Data storage",
     tag: "kv",
     blurb:
-      "Store shared values, private preferences and collections of authored records. Each collection has its own permissions.",
+      "Save shared data and each viewer’s preferences. Group authored records into collections with their own permissions.",
     glyph: "M4 7h16M4 12h16M4 17h10",
   },
   {
     name: "Files",
     tag: "files",
     blurb:
-      "Upload and share files with resource permissions. Comment attachments follow their parent record's access.",
+      "Let people upload files to a canvas. Set who can read or change them; attachments follow their parent record’s access.",
     glyph: "M6 3h8l4 4v14H6zM14 3v4h4",
   },
   {
     name: "AI",
     tag: "ai",
     blurb:
-      "Chat and stream through a server-side proxy. The provider key never reaches the browser.",
+      "Add AI responses using your configured models and quotas. Provider keys stay on the server.",
     glyph: "M12 3v4M12 17v4M3 12h4M17 12h4M7 7l2 2M15 15l2 2M17 7l-2 2M9 15l-2 2",
   },
   {
     name: "Identity",
     tag: "identity",
     blurb:
-      "Know who is viewing, their canvas role and what they can do. Identity and permissions are resolved server-side.",
+      "Use each viewer’s signed-in identity, canvas role and permissions. The server resolves who they are.",
     glyph: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M5 20a7 7 0 0 1 14 0",
   },
   {
     name: "Realtime",
     tag: "realtime",
     blurb:
-      "Choose who receives messages, publishes and appears in presence, separately for each channel.",
+      "Add live messages and presence. Choose who can receive, publish and appear in each channel.",
     glyph: "M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0M12 12h.01",
   },
   {
     name: "Connections",
     tag: "connections",
     blurb:
-      "Call approved third-party APIs through exact-origin profiles. Credentials stay server-side.",
+      "Call approved third-party APIs through admin-granted Connections. Credentials stay on the server.",
     glyph:
       "M10 13a5 5 0 0 0 7.54.54l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15M14 11a5 5 0 0 0-7.54-.54l-2 2a5 5 0 0 0 7.07 7.07l1.14-1.14",
   },
@@ -105,16 +103,16 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
 /** Three editorial value props for the band under the hero. */
 const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   {
-    title: "Bring your work with you",
-    body: "Publish exported HTML, a folder, or a ZIP from the tools you already use. Connect an agent over MCP to create and update canvases directly.",
+    title: "Let your agent publish the canvas",
+    body: "Bring HTML or files from an AI chat, cloud workspace, or laptop. Your agent can create and update canvases over MCP with the same permissions you have in the dashboard.",
   },
   {
-    title: "Let the right people use it",
-    body: "Share through your organization’s sign-in. Add colleagues and teams as viewers or editors, with access you can change or revoke. Public links follow your admin’s policy.",
+    title: "Keep the link as your canvas changes",
+    body: "Work on a draft while colleagues use the published canvas. Preview and publish updates at the same URL, or make an earlier version current again.",
   },
   {
-    title: "Keep building on it",
-    body: "Edit and preview a draft while the current version stays available. Restore an earlier version, review and prune old history to free space, or offer your canvas as a template.",
+    title: "Use your organization’s sign-in",
+    body: "Give people and teams viewer or editor access to each canvas. Open it to your whole organization, or publish a public link when your admin allows it.",
   },
 ];
 
@@ -125,86 +123,97 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
 const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?: boolean }> = [
   {
     rung: "People & teams",
-    who: "Name a colleague by email, or a team you create once and grant anywhere — each a viewer or an editor. Whatever you pick below, they're in.",
+    who: "Add colleagues and teams as viewers or editors. Their access stays in place whichever option you choose below.",
     feature: true,
   },
   { rung: "Restricted", who: "Nobody else. With no one added, that's just you." },
   { rung: "Whole org", who: "Anyone signed in to your organization." },
   {
     rung: "Public link",
-    who: "Anyone with the URL. Static files only; admins can switch it off instance-wide or per account.",
-    tag: "admin",
+    who: "Anyone with the URL, subject to any password or expiry you set. Available when your admin allows it.",
+    tag: "admin-controlled",
   },
 ];
 
 /** Product-tour carousel slides → committed light screenshots at /docs/assets.
  *  Refresh with `pnpm landing:screenshots` (after `pnpm seed:canvases`). */
-const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
+const TOUR: ReadonlyArray<{ img: string; label: string; title: string; caption: string }> = [
   {
     img: "landing-dashboard",
-    label: "Your dashboard",
+    label: "Your workspace",
+    title: "Keep your canvases within reach.",
     caption:
-      "Every canvas you own or edit. Search by title, description, tag, or slug; filter by access, status, or role; and see the current version and sharing at a glance.",
+      "Find the canvases you own or help edit. Open a published tool, continue a draft, or start your next canvas from HTML or uploaded files.",
   },
   {
     img: "tour-editor",
-    label: "In-browser editor",
+    label: "Edit & publish",
+    title: "Improve the canvas. Keep its link.",
     caption:
-      "Edit files with autosave, preview the draft, and publish a new version. No local setup, no deploy pipeline.",
-  },
-  {
-    img: "tour-shared",
-    label: "Shared with you",
-    caption:
-      "Canvases other people opened to you, directly or through a team or the whole org. Search, sort by owner or last update, and open the right one fast.",
-  },
-  {
-    img: "landing-gallery",
-    label: "Opt-in gallery",
-    caption:
-      "Browse public canvases and the org-wide ones their owners chose to list. Search, filter by tag, and start from any one marked as a template. Admins can feature their picks.",
-  },
-  {
-    img: "tour-preview",
-    label: "Preview covers",
-    caption:
-      "Choose each canvas's cover: an automatic screenshot on publish where your instance has capture switched on, none, or an image you upload that survives every publish.",
+      "Edit an autosaved draft while the published canvas stays available. Preview your changes, review what will go live, and publish when ready.",
   },
   {
     img: "tour-sharing",
-    label: "Share link & access",
+    label: "Links & access",
+    title: "Choose who can open your canvas.",
     caption:
-      "Copy the live URL, choose who else can open it — Restricted, Whole org, or Public link — and add a password or an expiry. People and teams you add always get in.",
+      "Start Restricted, then open the canvas to your organization or use a public link when your admin allows it. Set a password or expiry when a share needs one.",
   },
   {
     img: "tour-people",
     label: "People & editors",
+    title: "Invite colleagues to improve the canvas.",
     caption:
-      "One people list per canvas. Add a person or a team as a viewer or an editor. Editors run the canvas with you, and the owner can hand it to any editor from the same list.",
+      "Give named people and teams viewer or editor access. Editors can change files and publish updates; the owner controls ownership and deletion.",
+  },
+  {
+    img: "tour-capabilities",
+    label: "Data & capabilities",
+    title: "Add data and AI to your canvas.",
+    caption:
+      "Enable the backend features your canvas needs, from saved data to AI responses and live collaboration. Admin-granted Connections let it call approved services with credentials kept on the server.",
+  },
+  {
+    img: "tour-shared",
+    label: "Shared with you",
+    title: "Find the canvases shared with you.",
+    caption:
+      "Return to canvases shared directly with you or your teams, plus those listed for your organization. Search by name or filter by owner.",
+  },
+  {
+    img: "landing-gallery",
+    label: "Gallery & templates",
+    title: "Make a useful canvas your starting point.",
+    caption:
+      "Explore canvases their owners chose to list in the gallery. Clone a template into your own canvas, then adapt the files and publish your version.",
+  },
+  {
+    img: "tour-usage",
+    label: "Usage",
+    title: "See which canvases people use.",
+    caption:
+      "Review views, unique viewers and recent activity for each canvas. Check backend usage as well, including storage and AI calls.",
   },
   {
     img: "tour-teams",
     label: "Teams & invites",
+    title: "Give a team access to the canvases it needs.",
     caption:
-      "Make a team once and grant it on any canvas. Add people by email before they have ever signed in; they're in the moment they first sign in through your org's auth, with no password for you to manage.",
-  },
-  {
-    img: "tour-capabilities",
-    label: "Backend in a click",
-    caption:
-      "The backend is off until you switch it on. Then add data, files, AI, identity, realtime, or controlled third-party requests through admin-granted Connections.",
+      "Manage membership in one team, then grant that team access to individual canvases. Invite colleagues by email; they join through your organization’s sign-in.",
   },
   {
     img: "tour-admin",
-    label: "Admin & control",
+    label: "Administration",
+    title: "Manage canvases across your organization.",
     caption:
-      "Find public canvases without passwords, inspect access, and act on an explicit selection. Real interface, shown with a local example canvas.",
+      "Find canvases by owner, access and status. Inspect permissions, hand over ownership, and review the exact selection before an administrative action.",
   },
   {
-    img: "tour-usage",
-    label: "Usage insight",
+    img: "tour-preview",
+    label: "Preview covers",
+    title: "Make each canvas easy to recognize.",
     caption:
-      "Views, unique viewers, and a 30-day trend for every canvas, plus KV, file, AI, and realtime usage once the backend is on.",
+      "Use an automatic screenshot when capture is enabled, or upload a cover that stays with future versions. You can also turn previews off.",
   },
 ];
 
@@ -212,23 +221,23 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
 const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Teams & invites",
-    body: "Group people into a team and grant it on any canvas, as viewers or as editors. Add colleagues by email before they have ever signed in; access materializes on their first login through your auth. Inviting people from outside your domain is an admin's call, or a policy admins can hand to members.",
+    body: "Share with a team as viewers or editors. Invite colleagues by email before their first sign-in. Your admin decides whether people outside your organization can be invited.",
   },
   {
     title: "Editors & ownership",
-    body: "Give a person or a team the editor role and they can do everything the owner can, except delete the canvas, transfer it, or switch on guest AI. Org members only, re-checked on every request. Owners hand a canvas to an editor from the people list; admins reassign the canvases of anyone who leaves.",
+    body: "Editors help manage, edit, and publish a canvas. Deletion, ownership transfer, and enabling guest AI remain owner-only. Owners can hand work to an editor; admins can reassign it when someone leaves.",
   },
   {
     title: "Org sign-in (SSO)",
-    body: "Everyone signs in through your OIDC provider or behind your identity-aware proxy. Access is gated by email domain and an admin allowlist, and canvas-drop holds no user passwords.",
+    body: "Use your OIDC provider or identity-aware proxy, with your allowed domains and people. Canvas Drop does not manage user passwords.",
   },
   {
     title: "Admin console",
-    body: "Find public canvases without passwords, combine positive and negative filters, and save the views you use. Inspect ownership and access without leaving the list or gaining access to private content.",
+    body: "Filter by owner, access, or status and save useful views. Inspect ownership and permissions without gaining access to private canvas content.",
   },
   {
     title: "Your brand, your look",
-    body: "Switch the whole instance, dashboard, editor, and this page included, to one of four design skins from the admin console. No restart, no code.",
+    body: "Choose from four design skins for your dashboard, editor, and public pages. Change the whole instance from the admin console without a restart.",
   },
   {
     title: "A clear handover",
@@ -236,11 +245,11 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Investigate and act",
-    body: "Explain why a person can access a canvas. Search administrative activity and recorded reasons. Preview selected bulk actions, restore deleted work, or permanently purge its files and app data after the retention window. Backups follow their own policy.",
+    body: "Check why someone has access, review administrative activity, and preview bulk actions. Restore deleted work during retention or purge it afterward; backups follow their own policy.",
   },
   {
     title: "Connections you can operate",
-    body: "See recent failures, latency, and affected canvases. Run a bounded diagnostic and rotate protected credentials while their values stay on the server.",
+    body: "See recent failures, latency, and affected canvases. Test a connection and rotate its credentials while their values stay on the server.",
   },
 ];
 
@@ -248,23 +257,23 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
 const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Restricted by default",
-    body: "Every canvas starts Restricted: only its owner and the people or teams they add can open it until they choose a wider rung.",
+    body: "New canvases start Restricted. Only the owner and the people or teams they add can open them until access is widened.",
   },
   {
-    title: "No telemetry, ever",
-    body: "canvas-drop never phones home. No tracking, no analytics, no third-party beacons; even the fonts are served from your instance.",
+    title: "Usage stays in your instance",
+    body: "Canvas Drop does not phone home or load third-party tracking. Product usage data stays in your instance, and fonts are served locally.",
   },
   {
     title: "Secrets stay server-side",
-    body: "AI provider keys and canvas deploy keys live on the server. Canvas code ships no secrets, and identity comes from the server, never from the client.",
+    body: "Built-in AI and Connections keep provider credentials on the server. The backend resolves each visitor’s identity and permissions for every request.",
   },
   {
     title: "Backend off by default",
-    body: "A canvas reaches no backend until you switch it on, and you choose which primitives it may use. Public visitors get static files only.",
+    body: "You choose which backend capabilities a canvas may use. Named collections, file groups, channels, and Connections each have their own permission controls.",
   },
   {
     title: "Your infrastructure",
-    body: "Self-host on a single VPS or your own cloud. Your data lives where you put it, and the only outbound calls are the ones you configure, such as an AI provider.",
+    body: "Choose SQLite or Postgres and local disk or S3 for your canvas files and data. Configured AI providers and Connections use the external services you choose.",
   },
 ];
 
@@ -319,27 +328,35 @@ const arrow = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="
 // committed dir the docs route serves (apps/server/src|dist/http → ../../../.. = repo root).
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../..", "docs/site/assets");
 const assetVerCache = new Map<string, string>();
-function assetSrc(img: string): string {
-  let ver = assetVerCache.get(img);
+function assetFileSrc(filename: string): string {
+  let ver = assetVerCache.get(filename);
   if (ver === undefined) {
     try {
       ver = createHash("sha256")
-        .update(readFileSync(join(ASSETS_DIR, `${img}.webp`)))
+        .update(readFileSync(join(ASSETS_DIR, filename)))
         .digest("hex")
         .slice(0, 8);
     } catch {
       ver = ""; // asset unreadable (shouldn't happen in a real deploy) → no cache-bust
     }
-    assetVerCache.set(img, ver);
+    assetVerCache.set(filename, ver);
   }
-  return ver ? `/docs/assets/${img}.webp?v=${ver}` : `/docs/assets/${img}.webp`;
+  return ver ? `/docs/assets/${filename}?v=${ver}` : `/docs/assets/${filename}`;
 }
 
-/** One carousel slide: a framed dark screenshot + a caption. */
-function tourSlide(t: (typeof TOUR)[number]): string {
-  return `<figure class="slide">
-  <div class="shot"><img src="${assetSrc(t.img)}" width="1440" height="900" alt="${escapeHtml(`${t.label}. ${t.caption}`)}" loading="lazy" decoding="async"></div>
-  <figcaption><strong>${escapeHtml(t.label)}.</strong> ${escapeHtml(t.caption)}</figcaption>
+function assetSrc(img: string): string {
+  return assetFileSrc(`${img}.webp`);
+}
+
+/** A complete, readable slide also works with native horizontal scrolling and no JavaScript. */
+function tourSlide(t: (typeof TOUR)[number], index: number): string {
+  return `<figure class="slide" id="tour-screen-${index + 1}" role="group" aria-roledescription="slide" aria-label="${index + 1} of ${TOUR.length}: ${escapeHtml(t.label)}">
+  <figcaption class="tour-caption">
+    <h3>${escapeHtml(t.title)}</h3>
+    <p>${escapeHtml(t.caption)}</p>
+    <a class="text-link" href="${assetSrc(t.img)}" target="_blank" rel="noopener">View full-size screenshot <span class="sr-only">of ${escapeHtml(t.label)} (opens in a new tab)</span>${arrow}</a>
+  </figcaption>
+  <div class="shot"><img src="${assetSrc(t.img)}" width="2560" height="1600" alt="Canvas-drop: ${escapeHtml(t.label)}" loading="${index === 0 ? "eager" : "lazy"}"${index === 0 ? ' fetchpriority="high"' : ""} decoding="async"></div>
 </figure>`;
 }
 
@@ -349,10 +366,9 @@ function featItem(f: { title: string; body: string }): string {
 }
 
 /** One rung of the sharing-ladder marketing visual. */
-function ladderRung(r: (typeof LADDER)[number], i: number): string {
+function ladderRung(r: (typeof LADDER)[number]): string {
   const tag = r.tag ? ` <span class="r-tag">${escapeHtml(r.tag)}</span>` : "";
   return `<div class="rung${r.feature ? " feature" : ""}">
-  <span class="r-step">${i + 1}</span>
   <div><span class="r-name">${escapeHtml(r.rung)}${tag}</span><p class="r-who">${escapeHtml(r.who)}</p></div>
 </div>`;
 }
@@ -363,7 +379,7 @@ function capabilityCard(p: (typeof BACKEND_CAPABILITIES)[number]): string {
     : 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
   return `<div class="prim p-${escapeHtml(p.tag)}">
   <div class="ic"><svg viewBox="${p.viewBox ?? "0 0 24 24"}" aria-hidden="true"><path d="${p.glyph}" ${paint}/></svg></div>
-  <h4>${escapeHtml(p.name)} <span class="tag mono">${escapeHtml(p.tag)}</span></h4>
+  <h3>${escapeHtml(p.name)}</h3>
   <p>${escapeHtml(p.blurb)}</p>
 </div>`;
 }
@@ -388,8 +404,7 @@ export function renderLandingPage(
       : { href: "/", label: "Open canvas-drop", short: "Open app" };
 
   const values = VALUES.map(
-    (v, i) =>
-      `<div class="value"><span class="num">0${i + 1}</span><h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.body)}</p></div>`,
+    (v) => `<div class="value"><h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.body)}</p></div>`,
   ).join("\n");
 
   // editorial is the attribute-free base (matches the SPA's applySkin, which removes the
@@ -407,48 +422,58 @@ ${siteHeader({ action: { href: cta.href, label: cta.short } })}
   <section class="hero" aria-label="Introducing canvas-drop">
     <div class="wrap hero-inner">
       <div class="hero-copy">
-        <span class="eyebrow">${escapeHtml(SITE.eyebrow)}</span>
-        <h1>Drop it in.<br><span class="accent">Share it out.</span></h1>
+        <h1>Make it with AI.<br><span class="accent">Share it as a canvas.</span></h1>
       </div>
       <div class="hero-description">
         <p class="lede">${escapeHtml(SITE.subhead)}</p>
-        <div class="cta-row"><a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a><a class="btn btn-ghost" href="#how-it-works">How it works</a></div>
-        <p class="cue">Bring your files, or <a href="/docs/agents/mcp">connect your agent over MCP.</a></p>
+        <div class="cta-row"><a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a><a class="btn btn-ghost" href="/docs/self-hosting/install">Set up your instance</a></div>
+        <p class="cue">Self-hosted and MIT licensed. <a href="/docs/agents/mcp">Connect your AI agent.</a></p>
       </div>
     </div>
   </section>
   <section class="tour wrap" aria-label="Product walkthrough">
-    <h2 class="s-head">From an artifact to a tool your team can use.</h2>
-    <p class="s-sub">A shared home, controlled access, and a way to keep improving what you made.</p>
     <div class="carousel" data-embla aria-roledescription="carousel" aria-label="Product tour">
-      <div class="viewport" data-embla-viewport tabindex="0" role="region" aria-label="Product screens"><div class="embla-container">${TOUR.map(tourSlide).join("\n")}</div></div>
-      <div class="tour-controls" data-embla-controls hidden>
-        <button class="btn btn-outline" type="button" data-embla-prev aria-label="Previous screen">Previous</button>
-        <div class="dots" role="group" aria-label="Choose screen">${TOUR.map((t, i) => `<button class="dot" type="button" data-embla-dot aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}</div>
-        <button class="btn btn-outline" type="button" data-embla-next aria-label="Next screen">Next</button>
+      <div class="tour-heading">
+        <h2>See what your canvas can become.</h2>
+        <div class="tour-controls" data-embla-controls hidden>
+          <div class="tour-picker"><span id="tour-picker-label">Explore</span>
+            <select aria-label="Choose walkthrough topic" data-embla-select>${TOUR.map((t, i) => `<option value="${i}">${escapeHtml(t.label)}</option>`).join("")}</select>
+            <div class="tour-topic" data-tour-picker hidden>
+              <button class="tour-topic-trigger" type="button" role="combobox" aria-label="Choose walkthrough topic" aria-expanded="false" aria-haspopup="listbox" aria-controls="tour-topics" data-tour-trigger><span data-tour-value>${escapeHtml(TOUR[0]?.label ?? "Your workspace")}</span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m6 8 4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+              <ul class="tour-topic-menu" id="tour-topics" role="listbox" aria-label="Walkthrough topics" data-tour-list hidden>${TOUR.map((t, i) => `<li class="tour-topic-option" id="tour-topic-${i}" role="option" aria-selected="${i === 0}" data-tour-option><span>${escapeHtml(t.label)}</span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 10 3 3 7-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></li>`).join("")}</ul>
+            </div>
+          </div>
+          <div class="tour-pagination">
+            <span class="tour-count" data-embla-count aria-live="polite" aria-atomic="true">1 / ${TOUR.length}</span>
+            <button class="tour-arrow" type="button" data-embla-prev aria-label="Previous screen">${arrow}</button>
+            <button class="tour-arrow" type="button" data-embla-next aria-label="Next screen">${arrow}</button>
+          </div>
+        </div>
       </div>
+      <div class="viewport" data-embla-viewport tabindex="0" role="region" aria-label="Product screens" aria-describedby="tour-instructions"><div class="embla-container">${TOUR.map(tourSlide).join("\n")}</div></div>
+      <p id="tour-instructions" class="tour-note"><span data-embla-instructions>Scroll sideways to explore.</span> Actual product screens with example content, shown in the Editorial skin.</p>
     </div>
-    <p class="tour-note">Product walkthrough with example content, shown in the Editorial skin.</p>
   </section>
   <section class="section" id="how-it-works" aria-label="From files to a shared canvas"><div class="wrap values">${values}</div></section>
   <section class="section section-tint">
     <div class="wrap split">
-      <div><p class="kicker">Sharing</p><h2 class="s-head">A working link.<br>The right people.</h2><p class="s-sub">An access ladder that fits how people actually share. The people and teams you name always get in. General access says who else does.</p><p class="ladder-note"><strong>Add people by email</strong>, even before their first sign-in. They enter through your instance’s auth: no app-managed passwords, no magic-link accounts. Inviting someone from outside your domain follows your admin’s policy.</p></div>
+      <div><h2 class="s-head">Choose who can use<br>and edit your canvas.</h2><p class="s-sub">Start with the people and teams who need your canvas. Add them as viewers or editors, then decide whether to open it to your whole organization or anyone with the link.</p><p class="ladder-note">The people and teams you add keep their access when you change General access. Invite colleagues before their first visit; they use your organization’s sign-in, with no separate password to manage.</p><a class="text-link section-link" href="/docs/authoring/sharing">How canvas sharing works ${arrow}</a></div>
       <div class="ladder">${LADDER.map(ladderRung).join("\n")}</div>
     </div>
   </section>
   <section class="section">
-    <div class="wrap"><p class="kicker">Six primitives + authoring</p><h2 class="s-head">Let it do more.</h2><p class="s-sub">Keep shared data, respond to people, and connect to approved services. Static files first, with no server build. Six runtime primitives add data, files, AI, identity, realtime, and controlled access to third-party APIs through admin-granted Connections. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Secrets stay server-side.</p><div class="prims">${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}</div></div>
+    <div class="wrap"><h2 class="s-head">Give your canvas<br>the backend it needs.</h2><p class="s-sub">Six built-in capabilities let your canvas save data, accept uploads, call AI and work live with other people. Use them through the browser SDK after enabling access; authoring is a separate opt-in.</p><div class="prims">${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}</div></div>
   </section>
   <section class="section section-tint">
     <div class="wrap split">
-      <div><p class="kicker">Built for teams</p><h2 class="s-head">A small tool.<br>A proper home.</h2><p class="s-sub">Your sign-in, your workspace, your rules. Give colleagues room to build, with the controls your organization needs.</p><div class="feats">${TEAM.map(featItem).join("\n")}</div></div>
-      <div><p class="kicker">Restricted by default</p><h2 class="s-head">Yours to run.<br>Yours to trust.</h2><p class="s-sub">Open source under the MIT license. Self-host with Docker on a VPS or your own cloud. SQLite or Postgres, local disk or S3: each a config change.</p><div class="feats">${PRIVACY.map(featItem).join("\n")}</div><div class="cta-row"><a class="btn btn-outline" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a><a class="btn btn-outline" href="/docs">Self-host guide ${arrow}</a></div></div>
+      <div><h2 class="s-head">Make room for canvases<br>across your organization.</h2><p class="s-sub">Use the sign-in your organization already has. Keep ownership clear, review access, and hand over canvases when people change roles.</p><div class="feats">${TEAM.map(featItem).join("\n")}</div></div>
+      <div><h2 class="s-head">Run Canvas Drop<br>on your infrastructure.</h2><p class="s-sub">The source is yours under the MIT license. Run the Docker image on a VPS or in your cloud, with your choice of database and file storage.</p><div class="feats">${PRIVACY.map(featItem).join("\n")}</div><div class="cta-row"><a class="btn btn-outline" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a><a class="btn btn-outline" href="/docs/self-hosting/install">Self-host guide ${arrow}</a></div></div>
     </div>
   </section>
+  <section class="section closing"><div class="wrap closing-inner"><div><h2 class="s-head">Make your next creation<br>a canvas people use.</h2><p class="s-sub">Bring your HTML or files, or connect your AI agent. Publish a canvas and share its link with your team.</p></div><div class="cta-row"><a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a><a class="text-link" href="/docs/authoring/create-and-publish">Create your first canvas ${arrow}</a></div></div></section>
 </main>
 ${siteFooter()}
-<script src="/docs/assets/landing-carousel.js" defer></script>
+<script src="${assetFileSrc("landing-carousel.js")}" defer></script>
 </body>
 </html>`;
 }

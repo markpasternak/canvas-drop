@@ -107,6 +107,21 @@ const page = (items: GalleryItem[], over: Partial<GalleryPage> = {}): GalleryPag
 afterEach(() => vi.restoreAllMocks());
 
 describe("Gallery view", () => {
+  it("discloses secondary filters while retaining a visible active count and reset", async () => {
+    stubGallery(() => page([item()]));
+    renderGallery("/gallery?templatable=true&view=list");
+    await screen.findByRole("link", { name: "Budget chart" });
+    const toggle = screen.getByRole("button", { name: "Filters (1)" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(toggle);
+    expect(screen.queryByRole("button", { name: "Templates" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("renders a card grid: title links externally, description, tags, owner", async () => {
     stubGallery(() => page([item({ title: "Budget chart", description: "Quarterly budget" })]));
     renderGallery();
@@ -278,6 +293,7 @@ describe("Gallery view", () => {
     renderGallery();
     await screen.findByRole("link", { name: "All" });
 
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     await chooseFilterOption("Filter by owner", "bob");
     await waitFor(() => expect(calls.some((c) => c.get("owner") === "u-bob")).toBe(true));
   });
@@ -289,9 +305,13 @@ describe("Gallery view", () => {
     renderGallery();
     await screen.findByRole("link", { name: "All" });
 
+    if (screen.getByRole("button", { name: /^Filters/ }).getAttribute("aria-expanded") === "false")
+      await userEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     await userEvent.click(screen.getByRole("button", { name: "Templates" }));
     await waitFor(() => expect(calls.some((c) => c.get("templatable") === "1")).toBe(true));
     // Toggling off drops the param.
+    if (screen.getByRole("button", { name: /^Filters/ }).getAttribute("aria-expanded") === "false")
+      await userEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     await userEvent.click(screen.getByRole("button", { name: "Templates" }));
     await waitFor(() => expect(calls.some((c) => !c.get("templatable"))).toBe(true));
   });
@@ -387,7 +407,7 @@ describe("Gallery view", () => {
     expect(screen.queryByRole("heading", { name: "Browse all" })).not.toBeInTheDocument();
   });
 
-  it("renders Recently published once the gallery is larger than the discovery shelf", async () => {
+  it("keeps larger galleries focused without repeating a recent shelf", async () => {
     const grid = Array.from({ length: 7 }, (_, i) => item({ id: `g${i}`, title: `Grid ${i}` }));
     stubGallery(
       () => page(grid),
@@ -396,8 +416,9 @@ describe("Gallery view", () => {
         p.get("sort") === "recent" ? page([item({ id: "r1", title: "Fresh canvas" })]) : page([]),
     );
     renderGallery();
-    expect(await screen.findByRole("heading", { name: "Recently published" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Fresh canvas" })).toBeInTheDocument();
+    await screen.findByRole("link", { name: "Grid 0" });
+    expect(screen.queryByRole("heading", { name: "Recently published" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Fresh canvas" })).not.toBeInTheDocument();
   });
 
   it("top-tag shortcut chips filter the gallery via ?tag=", async () => {
@@ -409,6 +430,7 @@ describe("Gallery view", () => {
     await screen.findByRole("link", { name: "All" });
 
     // The chip carries the "#tag" label; clicking it applies ?tag=.
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     await userEvent.click(screen.getByRole("button", { name: "#maps" }));
     await waitFor(() => expect(calls.some((c) => c.get("tag") === "maps")).toBe(true));
   });
@@ -423,6 +445,8 @@ describe("Gallery view", () => {
 
     // Open the multi-select control (sourced from the gallery-wide facet tags) and
     // pick a tag — the gallery query then carries it as ?tag=.
+    if (screen.getByRole("button", { name: /^Filters/ }).getAttribute("aria-expanded") === "false")
+      await userEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     await userEvent.click(screen.getByRole("button", { name: "Filter by tag" }));
     await userEvent.click(await screen.findByRole("option", { name: "games" }));
     await waitFor(() => expect(calls.some((c) => c.get("tag") === "games")).toBe(true));
@@ -445,6 +469,7 @@ describe("Gallery view", () => {
     stubGallery(() => page([item()]), { owners: [], tags: [] });
     renderGallery();
     await screen.findByRole("link", { name: "Budget chart" });
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(screen.queryByRole("button", { name: "Filter by tag" })).not.toBeInTheDocument();
   });
 

@@ -1,15 +1,19 @@
-import { useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip } from "../components/Filters.js";
+import { NativeSelect } from "../components/NativeSelect.js";
+import { PendingChangesGuard } from "../components/PendingChangesGuard.js";
+import { ReadError } from "../components/ReadError.js";
 import { SearchInput } from "../components/SearchInput.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { type AdminConfigField, type AdminEmailTemplate, ApiError } from "../lib/api.js";
+import { emailPreviewDocument } from "../lib/email-preview.js";
 import {
   useAdminResetEmailTemplate,
   useAdminSetConfig,
@@ -18,6 +22,18 @@ import {
 import { useAdminConfig, useAdminEmailTemplates } from "../lib/queries.js";
 import { commitSkin, previewSkin, restoreSkinFromCache } from "../lib/skin.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
+
+const ConfigDraftContext = createContext<{
+  drafts: Record<string, string>;
+  change: (key: string, value: string | null) => void;
+  refresh: () => Promise<{ isError: boolean }>;
+  acknowledged: Record<string, boolean>;
+  acknowledge: (key: string, saved: boolean) => void;
+  pending: Record<string, boolean>;
+  errors: Record<string, string>;
+  setError: (key: string, error: string) => void;
+  run: (key: string, action: () => Promise<void>) => Promise<void>;
+} | null>(null);
 
 /** Source badge: where a setting's effective value comes from. */
 function SourceBadge({ source }: { source: AdminConfigField["source"] }) {
@@ -76,36 +92,60 @@ function BooleanRow({
 }) {
   const setConfig = useAdminSetConfig();
   const toast = useToast();
+  const context = useContext(ConfigDraftContext);
+  const pending = setConfig.isPending || Boolean(context?.pending[field.key]);
+  const run = (action: () => Promise<void>) =>
+    context ? context.run(field.key, action) : action();
   const serverOn = fieldOn(field);
   const [on, setOn] = useState(serverOn);
   // Re-sync when the server value changes (after a save settles or a dependency flips it).
   useEffect(() => setOn(serverOn), [serverOn]);
 
   async function flip(next: boolean) {
-    setOn(next); // optimistic
-    try {
-      await setConfig.mutateAsync({ key: field.key, value: next });
-      toast(`${field.label} turned ${next ? "on" : "off"}`);
-    } catch (err) {
-      setOn(!next); // revert
-      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
-    }
+    await run(async () => {
+      setOn(next); // optimistic
+      try {
+        await setConfig.mutateAsync({ key: field.key, value: next });
+        const refreshed = await context?.refresh();
+        if (refreshed?.isError) {
+          toast(
+            "Change saved, but the effective value could not be refreshed. Try refreshing configuration.",
+            "error",
+          );
+          return;
+        }
+        toast(`${field.label} turned ${next ? "on" : "off"}`);
+      } catch (err) {
+        setOn(!next); // revert
+        toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+      }
+    });
   }
 
   async function reset() {
-    try {
-      await setConfig.mutateAsync({ key: field.key, value: null });
-      toast(`${field.label} reset to default`);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't reset", "error");
-    }
+    await run(async () => {
+      try {
+        await setConfig.mutateAsync({ key: field.key, value: null });
+        const refreshed = await context?.refresh();
+        if (refreshed?.isError) {
+          toast(
+            "Override removed, but the effective value could not be refreshed. Try refreshing configuration.",
+            "error",
+          );
+          return;
+        }
+        toast(`${field.label} reset to environment/default`);
+      } catch (err) {
+        toast(err instanceof ApiError ? err.hint : "Couldn't reset", "error");
+      }
+    });
   }
 
   return (
     <div className="py-3">
       <Toggle
         checked={on}
-        disabled={disabled}
+        disabled={disabled || pending}
         onChange={flip}
         label={
           <span className="inline-flex items-center gap-2">
@@ -123,12 +163,12 @@ function BooleanRow({
         }
       />
       <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="font-mono text-[11px] text-muted">
+        <span className="break-all font-mono text-xs text-muted">
           {field.env !== "—" ? field.env : field.key}
         </span>
         {field.overridden ? (
-          <Button size="sm" variant="ghost" onClick={reset}>
-            Reset to default
+          <Button size="sm" variant="ghost" disabled={pending} onClick={reset}>
+            Reset override
           </Button>
         ) : null}
       </div>
@@ -142,7 +182,34 @@ function DraftRow({ field }: { field: AdminConfigField }) {
   const setConfig = useAdminSetConfig();
   const toast = useToast();
   // Secrets are write-only: the input starts empty (we never receive the value).
-  const [draft, setDraft] = useState(field.secret ? "" : (field.value ?? ""));
+  const context = useContext(ConfigDraftContext);
+  const [localDraft, setLocalDraft] = useState<string | null>(null);
+  const baseline = field.secret ? "" : (field.value ?? "");
+  const draft = context ? (context.drafts[field.key] ?? baseline) : (localDraft ?? baseline);
+  const acknowledged = Boolean(context?.acknowledged[field.key]);
+  const dirty = draft !== baseline && !acknowledged;
+  const [localError, setLocalError] = useState("");
+  const [localPending, setLocalPending] = useState(false);
+  const pending = context ? Boolean(context.pending[field.key]) : localPending;
+  const error = context ? (context.errors[field.key] ?? "") : localError;
+  const setError = (message: string) =>
+    context ? context.setError(field.key, message) : setLocalError(message);
+  const run = async (action: () => Promise<void>) => {
+    if (context) return context.run(field.key, action);
+    if (localPending) return;
+    setLocalPending(true);
+    try {
+      await action();
+    } finally {
+      setLocalPending(false);
+    }
+  };
+  const setDraft = (value: string | null) => {
+    if (context) context.change(field.key, value === baseline ? null : value);
+    else setLocalDraft(value);
+    context?.acknowledge(field.key, false);
+    setError("");
+  };
 
   // The design-skin field previews live across the whole app as the admin picks (they
   // see the real thing, not a swatch); leaving without saving reverts to the cached
@@ -179,34 +246,61 @@ function DraftRow({ field }: { field: AdminConfigField }) {
       }
       value = list;
     }
-    try {
-      await setConfig.mutateAsync({ key: field.key, value });
-      if (isSkinField && typeof value === "string") commitSkin(value);
-      if (field.secret) setDraft("");
-      toast(`${field.label} saved`);
-    } catch (err) {
-      // A failed save must not leave the live preview on screen — revert to the committed skin.
-      if (isSkinField) restoreSkinFromCache();
-      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
-    }
+    await run(async () => {
+      try {
+        await setConfig.mutateAsync({ key: field.key, value });
+        if (isSkinField && typeof value === "string") commitSkin(value);
+        context?.acknowledge(field.key, true);
+        const refreshed = await context?.refresh();
+        if (refreshed?.isError) {
+          setError(
+            "Change saved, but the effective value couldn't be refreshed. The entered value is retained here. Retry the refresh before relying on the inherited value.",
+          );
+          return;
+        }
+        setDraft(null);
+        toast(`${field.label} saved`);
+      } catch (err) {
+        // A failed save must not leave the live preview on screen — revert to the committed skin.
+        if (isSkinField) restoreSkinFromCache();
+        setError(
+          err instanceof ApiError
+            ? err.hint
+            : "Couldn't save. Your change is still here; try Save again.",
+        );
+      }
+    });
   }
 
   async function clear() {
-    try {
-      await setConfig.mutateAsync({ key: field.key, value: null });
-      setDraft(""); // Clear only renders for an overridden field; revert to env/default.
-      toast(`${field.label} reset to environment/default`);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't clear", "error");
-    }
+    await run(async () => {
+      try {
+        await setConfig.mutateAsync({ key: field.key, value: null });
+        context?.acknowledge(field.key, true);
+        const refreshed = await context?.refresh();
+        if (refreshed?.isError) {
+          setError(
+            "Change saved, but the effective value couldn't be refreshed. The entered value is retained here. Retry the refresh before relying on the inherited value.",
+          );
+          return;
+        }
+        setDraft(null);
+        if (isSkinField) restoreSkinFromCache();
+        toast(`${field.label} reset to environment/default`);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.hint : "Couldn't reset the override. Try again.");
+      }
+    });
   }
 
   return (
-    <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-2 py-3">
       <div className="min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-fg">{field.label}</span>
           <SourceBadge source={field.source} />
+          {dirty && <Badge tone="warning">Unsaved</Badge>}
+          {acknowledged && <Badge>Saved · awaiting refresh</Badge>}
         </div>
         {field.help ? <p className="text-xs text-muted">{field.help}</p> : null}
         {isSkinField ? (
@@ -215,27 +309,30 @@ function DraftRow({ field }: { field: AdminConfigField }) {
             this page to revert.
           </p>
         ) : null}
-        <p className="font-mono text-[11px] text-muted">
-          {field.env !== "—" ? field.env : field.key} · now: {valueLabel(field)}
+        <p className="break-all font-mono text-xs text-muted">
+          {field.env !== "—" ? field.env : field.key} · {acknowledged ? "last loaded" : "now"}:{" "}
+          {valueLabel(field)}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {field.type === "enum" && field.enumValues ? (
-          <select
+          <NativeSelect
             aria-label={field.label}
             value={draft}
+            disabled={pending}
             onChange={(e) => {
               setDraft(e.target.value);
               if (isSkinField) previewSkin(e.target.value);
             }}
-            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
+            controlSize="md"
+            wrapperClassName="flex-1 sm:w-56"
           >
             {field.enumValues.map((v) => (
               <option key={v} value={v}>
                 {v}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         ) : (
           <input
             type={field.secret ? "password" : field.type === "number" ? "number" : "text"}
@@ -243,21 +340,56 @@ function DraftRow({ field }: { field: AdminConfigField }) {
             min={field.type === "number" ? 1 : undefined}
             aria-label={field.label}
             value={draft}
+            disabled={pending}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={field.secret ? (field.set ? "Replace key…" : "Paste key…") : field.label}
             autoComplete={field.secret ? "new-password" : "off"}
             className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
           />
         )}
-        <Button size="sm" loading={setConfig.isPending} onClick={save}>
-          Save
-        </Button>
+        {acknowledged && (
+          <Button
+            size="sm"
+            loading={pending}
+            onClick={() =>
+              run(async () => {
+                const refreshed = await context?.refresh();
+                if (!refreshed?.isError) setDraft(null);
+              })
+            }
+          >
+            Refresh effective value
+          </Button>
+        )}
+        {dirty && (
+          <Button size="sm" loading={pending} onClick={save}>
+            Save
+          </Button>
+        )}
+        {(dirty || acknowledged) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              setDraft(null);
+              if (isSkinField) restoreSkinFromCache();
+            }}
+          >
+            Discard
+          </Button>
+        )}
         {field.overridden ? (
-          <Button size="sm" variant="ghost" onClick={clear}>
-            Clear
+          <Button size="sm" variant="ghost" disabled={pending} onClick={clear}>
+            Reset override
           </Button>
         ) : null}
       </div>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -267,11 +399,11 @@ function ReadonlyRow({ field }: { field: AdminConfigField }) {
   return (
     <div className="flex items-center justify-between gap-3 py-3">
       <div className="min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-fg">{field.label}</span>
           <SourceBadge source={field.source} />
         </div>
-        <p className="font-mono text-[11px] text-muted">
+        <p className="break-all font-mono text-xs text-muted">
           {field.env !== "—" ? field.env : field.key}
         </p>
       </div>
@@ -300,7 +432,7 @@ const GROUP_ORDER = [
 type SettingsFilter = "all" | "editable" | "overridden" | "secret" | "readonly";
 
 const QUICK_FILTERS: Array<{ value: SettingsFilter; label: string }> = [
-  { value: "all", label: "All" },
+  { value: "all", label: "All configuration" },
   { value: "editable", label: "Editable" },
   { value: "overridden", label: "Overridden" },
   { value: "secret", label: "Secrets" },
@@ -349,10 +481,65 @@ const GROUP_NOTES: Record<string, string> = {
 const groupAnchor = (group: string) => `cfg-${group.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
 /** Unified Configuration view: every setting with value/source, a safe editable subset. */
-function Configuration() {
+function Configuration({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
   const config = useAdminConfig();
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<SettingsFilter>("all");
+  const [filter, setFilter] = useState<SettingsFilter>("editable");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftRevisions = useRef<Record<string, number>>({});
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [acknowledged, setAcknowledged] = useState<Record<string, boolean>>({});
+  const acknowledge = (key: string, saved: boolean) =>
+    setAcknowledged((current) => ({ ...current, [key]: saved }));
+  const activeWrites = useRef(new Set<string>());
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const setError = (key: string, error: string) =>
+    setErrors((current) => ({ ...current, [key]: error }));
+  const run = async (key: string, action: () => Promise<void>) => {
+    if (activeWrites.current.has(key)) return;
+    activeWrites.current.add(key);
+    setPending((current) => ({ ...current, [key]: true }));
+    try {
+      await action();
+    } finally {
+      activeWrites.current.delete(key);
+      setPending((current) => ({ ...current, [key]: false }));
+    }
+  };
+  const dirtyCount = Object.keys(drafts).filter((key) => !acknowledged[key]).length;
+  const anyPending = Object.values(pending).some(Boolean);
+  useEffect(
+    () => onDirtyChange(dirtyCount > 0 || anyPending),
+    [dirtyCount, anyPending, onDirtyChange],
+  );
+  const change = (key: string, value: string | null) => {
+    draftRevisions.current[key] = (draftRevisions.current[key] ?? 0) + 1;
+    setDrafts((current) => {
+      const next = { ...current };
+      if (value === null) delete next[key];
+      else next[key] = value;
+      return next;
+    });
+  };
+
+  const refresh = async () => {
+    const revisions = { ...draftRevisions.current };
+    const result = await config.refetch();
+    if (!result.isError) {
+      for (const key of Object.keys(acknowledged)) {
+        if (
+          !acknowledged[key] ||
+          activeWrites.current.has(key) ||
+          revisions[key] !== draftRevisions.current[key]
+        )
+          continue;
+        change(key, null);
+        acknowledge(key, false);
+        setError(key, "");
+      }
+    }
+    return result;
+  };
 
   // Derive everything from `config.data ?? []` so the hooks below (useSectionNav) run on every
   // render — even while loading — keeping hook order stable (React's rules of hooks).
@@ -403,10 +590,14 @@ function Configuration() {
     setFilter("all");
   }
 
-  if (config.isError) {
+  if (config.isError && !config.data) {
     return (
       <Panel className="p-4">
-        <p className="text-sm text-danger">Couldn't load configuration.</p>
+        <ReadError
+          title="Couldn't load configuration"
+          onRetry={() => void refresh()}
+          retrying={config.isFetching}
+        />
       </Panel>
     );
   }
@@ -419,101 +610,122 @@ function Configuration() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-3">
-        <div className="rounded-lg border border-border bg-surface-sunken px-3 py-2 text-sm text-muted">
-          <span className="font-medium text-fg">Database</span> overrides{" "}
-          <span className="font-medium text-fg">Environment</span>, which overrides the built-in
-          default. Editable rows can be changed here; read-only rows move through environment
-          config.
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            placeholder="Search settings, env vars, values"
-            aria-label="Search configuration settings"
-          />
-          {activeFiltering ? (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              Clear all
-            </Button>
-          ) : null}
-        </div>
-
-        <FilterBar>
-          {QUICK_FILTERS.map((chip) => (
-            <FilterChip
-              key={chip.value}
-              active={filter === chip.value}
-              onClick={() => setFilter(chip.value)}
-            >
-              {chip.label}
-            </FilterChip>
-          ))}
-        </FilterBar>
-
-        <p className="text-xs text-subtle">
-          Showing {filteredFields.length} of {allFields.length} settings · {editableCount} editable
-          · {overriddenCount} overridden
-        </p>
-      </div>
-
-      {filteredFields.length === 0 ? (
-        <EmptyState
-          title="No settings match"
-          description="Try a different search, or clear the filters to see every configuration field."
-          action={
-            <Button variant="secondary" size="sm" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          }
-        />
-      ) : (
-        <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start lg:gap-8">
-          <SettingsNav
-            sections={groups.map((g) => ({ id: groupAnchor(g), label: g }))}
-            active={active}
-            onSelect={select}
-            ariaLabel="Configuration sections"
-          />
-          <div className="space-y-5">
-            {groups.map((group) => {
-              const fields = byGroup.get(group) ?? [];
-              const total = allByGroup.get(group)?.length ?? fields.length;
-              const groupEditable = (allByGroup.get(group) ?? []).filter((f) => f.editable).length;
-              return (
-                <section key={group} id={groupAnchor(group)} className="scroll-mt-24">
-                  <Panel className="p-4">
-                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                      <h2 className="text-sm font-semibold text-fg">{group}</h2>
-                      <p className="text-xs text-subtle">
-                        {fields.length} of {total} settings · {groupEditable} editable
-                      </p>
-                    </div>
-                    {GROUP_NOTES[group] ? (
-                      <p className="mb-2 rounded-md bg-surface-sunken px-3 py-2 text-xs text-muted">
-                        {GROUP_NOTES[group]}
-                      </p>
-                    ) : null}
-                    <div className="divide-y divide-border">
-                      {fields.map((f) =>
-                        f.editable ? (
-                          <EditableRow key={f.key} field={f} {...gateOf(f)} />
-                        ) : (
-                          <ReadonlyRow key={f.key} field={f} />
-                        ),
-                      )}
-                    </div>
-                  </Panel>
-                </section>
-              );
-            })}
+    <ConfigDraftContext.Provider
+      value={{ drafts, change, refresh, pending, errors, setError, run, acknowledged, acknowledge }}
+    >
+      <div className="space-y-5">
+        {config.isError && (
+          <ReadError
+            title="Couldn’t refresh configuration"
+            onRetry={() => void refresh()}
+            retrying={config.isFetching}
+          >
+            Your edits are still here. Saved values may be out of date.
+          </ReadError>
+        )}
+        <div className="space-y-3">
+          <div className="rounded-lg border border-border bg-surface-sunken px-3 py-2 text-sm text-muted">
+            <span className="font-medium text-fg">Database</span> overrides{" "}
+            <span className="font-medium text-fg">Environment</span>, which overrides the built-in
+            default. Editable rows can be changed here; read-only rows move through environment
+            config.
           </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Search settings, env vars, values"
+              aria-label="Search configuration settings"
+            />
+            {activeFiltering ? (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Clear all
+              </Button>
+            ) : null}
+          </div>
+
+          <FilterBar>
+            {QUICK_FILTERS.map((chip) => (
+              <FilterChip
+                key={chip.value}
+                active={filter === chip.value}
+                onClick={() => setFilter(chip.value)}
+              >
+                {chip.label}
+              </FilterChip>
+            ))}
+          </FilterBar>
+
+          {dirtyCount > 0 && (
+            <p role="status" className="text-sm text-warning">
+              {dirtyCount} unsaved setting{dirtyCount === 1 ? "" : "s"}. Drafts stay here when you
+              search or change filters.
+            </p>
+          )}
+          <p className="text-xs text-subtle">
+            Showing {filteredFields.length} of {allFields.length} settings · {editableCount}{" "}
+            editable · {overriddenCount} overridden
+          </p>
         </div>
-      )}
-    </div>
+
+        {filteredFields.length === 0 ? (
+          <EmptyState
+            title="No settings match"
+            description="Try a different search, or clear the filters to see every configuration field."
+            action={
+              <Button variant="secondary" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
+        ) : (
+          <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start lg:gap-8">
+            <SettingsNav
+              sections={groups.map((g) => ({ id: groupAnchor(g), label: g }))}
+              active={active}
+              onSelect={select}
+              ariaLabel="Configuration sections"
+            />
+            <div className="space-y-5">
+              {groups.map((group) => {
+                const fields = byGroup.get(group) ?? [];
+                const total = allByGroup.get(group)?.length ?? fields.length;
+                const groupEditable = (allByGroup.get(group) ?? []).filter(
+                  (f) => f.editable,
+                ).length;
+                return (
+                  <section key={group} id={groupAnchor(group)} className="scroll-mt-24">
+                    <Panel className="p-4">
+                      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                        <h2 className="text-sm font-semibold text-fg">{group}</h2>
+                        <p className="text-xs text-subtle">
+                          {fields.length} of {total} settings · {groupEditable} editable
+                        </p>
+                      </div>
+                      {GROUP_NOTES[group] ? (
+                        <p className="mb-2 rounded-md bg-surface-sunken px-3 py-2 text-xs text-muted">
+                          {GROUP_NOTES[group]}
+                        </p>
+                      ) : null}
+                      <div className="divide-y divide-border">
+                        {fields.map((f) =>
+                          f.editable ? (
+                            <EditableRow key={f.key} field={f} {...gateOf(f)} />
+                          ) : (
+                            <ReadonlyRow key={f.key} field={f} />
+                          ),
+                        )}
+                      </div>
+                    </Panel>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </ConfigDraftContext.Provider>
   );
 }
 
@@ -542,41 +754,94 @@ const TEMPLATE_VARS =
   "{{recipientEmail}} · {{name}} · {{inviterName}} · {{canvasTitle}} · {{teamName}} · {{link}}";
 
 /** One email template: editable subject + HTML body + text body, with Save and Reset. */
-function TemplateRow({ template }: { template: AdminEmailTemplate }) {
+function TemplateRow({
+  template,
+  onDirtyChange,
+  refresh,
+  refreshEpoch,
+  getRefreshGeneration,
+}: {
+  template: AdminEmailTemplate;
+  onDirtyChange: (key: string, dirty: boolean) => void;
+  refresh: () => Promise<{ isError: boolean }>;
+  refreshEpoch: number;
+  getRefreshGeneration: () => number;
+}) {
   const setTemplate = useAdminSetEmailTemplate();
   const resetTemplate = useAdminResetEmailTemplate();
   const toast = useToast();
   const meta = TEMPLATE_META[template.key];
-  const [subject, setSubject] = useState(template.subject);
-  const [bodyHtml, setBodyHtml] = useState(template.bodyHtml);
-  const [bodyText, setBodyText] = useState(template.bodyText);
-
-  // Re-sync local drafts when the server value changes (after a save/reset refetch).
+  const [draft, setDraft] = useState<Pick<
+    AdminEmailTemplate,
+    "subject" | "bodyHtml" | "bodyText"
+  > | null>(null);
+  const { subject, bodyHtml, bodyText } = draft ?? template;
+  const [acknowledged, setAcknowledged] = useState<"saved" | "reset" | null>(null);
+  const revision = useRef(0);
+  const acknowledgedAt = useRef({ epoch: refreshEpoch, revision: 0 });
+  const [busy, setBusy] = useState(false);
+  const pending = busy || setTemplate.isPending || resetTemplate.isPending;
+  const dirty =
+    !acknowledged &&
+    (subject !== template.subject ||
+      bodyHtml !== template.bodyHtml ||
+      bodyText !== template.bodyText);
+  const [error, setError] = useState("");
   useEffect(() => {
-    setSubject(template.subject);
-    setBodyHtml(template.bodyHtml);
-    setBodyText(template.bodyText);
-  }, [template.subject, template.bodyHtml, template.bodyText]);
+    if (
+      !acknowledged ||
+      refreshEpoch <= acknowledgedAt.current.epoch ||
+      revision.current !== acknowledgedAt.current.revision
+    )
+      return;
+    setDraft(null);
+    setAcknowledged(null);
+    setError("");
+  }, [acknowledged, refreshEpoch]);
+  const edit = (key: "subject" | "bodyHtml" | "bodyText", value: string) => {
+    revision.current += 1;
+    setDraft({ subject, bodyHtml, bodyText, [key]: value });
+    setAcknowledged(null);
+    setError("");
+  };
+  useEffect(() => onDirtyChange(template.key, dirty), [template.key, dirty, onDirtyChange]);
 
-  async function save() {
-    if (!subject.trim() || !bodyHtml.trim() || !bodyText.trim()) {
+  async function write(operation: "save" | "reset") {
+    if (pending) return;
+    if (operation === "save" && (!subject.trim() || !bodyHtml.trim() || !bodyText.trim())) {
       toast("Subject, HTML body, and text body are all required", "error");
       return;
     }
+    setBusy(true);
+    setError("");
     try {
-      await setTemplate.mutateAsync({ key: template.key, body: { subject, bodyHtml, bodyText } });
-      toast(`${meta?.label ?? template.key} saved`);
+      if (operation === "save") {
+        await setTemplate.mutateAsync({ key: template.key, body: { subject, bodyHtml, bodyText } });
+      } else await resetTemplate.mutateAsync(template.key);
+      acknowledgedAt.current = { epoch: getRefreshGeneration(), revision: revision.current };
+      setAcknowledged(operation === "save" ? "saved" : "reset");
+      const result = await refresh();
+      if (result.isError) {
+        setError(
+          operation === "save"
+            ? "Template saved, but the current template couldn't be refreshed. Your entered content is retained here. Refresh to see the effective template."
+            : "Override removed, but the default template couldn't be refreshed. Your entered content is retained here. Refresh to see the current default.",
+        );
+        return;
+      }
+      setDraft(null);
+      setAcknowledged(null);
+      toast(
+        `${meta?.label ?? template.key} ${operation === "save" ? "saved" : "reset to default"}`,
+      );
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
-    }
-  }
-
-  async function reset() {
-    try {
-      await resetTemplate.mutateAsync(template.key);
-      toast(`${meta?.label ?? template.key} reset to default`);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't reset", "error");
+      setError(
+        err instanceof ApiError
+          ? err.hint
+          : "Couldn't change this template. Your edits are still here.",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -584,9 +849,16 @@ function TemplateRow({ template }: { template: AdminEmailTemplate }) {
 
   return (
     <div className="space-y-2 py-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-fg">{meta?.label ?? template.key}</span>
-        {template.overridden ? <Badge tone="success">Customized</Badge> : <Badge>Default</Badge>}
+        <Badge tone={template.overridden ? "success" : "neutral"}>
+          {acknowledged ? "Last loaded · " : ""}
+          {template.overridden ? "Customized" : "Default"}
+        </Badge>
+        {dirty && <Badge tone="warning">Unsaved</Badge>}
+        {acknowledged && (
+          <Badge>{acknowledged === "saved" ? "Saved" : "Reset"} · awaiting refresh</Badge>
+        )}
       </div>
       {meta?.help ? <p className="text-xs text-muted">{meta.help}</p> : null}
       <label className="block space-y-1">
@@ -594,7 +866,8 @@ function TemplateRow({ template }: { template: AdminEmailTemplate }) {
         <input
           aria-label={`${meta?.label ?? template.key} subject`}
           value={subject}
-          onChange={(e) => setSubject(e.target.value)}
+          onChange={(e) => edit("subject", e.target.value)}
+          disabled={pending}
           className={inputClass}
         />
       </label>
@@ -603,7 +876,8 @@ function TemplateRow({ template }: { template: AdminEmailTemplate }) {
         <textarea
           aria-label={`${meta?.label ?? template.key} HTML body`}
           value={bodyHtml}
-          onChange={(e) => setBodyHtml(e.target.value)}
+          onChange={(e) => edit("bodyHtml", e.target.value)}
+          disabled={pending}
           rows={4}
           className={inputClass}
         />
@@ -613,17 +887,70 @@ function TemplateRow({ template }: { template: AdminEmailTemplate }) {
         <textarea
           aria-label={`${meta?.label ?? template.key} text body`}
           value={bodyText}
-          onChange={(e) => setBodyText(e.target.value)}
+          onChange={(e) => edit("bodyText", e.target.value)}
+          disabled={pending}
           rows={3}
           className={inputClass}
         />
       </label>
-      <div className="flex items-center gap-2">
-        <Button size="sm" loading={setTemplate.isPending} onClick={save}>
-          Save
-        </Button>
+      <details className="space-y-3">
+        <summary className="cursor-pointer text-sm text-accent">Preview email</summary>
+        <p className="text-xs text-muted">
+          Illustrative values, rendered locally. No email is sent; external images and links are
+          disabled.
+        </p>
+        <iframe
+          title={`${meta?.label ?? template.key} email preview`}
+          sandbox=""
+          referrerPolicy="no-referrer"
+          srcDoc={emailPreviewDocument(bodyHtml)}
+          className="h-72 w-full rounded-md border border-border bg-surface"
+        />
+      </details>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {dirty && (
+          <Button
+            size="sm"
+            loading={pending && !resetTemplate.isPending}
+            disabled={pending}
+            onClick={() => void write("save")}
+          >
+            Save
+          </Button>
+        )}
+        {acknowledged && (
+          <Button size="sm" disabled={pending} onClick={() => void refresh()}>
+            Refresh effective template
+          </Button>
+        )}
+        {(dirty || acknowledged) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              revision.current += 1;
+              setDraft(null);
+              setAcknowledged(null);
+              setError("");
+            }}
+          >
+            Discard
+          </Button>
+        )}
         {template.overridden ? (
-          <Button size="sm" variant="ghost" loading={resetTemplate.isPending} onClick={reset}>
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={resetTemplate.isPending}
+            disabled={pending}
+            onClick={() => void write("reset")}
+          >
             Reset to latest default
           </Button>
         ) : null}
@@ -633,12 +960,30 @@ function TemplateRow({ template }: { template: AdminEmailTemplate }) {
 }
 
 /** Admin email-template editor: each sign-in/access email, subject + HTML + text. */
-function EmailTemplates() {
+function EmailTemplates({
+  onDirtyChange,
+}: {
+  onDirtyChange: (key: string, dirty: boolean) => void;
+}) {
   const templates = useAdminEmailTemplates();
-  if (templates.isError) {
+  const [refreshEpoch, setRefreshEpoch] = useState(0);
+  const refreshGeneration = useRef(0);
+  const getRefreshGeneration = () => refreshGeneration.current;
+  const refresh = async () => {
+    // Only reads started after a write acknowledgement can reconcile its buffer.
+    const generation = ++refreshGeneration.current;
+    const result = await templates.refetch();
+    if (!result.isError) setRefreshEpoch((current) => Math.max(current, generation));
+    return result;
+  };
+  if (templates.isError && !templates.data) {
     return (
       <Panel className="p-4">
-        <p className="text-sm text-danger">Couldn't load email templates.</p>
+        <ReadError
+          title="Couldn't load email templates"
+          onRetry={() => void refresh()}
+          retrying={templates.isFetching}
+        />
       </Panel>
     );
   }
@@ -651,6 +996,15 @@ function EmailTemplates() {
   }
   return (
     <Panel className="p-4">
+      {templates.isError && (
+        <ReadError
+          title="Couldn’t refresh email templates"
+          onRetry={() => void refresh()}
+          retrying={templates.isFetching}
+        >
+          Your edits are still here. Saved templates may be out of date.
+        </ReadError>
+      )}
       <div className="mb-2">
         <h2 className="text-sm font-semibold text-fg">Email templates</h2>
         <p className="text-xs text-muted">
@@ -661,7 +1015,14 @@ function EmailTemplates() {
       </div>
       <div className="divide-y divide-border">
         {templates.data.map((t) => (
-          <TemplateRow key={t.key} template={t} />
+          <TemplateRow
+            key={t.key}
+            template={t}
+            onDirtyChange={onDirtyChange}
+            refresh={refresh}
+            refreshEpoch={refreshEpoch}
+            getRefreshGeneration={getRefreshGeneration}
+          />
         ))}
       </div>
     </Panel>
@@ -675,14 +1036,24 @@ function EmailTemplates() {
  * shown only as configured + last-4; the server never returns their value.
  */
 export default function AdminSettings() {
+  const [configDirty, setConfigDirty] = useState(false);
+  const [templateDirty, setTemplateDirty] = useState<Record<string, boolean>>({});
+  const markTemplate = useCallback(
+    (key: string, dirty: boolean) =>
+      setTemplateDirty((current) =>
+        current[key] === dirty ? current : { ...current, [key]: dirty },
+      ),
+    [],
+  );
   return (
     <div className="space-y-6">
       <AdminHeader
         title="Configuration"
         description="Database overrides environment; editable AI and quota defaults can change without restart."
       />
-      <Configuration />
-      <EmailTemplates />
+      <Configuration onDirtyChange={setConfigDirty} />
+      <EmailTemplates onDirtyChange={markTemplate} />
+      <PendingChangesGuard dirty={configDirty || Object.values(templateDirty).some(Boolean)} />
     </div>
   );
 }

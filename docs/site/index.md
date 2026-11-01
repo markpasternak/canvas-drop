@@ -34,7 +34,8 @@ pnpm dev
 ```
 
 Open `http://localhost:5173`, click **Create canvas**, choose **Paste HTML**, and
-paste an `index.html`. It is created and published in one step and live at
+paste an `index.html`. Choose **Create draft**, check its preview, then choose
+**Review and publish** and confirm. The published canvas is live at
 `http://localhost:3000/c/{slug}/`. To give it a backend, switch on **Enable
 backend** in the canvas's **Backend** tab and add one tag to the page:
 
@@ -72,7 +73,7 @@ file/data purge, and observed Connections health.
 | Backend | Turn on the backend per canvas, then toggle KV, files, AI, and realtime independently; identity (`canvasdrop.me()`) is on whenever the backend is. A call to a disabled primitive fails with `CAPABILITY_DISABLED`. A further opt-in, authoring, lets a page create canvases as the signed-in viewer. | [Capabilities](/docs/authoring/capabilities), [Browser SDK](/docs/sdk/overview) |
 | Connections | An admin can define a reusable exact-origin HTTPS profile with selected methods and write-only protected headers, then grant it to specific canvases. Canvas code gets a bounded `fetch`-like API; no arbitrary backend code runs. | [Connections](/docs/sdk/connections) |
 | Discover | **Shared** lists the canvases already opened to you. The **Gallery** is opt-in: Public-link canvases and Whole-org canvases their owners list, scoped to your org. An owner can also allow a listed canvas to be used as a template, which others clone. | [Gallery, description, and tags](/docs/authoring/sharing#gallery-description-and-tags) |
-| Agents | The MCP server at `{base}/mcp` (OAuth 2.1, 47 identity-scoped tools) covers everything the dashboard can do, with the same owner/editor/viewer checks. `{base}/llms.txt` and the agent skill (`{base}/skill.zip`) describe the whole surface for models. | [MCP server](/docs/agents/mcp), [llms.txt](/docs/agents/llms), [Agent skill](/docs/agents/skill) |
+| Agents | The MCP server at `{base}/mcp` (OAuth 2.1, identity-scoped tools) covers everything the dashboard can do, with the same owner/editor/viewer checks. `{base}/llms.txt` and the agent skill (`{base}/skill.zip`) describe the whole surface for models. | [MCP server](/docs/agents/mcp), [llms.txt](/docs/agents/llms), [Agent skill](/docs/agents/skill) |
 | Admin | Disable or restore any canvas, reassign owners, feature canvases in the gallery, block users, grant public-link publishing per account, and edit runtime settings (AI key and quotas, screenshots, design skin) without a restart. | [Configuration](/docs/self-hosting/configuration) |
 | Operate | SQLite or Postgres, local disk or S3-compatible storage, `path` or `subdomain` URLs, `dev` / `proxy` / `oidc` auth: each is a config swap, never a code change. Docker image and compose stack; `pnpm backup`, `pnpm restore`, `pnpm purge`. | [Install](/docs/self-hosting/install), [Deploy](/docs/self-hosting/deploy), [Security model](/docs/self-hosting/security-model) |
 
@@ -112,8 +113,7 @@ a real org's load; treat it as ready to self-host and evaluate, not as
 battle-tested.
 
 Not in v1: a CLI (the Deploy API, MCP server, and agent skill cover programmatic
-deploys), custom domains, multi-org tenancy, an audit-log viewer in the admin
-panel, KV change subscriptions, and realtime message history.
+deploys), custom domains, multi-org tenancy, KV change subscriptions, and realtime message history.
 
 ## Where to go next
 

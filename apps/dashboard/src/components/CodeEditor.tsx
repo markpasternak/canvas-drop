@@ -21,7 +21,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 
 /** Pick a CodeMirror language extension from a file path's extension (R17). */
 function languageFor(path: string): Extension[] {
@@ -162,6 +162,7 @@ export interface CodeEditorProps {
   path: string;
   value: string;
   readOnly?: boolean;
+  label?: string;
   onChange: (next: string) => void;
   /** ⌘S / Ctrl+S — flush the autosave immediately instead of the browser save dialog. */
   onSave?: () => void;
@@ -173,7 +174,15 @@ export interface CodeEditorProps {
  * and re-keys this component per file, so we don't reconcile external value changes
  * into a live view — that avoids cursor-jump on autosave round-trips).
  */
-export function CodeEditor({ path, value, readOnly = false, onChange, onSave }: CodeEditorProps) {
+export function CodeEditor({
+  path,
+  value,
+  readOnly = false,
+  label,
+  onChange,
+  onSave,
+}: CodeEditorProps) {
+  const helpId = useId();
   const host = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -204,6 +213,11 @@ export function CodeEditor({ path, value, readOnly = false, onChange, onSave }: 
         ...baseExtensions,
         ...languageFor(path),
         EditorState.readOnly.of(readOnly),
+        EditorView.contentAttributes.of({
+          "aria-label": label ?? `Source code for ${path}`,
+          "aria-readonly": String(readOnly),
+          "aria-describedby": helpId,
+        }),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
         }),
@@ -211,7 +225,20 @@ export function CodeEditor({ path, value, readOnly = false, onChange, onSave }: 
     });
     const view = new EditorView({ state, parent: host.current });
     return () => view.destroy();
-  }, [path, readOnly]);
+  }, [path, readOnly, helpId, label]);
 
-  return <div ref={host} data-testid="code-editor" className="h-full overflow-hidden bg-surface" />;
+  return (
+    <>
+      <p id={helpId} className="sr-only">
+        {readOnly
+          ? "Read-only source inspection."
+          : "Edits autosave to the draft. Press Control S or Command S to save now. Tab moves to the next control."}
+      </p>
+      <div
+        ref={host}
+        data-testid="code-editor"
+        className="h-full min-w-0 overflow-hidden bg-surface focus-within:ring-2 focus-within:ring-inset focus-within:ring-accent"
+      />
+    </>
+  );
 }

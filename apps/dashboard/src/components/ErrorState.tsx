@@ -34,26 +34,28 @@ function ErrorShell({
           <BrandMark className="size-8" />
           canvas-drop
         </div>
-        <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_20rem] lg:items-end">
+        <div className="space-y-6 p-6 sm:p-8">
           <div className="min-w-0">
-            <p className="mb-3 font-mono text-xs font-semibold tracking-[0.08em] text-subtle">
-              HTTP {status}
-            </p>
-            <h1 className="max-w-lg text-4xl font-semibold leading-none tracking-tight text-fg sm:text-5xl">
-              {title}
-            </h1>
+            <h1 className="max-w-lg font-display text-h1 leading-tight text-fg">{title}</h1>
             <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted">{message}</p>
           </div>
-          <dl className="grid gap-3 rounded-lg border border-border bg-surface-sunken p-4">
-            <div className="min-w-0">
-              <dt className="text-xs font-medium text-subtle">Code</dt>
-              <dd className="mt-1 break-words font-mono text-sm text-fg">{code}</dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-xs font-medium text-subtle">Path</dt>
-              <dd className="mt-1 break-words font-mono text-sm text-fg">{path}</dd>
-            </div>
-          </dl>
+          <details className="text-sm text-muted">
+            <summary className="cursor-pointer">Technical details</summary>
+            <dl className="mt-3 grid gap-3 border-t border-border pt-3">
+              <div>
+                <dt>Status</dt>
+                <dd className="font-mono">HTTP {status}</dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs font-medium text-subtle">Code</dt>
+                <dd className="mt-1 break-words font-mono text-sm text-fg">{code}</dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs font-medium text-subtle">Path</dt>
+                <dd className="mt-1 break-words font-mono text-sm text-fg">{path}</dd>
+              </div>
+            </dl>
+          </details>
         </div>
         <div className="flex flex-wrap gap-2 border-t border-border bg-surface-raised px-6 py-4 sm:px-8">
           {children}
@@ -77,18 +79,15 @@ export function DashboardNotFoundState(_props: NotFoundRouteProps) {
       status="404"
       code="not_found"
       title="Page not found"
-      message="There is no dashboard page at this address."
+      message="This link isn't available. Check the address or return to your canvases."
       path={path}
     />
   );
 }
 
-export function DashboardRouteErrorState({ error, reset }: ErrorComponentProps) {
+export function DashboardRouteErrorState({ reset }: ErrorComponentProps) {
   const path = useCurrentPath();
-  const message =
-    error instanceof Error && error.message
-      ? error.message
-      : "The dashboard hit an unexpected problem while loading this view.";
+  const message = "This view couldn't be loaded. Try again, or return to your canvases.";
   return (
     <ErrorShell
       status="500"

@@ -30,9 +30,16 @@ export function SettingsNav({
                 onSelect(s.id);
                 // `instant`, not `smooth`: a smooth scrollIntoView is a no-op under some engines
                 // (and reduced-motion), so a guaranteed jump beats a sometimes-silent animation.
-                document
-                  .getElementById(s.id)
-                  ?.scrollIntoView({ behavior: "instant", block: "start" });
+                const section = document.getElementById(s.id);
+                if (!section) return;
+                section.tabIndex = -1;
+                section.focus({ preventScroll: true });
+                section.scrollIntoView?.({ behavior: "instant", block: "start" });
+                // Keep the fragment shareable without triggering a router transition
+                // (and its route-focus reset). Preserve the router's history metadata.
+                const url = new URL(window.location.href);
+                url.hash = s.id;
+                window.history.replaceState(window.history.state, "", url);
               }}
               aria-current={active === s.id ? "true" : undefined}
               className={cn(
