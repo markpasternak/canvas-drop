@@ -1,14 +1,15 @@
 # gitleaks config for canvas-drop secret scanning (U5).
 #
-# Extends the default ruleset and allowlists ONLY specific known-fake values —
+# Extends the default ruleset and allowlists specific known-fake values —
 # test fixtures and the clearly-labeled DEMO-ONLY secrets in the bundled compose
 # stack. The allowlist is scoped to exact secret values, NOT to file paths or
 # rules, so a REAL secret added anywhere (including next to these) is still caught.
+# A separate exact-match exception below covers a generated JavaScript expression.
 
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Known-fake test fixtures and demo-only placeholders (not real secrets)."
 regexes = [
   # Dashboard test fixture API key — apps/dashboard/src/test/settings.test.tsx.
@@ -28,3 +29,11 @@ regexes = [
   '''9f2c4e7a1b3d5f60718293a4b5c6d7e8''',
   '''c0ffee1234567890abcdef1234567890''',
 ]
+
+[[allowlists]]
+description = "Mermaid 12 bundled Cytoscape atlas counter expression, not a credential."
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)docs/site/assets/mermaid\.js$''']
+regexTarget = "match"
+regexes = ['''^p\.keyCount,v=p\.atlasCount;$''']
