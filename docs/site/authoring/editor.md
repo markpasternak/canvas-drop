@@ -66,7 +66,7 @@ erased. When the canvas's preview mode is **auto** and the instance has
 [screenshots](/docs/self-hosting/screenshots) on, a fresh cover is captured after each
 publish.
 
-The **Upload and publish** / **Upload new version** button in the canvas header is a different thing: it
+The **Upload and publish** / **Upload new version** button on the **Overview** tab is a different thing: it
 uploads files (paste, folder, or ZIP) as a direct deploy. The editor and the unpublished Share view use
 **Review and publish** to publish the saved draft.
 
@@ -210,6 +210,9 @@ The **Versions** tab lists them newest first with the source (`editor`, folder u
 ZIP, paste, the API, or `upload` for the staged upload API), who created it, when, file
 count, and total size. Per version:
 
+- **Inspect**: read a version’s source without changing the draft or live canvas.
+  **Compare with current** shows added, changed, removed and unchanged files with
+  read-only source side by side. Large or binary files can be downloaded instead.
 - **Download ZIP**: every file in that version as one archive, named
   `{slug}-v{version}.zip`.
 - **Restore to draft**: load that version's files into the draft. Every restore asks
@@ -222,9 +225,10 @@ count, and total size. Per version:
   current version cannot be deleted (`409 CURRENT_VERSION`); files still used by
   another version or the draft are kept.
 
-Restore changes only the draft; Make current changes only what visitors see. To
-inspect a single file from an older version, restore it into the draft and use the
-tree, or download the ZIP.
+Restore changes only the draft; Make current changes only what visitors see. Use
+**Inspect** to review an older file before deciding whether to restore, or download
+the ZIP. Inspection uses the same protected version export and does not create a
+public URL for historical content.
 
 Storage is content-addressed: each file is stored once per canvas by content hash, so
 a version that changes one file writes one new blob, and blobs no version or the

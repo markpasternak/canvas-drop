@@ -66,7 +66,8 @@ function mockStatus(
       const path = new URL(url, "http://localhost").pathname;
       calls.push({ method, url: path, body: init?.body as string | undefined });
       if (path === "/api/canvases/c1") return json(canvas);
-      if (path === "/api/canvases/c1/settings") return json(canvas);
+      if (path === "/api/canvases/c1/settings")
+        return json({ ...canvas, ...JSON.parse(String(init?.body ?? "{}")) });
       if (path === "/api/canvases/c1/draft") return json(draft);
       if (path === "/api/canvases/c1/versions") return json({ versions });
       return json({ error: "not_mocked" }, 500);
@@ -159,7 +160,7 @@ describe("canvas Overview tab", () => {
       "href",
       "/canvases/c1/share",
     );
-    expect(screen.getByText("Canvas URL")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
     await userEvent.click(screen.getByText("Edit details"));
     expect(screen.getByLabelText("Title")).toBeVisible();
   });
@@ -226,16 +227,12 @@ describe("canvas Overview tab", () => {
     mockStatus();
     renderStatus();
 
-    expect(await screen.findByText("Version 1")).toBeInTheDocument();
-    // Header three-chip row (Publication · Visibility · Gallery) + the global
-    // "New version" upload affordance (shown on every tab).
-    // "Published" appears in both the header chip and the Publication fact.
-    expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
-    expect(screen.getByText("Unlisted")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Published version 1" })).toBeInTheDocument();
+    expect(screen.getAllByText("Published")).toHaveLength(1);
+    expect(screen.getByText("Not listed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload new version" })).toBeInTheDocument();
-    // "Whole org" appears in both the header access chip and the Access fact.
-    expect(screen.getAllByText("Whole org").length).toBeGreaterThan(0);
-    expect(screen.getByText(/v1 via folder upload/i)).toBeInTheDocument();
+    expect(screen.getByText(/members, plus people and teams with access/i)).toBeInTheDocument();
+    expect(screen.getByText(/via folder upload/i)).toBeInTheDocument();
     expect(screen.getAllByText("2.0 KB")).toHaveLength(2);
     expect(screen.getByText("index.html")).toBeInTheDocument();
 
@@ -250,7 +247,7 @@ describe("canvas Overview tab", () => {
     await user.click(await screen.findByText("Edit details"));
     await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "Roadshow prototype");
-    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Save details" }));
 
     await vi.waitFor(() => {
       const patch = calls.find(
@@ -260,7 +257,7 @@ describe("canvas Overview tab", () => {
     });
 
     await user.type(screen.getByLabelText("Description"), "Shared with the launch team.");
-    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Save details" }));
 
     await vi.waitFor(() => {
       const patches = calls.filter(
@@ -321,8 +318,7 @@ describe("canvas Overview tab", () => {
 
     expect(await screen.findByText("Not published yet")).toBeInTheDocument();
     expect(screen.getByText(/The URL has no live page/i)).toBeInTheDocument();
-    // "Restricted" (the family's one label) appears in the header chip and the Access fact.
-    expect(screen.getAllByText("Restricted").length).toBeGreaterThan(0);
+    expect(screen.getByText(/not live yet — publish/i)).toBeInTheDocument();
   });
 
   it("shows the share expiry on a Restricted canvas too (the expiry applies to the listed people; review #12)", async () => {
@@ -336,7 +332,8 @@ describe("canvas Overview tab", () => {
       [VERSION],
     );
     renderStatus();
-    expect(await screen.findAllByText(/^Restricted \(expires in \dd\)/)).not.toHaveLength(0);
+    expect(await screen.findByText(/Viewer access expires/)).toBeInTheDocument();
+    expect(screen.getByText("Restricted to people and teams with access")).toBeInTheDocument();
   });
 
   it("reframes the draft header around 'not live yet' with Open draft + Publish primaries", async () => {
@@ -435,6 +432,7 @@ describe("canvas Overview tab", () => {
 
       await user.click(await screen.findByText("Edit details"));
       await user.type(screen.getByLabelText("Tags"), "Roadshow{Enter}");
+      await user.click(screen.getByRole("button", { name: "Save details" }));
 
       await vi.waitFor(() => {
         const patch = calls.find(
@@ -458,9 +456,11 @@ describe("canvas Overview tab", () => {
       const user = userEvent.setup();
       renderStatus();
 
-      const input = await screen.findByLabelText("Tags");
+      await user.click(await screen.findByText("Edit details"));
+      const input = screen.getByLabelText("Tags");
       expect(input).toBeEnabled();
       await user.type(input, "wip,");
+      await user.click(screen.getByRole("button", { name: "Save details" }));
 
       await vi.waitFor(() => {
         const patch = calls.find(
@@ -475,10 +475,12 @@ describe("canvas Overview tab", () => {
       const user = userEvent.setup();
       renderStatus();
 
-      expect(await screen.findByText("alpha")).toBeInTheDocument();
+      await user.click(await screen.findByText("Edit details"));
+      expect(screen.getByText("alpha")).toBeInTheDocument();
       expect(screen.getByText("beta")).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Remove tag alpha" }));
+      await user.click(screen.getByRole("button", { name: "Save details" }));
 
       await vi.waitFor(() => {
         const patch = calls.find(

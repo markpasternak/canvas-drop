@@ -137,6 +137,14 @@ describe("landing page — rendered content", () => {
     expect(html).not.toContain("fonts.gstatic.com");
   });
 
+  it("names walkthrough topics and points self-hosting at installation", () => {
+    const html = renderLandingPage();
+    expect(html).toContain('aria-label="Choose walkthrough topic"');
+    expect(html).toMatch(/data-embla-dot[^>]*>Your dashboard<\/button>/);
+    expect(html).toMatch(/data-embla-dot[^>]*>In-browser editor<\/button>/);
+    expect(html).toContain('href="/docs/self-hosting/install">Self-host guide');
+  });
+
   it("retains the multi-view walkthrough and gallery without gated marketing links", () => {
     const html = renderLandingPage();
     expect(html).toContain('aria-label="Product walkthrough"');

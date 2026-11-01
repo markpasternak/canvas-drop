@@ -4,6 +4,7 @@ import {
   BookOpen,
   Compass,
   List,
+  MagnifyingGlass,
   Plus,
   ShareNetwork,
   ShieldCheck,
@@ -15,7 +16,7 @@ import {
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
-import { CommandPalette } from "./components/CommandPalette.js";
+import { CommandPalette, openCommandPalette } from "./components/CommandPalette.js";
 import { ShortcutsHost } from "./components/Shortcuts.js";
 import { useToast } from "./components/Toast.js";
 import { UserMenu, useSwitchedAccountNotice } from "./components/UserMenu.js";
@@ -91,7 +92,7 @@ function CreateCanvasButton({
       title="Create canvas"
       onClick={onSelect}
       className={cn(
-        "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent text-[0.8125rem] font-semibold text-accent-fg",
+        "cd-touch-target inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent text-[0.8125rem] font-semibold text-accent-fg",
         collapsed ? "px-0" : "px-3.5",
         "shadow-[var(--shadow-panel)] transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover active:translate-y-px",
         className,
@@ -271,7 +272,7 @@ export function AppLayout() {
       <Link
         key={l.to}
         to={l.to}
-        activeOptions={l.exact ? { exact: true } : undefined}
+        activeOptions={{ exact: l.exact, includeSearch: false }}
         onClick={onSelect}
         aria-label={isCollapsed ? l.label : undefined}
         title={isCollapsed ? l.label : undefined}
@@ -339,6 +340,24 @@ export function AppLayout() {
           </button>
         </div>
         <CreateCanvasButton collapsed={collapsed} />
+        <button
+          type="button"
+          onClick={openCommandPalette}
+          aria-label="Search commands and canvases"
+          title="Search commands and canvases (⌘K / Ctrl+K)"
+          className={cn(
+            "cd-touch-target flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm text-muted hover:bg-surface-hover hover:text-fg",
+            collapsed && "justify-center px-0",
+          )}
+        >
+          <MagnifyingGlass size={17} aria-hidden />
+          {!collapsed && (
+            <>
+              <span>Search</span>
+              <kbd className="ml-auto text-xs text-subtle">⌘K</kbd>
+            </>
+          )}
+        </button>
         {/* Primary section nav: the first "Sections" landmark in the shell. */}
         <nav className="flex flex-col gap-0.5" aria-label="Sections">
           {links.map((l) => renderLink(l, undefined, collapsed))}
@@ -379,7 +398,7 @@ export function AppLayout() {
                 aria-label={menuOpen ? "Close menu" : "Open menu"}
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((v) => !v)}
-                className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-sunken text-muted transition-colors hover:text-fg"
+                className="cd-touch-target grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-sunken text-muted transition-colors hover:text-fg"
               >
                 {menuOpen ? (
                   <X size={18} weight="bold" aria-hidden />
@@ -414,6 +433,17 @@ export function AppLayout() {
                 aria-label="Sections"
               >
                 {links.map((l) => renderLink(l, () => setMenuOpen(false)))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    openCommandPalette();
+                  }}
+                  className={navLinkClass}
+                >
+                  <MagnifyingGlass size={17} aria-hidden />
+                  Search commands and canvases
+                </button>
                 {/* Theme lives in the account menu (reachable from the mobile top
                     bar), so the mobile menu footer carries only the Docs link — no
                     duplicate theme control. */}

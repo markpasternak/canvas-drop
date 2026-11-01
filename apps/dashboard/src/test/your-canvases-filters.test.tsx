@@ -334,7 +334,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     expect(screen.getByRole("button", { name: "Shared" })).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: "Protected" })).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: "Templates" })).toHaveTextContent("1");
-    expect(screen.getByRole("button", { name: "Never deployed" })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "Never published" })).toHaveTextContent("1");
   });
 
   it("filters to never-deployed from the URL", async () => {
@@ -352,7 +352,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Deployed one")).toBeNull();
     // The chip reflects the URL state.
-    expect(screen.getByRole("button", { name: "Never deployed" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Never published" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

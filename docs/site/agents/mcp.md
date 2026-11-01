@@ -117,7 +117,8 @@ Refusal codes you will meet across tools:
 
 ## Tools
 
-51 tools: 13 open to any signed-in account, 36 at minimum role editor, 2 owner-only.
+Tools below are grouped by their minimum role. The server advertises the current
+inventory through MCP `tools/list`; editor and owner checks match the dashboard.
 Optional inputs are marked `?`. "View" is the canvas projection described under Return
 shapes below.
 

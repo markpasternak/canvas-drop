@@ -1,18 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import {
-  AccessBadge,
-  Badge,
-  GalleryBadge,
-  PublicationBadge,
-  ScopeBadge,
-} from "../components/Badge.js";
+import { Badge, PublicationBadge, ScopeBadge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasAudience } from "../components/CanvasAudience.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DeployButton } from "../components/DeployButton.js";
 import { EmptyState } from "../components/EmptyState.js";
+import { ReadError } from "../components/ReadError.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, api } from "../lib/api.js";
@@ -67,21 +62,39 @@ function useSlugRedirect(param: string): { resolving: boolean } {
 /** Canvas detail shell: breadcrumb back-affordance, header, routed tabs, Outlet. */
 export default function CanvasLayout() {
   const { id } = useParams({ strict: false }) as { id: string };
-  const { data: canvas, isLoading, isError } = useCanvas(id);
+  const { data: canvas, isLoading, isError, error, refetch, isFetching } = useCanvas(id);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const compact = /\/(editor|versions|usage)$/.test(pathname);
   const me = useMe().data;
   const unarchive = useUnarchiveCanvas(id);
   const toast = useToast();
   // When `id` is actually a cosmetic slug, resolve it to the canonical id + redirect.
   const { resolving } = useSlugRedirect(id);
 
-  if (isError && resolving) {
+  if (isError && !canvas && resolving) {
     // The id lookup 404'd because `id` is a slug; a redirect to the real id is in
     // flight (or the slug lookup is still settling). Hold a quiet skeleton rather
     // than flashing "not found" before the canonical route loads.
     return <Skeleton className="h-40 w-full" />;
   }
 
-  if (isError) {
+  if (
+    isError &&
+    !canvas &&
+    !(error instanceof ApiError && (error.status === 403 || error.status === 404))
+  ) {
+    return (
+      <ReadError
+        title="Couldn’t load this canvas"
+        onRetry={() => void refetch()}
+        retrying={isFetching}
+      >
+        Your connection or the server may be unavailable. Retry to continue.
+      </ReadError>
+    );
+  }
+
+  if (isError && !canvas) {
     return (
       <EmptyState
         title="Canvas not found"
@@ -108,7 +121,7 @@ export default function CanvasLayout() {
     canvas?.status === "active" &&
     (canvas.publicationState !== "published" || canvas.currentVersionId === null);
   const actions =
-    canvas?.status === "active" ? (
+    canvas?.status === "active" && !compact ? (
       isDraft ? (
         // Draft: the two ways forward dominate — open the draft to keep editing, or
         // publish it live. No "New version" (there is no live version to replace yet).
@@ -123,8 +136,7 @@ export default function CanvasLayout() {
           <DeployButton canvasId={id} size="sm" label="Upload and publish" />
         </>
       ) : (
-        // Published: global "upload a new version" affordance — shown on every tab,
-        // distinct from the Editor tab's own "Publish" (which publishes the draft).
+        // Upload stays on management tabs; working tabs prioritize their own actions.
         <DeployButton canvasId={id} size="sm" label="Upload new version" />
       )
     ) : canvas?.status === "archived" ? (
@@ -160,6 +172,7 @@ export default function CanvasLayout() {
 
       <CanvasDetailChrome
         id={id}
+        compact={compact}
         title={title}
         url={canvas?.status === "active" ? canvas.url : undefined}
         draft={isDraft}
@@ -179,12 +192,21 @@ export default function CanvasLayout() {
                 </Badge>
               )}
               <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
-              <AccessBadge access={canvas.access} />
-              <GalleryBadge canvas={canvas} />
             </span>
           ) : null
         }
       />
+
+      {isError && canvas && (
+        <ReadError
+          title="Couldn't refresh this canvas"
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        >
+          The last loaded view is still here so you can recover your work. Access may have changed;
+          new operations are checked by the server.
+        </ReadError>
+      )}
 
       {/* Admin takedown → a shell-level read-only banner on EVERY tab. The owner can still
           read the canvas + see the reason; any edit is rejected with the DISABLED error. */}

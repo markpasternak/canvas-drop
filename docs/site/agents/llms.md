@@ -13,7 +13,7 @@ There are three ways in. Pick by what you hold.
 | You hold | Use | Reach |
 |---|---|---|
 | A per-canvas secret key (`cd_...`) | Deploy API at `{base}/v1/canvases/{id}/...` | that one canvas: deploy, read back, roll back, unpublish |
-| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 51 tools |
+| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; full management tool surface |
 | Code running inside a canvas page | Browser SDK at `{base}/sdk/v1.js`, global `canvasdrop` | the six fixed primitives for that canvas: KV, files, AI, identity, realtime, Connections |
 
 Two verbs recur below. **Publish** turns the editor draft into an immutable

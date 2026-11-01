@@ -26,6 +26,7 @@ export function CanvasDetailChrome({
   actions,
   badge,
   audience,
+  compact = false,
 }: {
   id: string;
   title?: ReactNode;
@@ -39,6 +40,7 @@ export function CanvasDetailChrome({
   badge?: ReactNode;
   /** Current audience and protection beside the link controls. */
   audience?: ReactNode;
+  compact?: boolean;
 }) {
   return (
     <header>
@@ -48,47 +50,60 @@ export function CanvasDetailChrome({
             <Skeleton className="h-9 w-56" />
           ) : (
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-              <h1 className="truncate font-display text-h1 leading-tight tracking-[var(--display-tracking)] text-fg">
+              <h1
+                className={cn(
+                  "min-w-0 break-words font-display leading-tight tracking-[var(--display-tracking)] text-fg",
+                  compact ? "text-h2" : "text-h1",
+                )}
+              >
                 {title}
               </h1>
-              {badge && <span className="shrink-0">{badge}</span>}
+              {badge && <span className="max-w-full">{badge}</span>}
             </div>
           )}
 
-          {isLoading ? (
-            <Skeleton className="h-5 w-72" />
-          ) : draft ? (
-            // A draft has no reachable page — don't dangle the public URL as if it's
-            // live. State the lifecycle plainly; the header actions (Open draft /
-            // Publish) carry the way forward.
-            <p className="flex items-center gap-1.5 text-sm text-muted">
-              <Circle size={9} weight="fill" className="text-warning" aria-hidden />
-              <span className="font-medium text-fg">Draft</span>
-              <span aria-hidden>·</span>
-              <span>not live yet — publish to make the URL reachable</span>
-            </p>
-          ) : !url ? null : (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <a
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="min-w-0 truncate rounded-md font-mono text-xs text-accent hover:underline"
-              >
-                {url}
-              </a>
-              <CopyButton
-                value={url}
-                label="Copy link"
-                toastMessage="Link copied"
-                className="h-8 shrink-0 whitespace-nowrap px-2"
-              />
-              <IconLink href={url} target="_blank" rel="noreferrer" label="Open live canvas">
-                <ArrowSquareOut size={15} weight="bold" aria-hidden />
-              </IconLink>
-            </div>
-          )}
-          {!isLoading && !draft && audience}
+          <div
+            className={
+              compact ? "flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1" : "space-y-2"
+            }
+          >
+            {isLoading ? (
+              <Skeleton className="h-5 w-72" />
+            ) : draft ? (
+              // A draft has no reachable page — don't dangle the public URL as if it's
+              // live. State the lifecycle plainly; the header actions (Open draft /
+              // Publish) carry the way forward.
+              <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted">
+                <Circle size={9} weight="fill" className="text-warning" aria-hidden />
+                <span className="font-medium text-fg">Draft</span>
+                <span aria-hidden>·</span>
+                <span>
+                  {compact ? "not published" : "not live yet — publish to make the URL reachable"}
+                </span>
+              </p>
+            ) : !url ? null : (
+              <div className="flex min-w-0 max-w-full items-center gap-1.5">
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 truncate rounded-md font-mono text-xs text-accent hover:underline"
+                >
+                  {url}
+                </a>
+                <CopyButton
+                  value={url}
+                  label="Copy link"
+                  toastMessage="Link copied"
+                  className="h-8 shrink-0 whitespace-nowrap px-2"
+                />
+                <IconLink href={url} target="_blank" rel="noreferrer" label="Open live canvas">
+                  <ArrowSquareOut size={15} weight="bold" aria-hidden />
+                </IconLink>
+              </div>
+            )}
+            {!isLoading && !draft && audience}
+          </div>
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
@@ -111,7 +126,7 @@ export function TabContentFrame({
   className?: string;
   children: ReactNode;
 }) {
-  return <div className={cn("space-y-4", className)}>{children}</div>;
+  return <div className={cn("min-w-0 space-y-4", className)}>{children}</div>;
 }
 
 export function TabEmptyState({

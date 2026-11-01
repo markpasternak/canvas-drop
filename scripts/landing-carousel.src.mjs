@@ -32,6 +32,14 @@ function setup(root) {
     const selected = embla.selectedScrollSnap();
     dots.forEach((d, i) => {
       d.setAttribute("aria-current", i === selected ? "true" : "false");
+      if (i === selected && d.parentElement) {
+        const strip = d.parentElement;
+        const left = d.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+        strip.scrollBy({
+          left: left - (strip.clientWidth - d.offsetWidth) / 2,
+          behavior: "instant",
+        });
+      }
     });
   }
 

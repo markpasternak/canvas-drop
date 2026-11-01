@@ -14,6 +14,86 @@ afterEach(() => {
 });
 
 describe("public-page browser controls", () => {
+  it("copies the original command text and exposes clipboard failure", async () => {
+    document.body.innerHTML =
+      '<article class="doc"><pre><code>pnpm install\npnpm dev</code></pre><pre class="mermaid">graph TD</pre></article>';
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    runInNewContext(NAV_CLIENT_JS, { document, navigator: { clipboard: { writeText } } });
+    const button = document.querySelector("button") as HTMLButtonElement;
+    expect(document.querySelectorAll("button")).toHaveLength(1);
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveTextContent("Copied"));
+    expect(writeText).toHaveBeenCalledWith("pnpm install\npnpm dev");
+    writeText.mockRejectedValueOnce(new Error("denied"));
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveTextContent("Copy failed"));
+  });
+  it("ranks all pages before limiting and supports arrow-key result navigation", async () => {
+    document.body.innerHTML =
+      '<div class="search"><input id="docs-search"><div id="docs-search-results"></div></div>';
+    const entries = Array.from({ length: 15 }, (_, i) => ({
+      path: `body-${i}`,
+      title: `Body ${i}`,
+      headings: [] as string[],
+      text: "Learn about MCP here",
+    }));
+    entries.push(
+      { path: "heading", title: "Integrations", headings: ["MCP setup"], text: "Connect an agent" },
+      { path: "title", title: "MCP server guide", headings: [], text: "Connect an agent" },
+      { path: "exact", title: "MCP", headings: [], text: "Connect an agent" },
+    );
+    runInNewContext(SEARCH_CLIENT_JS, {
+      document,
+      fetch: async () => ({ ok: true, json: async () => entries }),
+    });
+    const input = document.querySelector("input") as HTMLInputElement;
+    input.focus();
+    fireEvent.input(input, { target: { value: "MCP" } });
+    await waitFor(() =>
+      expect(document.querySelectorAll("#docs-search-results a")).toHaveLength(12),
+    );
+    const links = document.querySelectorAll<HTMLAnchorElement>("#docs-search-results a");
+    expect(
+      Array.from(links)
+        .slice(0, 3)
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/docs/exact", "/docs/title", "/docs/heading"]);
+    expect(document.querySelector('[role="status"]')).toHaveTextContent(
+      "18 pages; showing the 12 best matches",
+    );
+    expect(links[2]).toHaveTextContent("MCP setup");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(links[0]);
+    fireEvent.keyDown(links[0] as HTMLAnchorElement, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(links[11]);
+  });
+
+  it("announces loading and retries a failed index without reloading the page", async () => {
+    document.body.innerHTML =
+      '<div class="search"><input id="docs-search"><div id="docs-search-results"></div></div>';
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [
+          { path: "sdk/kv", title: "Storage", headings: [], text: "Store values" },
+        ],
+      });
+    runInNewContext(SEARCH_CLIENT_JS, { document, fetch });
+    const input = document.querySelector("input") as HTMLInputElement;
+    input.focus();
+    fireEvent.input(input, { target: { value: "storage" } });
+    expect(document.querySelector('[role="status"]')).toHaveTextContent("Searching documentation");
+    await waitFor(() => expect(document.querySelector("[data-search-retry]")).not.toBeNull());
+    expect(document.querySelector('[role="alert"]')).toHaveTextContent("Search unavailable");
+    fireEvent.click(document.querySelector("[data-search-retry]") as HTMLButtonElement);
+    await waitFor(() =>
+      expect(document.querySelector("#docs-search-results a")).toHaveTextContent("Storage"),
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("collapses mobile navigation, restores focus on Escape and opens on desktop", () => {
     document.body.innerHTML =
       '<details id="docs-navigation" open><summary>Browse documentation</summary><a href="/docs">Overview</a></details>';

@@ -4,6 +4,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
+import { keys } from "../lib/queries.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
 
@@ -99,6 +100,7 @@ function renderOverview() {
       </QueryClientProvider>
     </ThemeProvider>,
   );
+  return { router, qc };
 }
 
 afterEach(() => {
@@ -106,80 +108,126 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Overview Basics save — optimistic-divergence recovery", () => {
-  it("reverts the title input AND shows an error toast when the PATCH fails", async () => {
+describe("Overview details recovery", () => {
+  it("keeps failed version facts unavailable and supports retry without false empty claims", async () => {
+    let failed = true;
     mockFetch({
-      "PATCH /api/canvases/c1/settings": () =>
-        json({ code: "VALIDATION", message: "That title is not allowed." }, 422),
+      "GET /api/canvases/c1/versions": () =>
+        failed
+          ? json({ code: "UNAVAILABLE", message: "Unavailable" }, 503)
+          : json({ versions: [VERSION] }),
+    });
+    const user = userEvent.setup();
+    renderOverview();
+    await screen.findByText("Couldn’t load version details");
+    expect(screen.getAllByText("Unavailable")).toHaveLength(3);
+    expect(screen.queryByText("None yet")).toBeNull();
+    expect(screen.queryByText("None")).toBeNull();
+    expect(screen.queryByText("Not published yet")).toBeNull();
+    failed = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Published version 1" })).toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).toBeNull();
+  });
+  it.each([
+    ["Title", "Rejected Title", "Server Title"],
+    ["Description", "Rejected description", "Server description"],
+  ])(
+    "retains a rejected %s and lets the author explicitly revert",
+    async (label, attempted, original) => {
+      mockFetch({
+        "PATCH /api/canvases/c1/settings": () =>
+          json({ code: "VALIDATION", message: "Could not save details." }, 422),
+      });
+      const user = userEvent.setup();
+      renderOverview();
+      await user.click(await screen.findByText("Edit details"));
+      const input = screen.getByLabelText(label);
+      await user.clear(input);
+      await user.type(input, attempted);
+      await user.click(screen.getByRole("button", { name: "Save details" }));
+      expect(await screen.findByRole("button", { name: "Retry save" })).toBeInTheDocument();
+      expect(input).toHaveValue(attempted);
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Revert changes" }));
+      expect(input).toHaveValue(original);
+      expect(screen.getByRole("button", { name: "Save details" })).toBeDisabled();
+    },
+  );
+
+  it("retains tags after failure and retries the attempted batch", async () => {
+    let fail = true;
+    let saved = { ...CANVAS };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(saved),
+      "PATCH /api/canvases/c1/settings": () => {
+        if (fail) return json({ code: "VALIDATION", message: "Could not save tags." }, 422);
+        saved = { ...CANVAS, tags: ["alpha", "beta"] };
+        return json(saved);
+      },
     });
     const user = userEvent.setup();
     renderOverview();
     await user.click(await screen.findByText("Edit details"));
-
-    const title = (await screen.findByLabelText("Title")) as HTMLInputElement;
-    expect(title.value).toBe("Server Title");
-
-    // Edit then blur to trigger the save; the server rejects it.
-    await user.clear(title);
-    await user.type(title, "Rejected Title");
-    expect(title.value).toBe("Rejected Title");
-    title.blur();
-
-    // The save surfaces the failure as an error toast (no silent swallow)...
-    expect(await screen.findByText(/that title is not allowed/i)).toBeInTheDocument();
-    // ...and the local input snaps back to the server-truth value (not the rejected edit).
-    await vi.waitFor(() => expect(title.value).toBe("Server Title"));
+    await user.type(screen.getByLabelText("Tags"), "beta{Enter}");
+    await user.click(screen.getByRole("button", { name: "Save details" }));
+    await screen.findByRole("button", { name: "Retry save" });
+    expect(
+      within(screen.getByRole("list", { name: /current tags/i })).getByText("beta"),
+    ).toBeInTheDocument();
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Retry save" }));
+    expect(await screen.findByText("Details saved")).toBeInTheDocument();
+    expect(
+      calls.filter((call) => call.method === "PATCH").map((call) => JSON.parse(call.body ?? "{}")),
+    ).toEqual([{ tags: ["alpha", "beta"] }, { tags: ["alpha", "beta"] }]);
   });
 
-  it("reverts the TagsEditor to server tags when the PATCH fails", async () => {
+  it("keeps failed edits mounted when navigation is blocked, then discards explicitly", async () => {
     mockFetch({
       "PATCH /api/canvases/c1/settings": () =>
-        json({ code: "VALIDATION", message: "Could not save the tags." }, 422),
+        json({ code: "VALIDATION", message: "Cannot save right now." }, 422),
     });
     const user = userEvent.setup();
-    renderOverview();
+    const { router } = renderOverview();
     await user.click(await screen.findByText("Edit details"));
-
-    // Server-truth tag is present.
-    const tagList = await screen.findByRole("list", { name: /current tags/i });
-    expect(within(tagList).getByText("alpha")).toBeInTheDocument();
-
-    // Add a tag via Enter → optimistic render, then the server rejects the write.
-    const tagInput = screen.getByLabelText("Tags");
-    await user.type(tagInput, "beta{Enter}");
-
-    // The error toast fires...
-    expect(await screen.findByText(/could not save the tags/i)).toBeInTheDocument();
-    // ...and the TagsEditor reverts to the server vocabulary: the rejected tag is gone,
-    // the original stays.
-    await vi.waitFor(() => {
-      const list = screen.getByRole("list", { name: /current tags/i });
-      expect(within(list).queryByText("beta")).toBeNull();
-      expect(within(list).getByText("alpha")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Title"), " attempted");
+    await user.click(screen.getByRole("link", { name: "Gallery" }));
+    const dialog = await screen.findByRole("dialog", { name: "Save your canvas details?" });
+    await user.click(within(dialog).getByRole("button", { name: "Save and leave" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Cannot save right now");
+    expect(router.state.location.pathname).toBe("/canvases/c1");
+    expect(screen.getByLabelText("Title")).toHaveValue("Server Title attempted");
+    await user.click(within(dialog).getByRole("button", { name: "Discard and leave" }));
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/gallery"));
+  });
+  it("keeps dirty metadata mounted when a background read loses access", async () => {
+    let unavailable = false;
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        unavailable ? json({ code: "NOT_FOUND", message: "Not found" }, 404) : json(CANVAS),
     });
+    const user = userEvent.setup();
+    const { qc } = renderOverview();
+    await user.click(await screen.findByText("Edit details"));
+    await user.type(screen.getByLabelText("Title"), " unsaved");
+    unavailable = true;
+    await qc.refetchQueries({ queryKey: keys.canvas("c1") });
+    expect(await screen.findByText("Couldn't refresh this canvas")).toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toHaveValue("Server Title unsaved");
+    expect(screen.queryByText("Canvas not found")).toBeNull();
   });
 
-  it("reverts the Description field AND shows an error toast when the PATCH fails", async () => {
+  it.each([
+    [404, "Canvas not found"],
+    [503, "Couldn’t load this canvas"],
+  ])("distinguishes an initial %s from a temporary failure", async (status, title) => {
     mockFetch({
-      "PATCH /api/canvases/c1/settings": () =>
-        json({ code: "VALIDATION", message: "That description is not allowed." }, 422),
+      "GET /api/canvases/c1": () =>
+        json({ code: "UNAVAILABLE", message: "Unavailable" }, status as number),
     });
-    const user = userEvent.setup();
     renderOverview();
-    await user.click(await screen.findByText("Edit details"));
-
-    const description = (await screen.findByLabelText("Description")) as HTMLTextAreaElement;
-    expect(description.value).toBe("Server description");
-
-    // Edit then blur to trigger the save; the server rejects it.
-    await user.clear(description);
-    await user.type(description, "Rejected description");
-    expect(description.value).toBe("Rejected description");
-    description.blur();
-
-    // The save surfaces the failure as an error toast (no silent swallow)...
-    expect(await screen.findByText(/that description is not allowed/i)).toBeInTheDocument();
-    // ...and the local field snaps back to the server-truth value (not the rejected edit).
-    await vi.waitFor(() => expect(description.value).toBe("Server description"));
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Title")).toBeNull();
   });
 });

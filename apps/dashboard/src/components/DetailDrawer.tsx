@@ -3,10 +3,10 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { useExitTransition } from "../lib/use-exit-transition.js";
 
 /**
- * Right-side slide-in drawer for the detail rail below the `xl` breakpoint (U3).
+ * Right-side slide-in drawer for the detail rail below the `2xl` breakpoint (U3).
  * Mirrors the `Dialog` focus contract — moves focus into the panel on open, traps
  * Tab, closes on Escape + scrim click (restoring focus), and locks body scroll —
- * but presents as a full-height right sheet instead of a centered modal. The `xl`
+ * but presents as a full-height right sheet instead of a centered modal. The `2xl`
  * inline rail renders the same `DetailPanel` directly without this chrome.
  *
  * `onClose` is what clears the selection on the route (Escape / scrim / the close
@@ -78,7 +78,7 @@ export function DetailDrawer({
   if (!mounted) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end xl:hidden" role="presentation">
+    <div className="fixed inset-0 z-50 flex justify-end 2xl:hidden" role="presentation">
       {/* The scrim is the sole dismissal layer: it sits above this container in the
           stacking order and covers it, so an outside click always lands on the scrim
           (not here). Close from the scrim's own mousedown so clicking the backdrop
@@ -108,7 +108,7 @@ export function DetailDrawer({
             onClick={onClose}
             aria-label="Close details"
             data-autofocus
-            className="inline-flex size-8 items-center justify-center rounded-md text-muted outline-none transition-colors hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/50"
+            className="cd-touch-target inline-flex size-8 items-center justify-center rounded-md text-muted outline-none transition-colors hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/50"
           >
             <X size={18} weight="bold" aria-hidden />
           </button>

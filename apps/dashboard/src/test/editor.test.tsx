@@ -172,11 +172,9 @@ describe("Editor route", () => {
     expect(await screen.findByText("index.html")).toBeInTheDocument();
     const editor = await screen.findByTestId("code-editor");
     await waitFor(() => expect((editor as HTMLTextAreaElement).value).toContain("hi"));
-    // The Editor tab shows two distinct publish affordances: the editor bar's
-    // "Publish" (publishes the draft) and the global header "New version" (uploads
-    // fresh files as a new version), shown on every tab.
+    // Working context gives the draft publish action priority over direct upload.
     expect(screen.getByRole("button", { name: "Review and publish" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload new version" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload new version" })).toBeNull();
   });
 
   it("shows the stale notice when a newer version was published under the draft", async () => {

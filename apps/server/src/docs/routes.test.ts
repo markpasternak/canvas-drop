@@ -81,7 +81,7 @@ describe("docs routes", () => {
     expect(res.headers.get("content-type")).toContain("javascript");
     const js = await res.text();
     expect(js).toContain("has-js");
-    expect(js).toContain("No matches.");
+    expect(js).toContain("No matching pages. Try another term.");
     expect(js).toContain("Search unavailable.");
   });
 

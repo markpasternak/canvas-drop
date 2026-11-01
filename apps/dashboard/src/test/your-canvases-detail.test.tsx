@@ -369,10 +369,10 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
   });
 
   /** Force the xl breakpoint so the INLINE sticky rail (no scrim) renders instead of
-   *  the drawer. matchMedia is read by useMediaQuery("(min-width: 1280px)"). */
+   *  the drawer. matchMedia is read by useMediaQuery("(min-width: 1536px)"). */
   function stubXl() {
     vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query.includes("1280"),
+      matches: query.includes("1536"),
       media: query,
       onchange: null,
       addListener: () => {},

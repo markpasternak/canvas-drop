@@ -431,18 +431,8 @@ export function CanvasCard({
               F1/R15) — the grid card's counterpart to the list row's meta line. */}
           {ownerBadge(canvas) && <ConceptBadge concept="shared">{ownerBadge(canvas)}</ConceptBadge>}
           <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
-          {!isRestrictedRung(canvas.access) && <AccessBadge access={canvas.access} />}
-          {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
-          {canvas.hasPassword && (
-            <ConceptBadge concept="protected">
-              <LockSimple size={12} weight="bold" aria-hidden />
-              Protected
-            </ConceptBadge>
-          )}
         </>
       }
-      tags={canvasTags(canvas)}
-      description={canvas.description}
       topLeft={
         selectable ? (
           <input

@@ -71,6 +71,23 @@ beforeEach(() => {
 });
 
 describe("dashboard app", () => {
+  it("keeps Canvases active with query filters and exposes command search", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    renderApp("/?q=budget&selected=c1");
+    const home = await screen.findByRole("link", { name: "Canvases" });
+    expect(home).toHaveAttribute("aria-current", "page");
+    await userEvent.click(screen.getByRole("button", { name: "Search commands and canvases" }));
+    expect(await screen.findByRole("combobox", { name: "Command palette" })).toBeInTheDocument();
+  });
   it("renders the shell and, with zero canvases, the onboarding first-run page", async () => {
     vi.stubGlobal(
       "fetch",

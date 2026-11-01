@@ -112,8 +112,7 @@ a real org's load; treat it as ready to self-host and evaluate, not as
 battle-tested.
 
 Not in v1: a CLI (the Deploy API, MCP server, and agent skill cover programmatic
-deploys), custom domains, multi-org tenancy, an audit-log viewer in the admin
-panel, KV change subscriptions, and realtime message history.
+deploys), custom domains, multi-org tenancy, KV change subscriptions, and realtime message history.
 
 ## Where to go next
 

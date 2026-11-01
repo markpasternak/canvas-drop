@@ -424,7 +424,7 @@ ${siteHeader({ action: { href: cta.href, label: cta.short } })}
       <div class="viewport" data-embla-viewport tabindex="0" role="region" aria-label="Product screens"><div class="embla-container">${TOUR.map(tourSlide).join("\n")}</div></div>
       <div class="tour-controls" data-embla-controls hidden>
         <button class="btn btn-outline" type="button" data-embla-prev aria-label="Previous screen">Previous</button>
-        <div class="dots" role="group" aria-label="Choose screen">${TOUR.map((t, i) => `<button class="dot" type="button" data-embla-dot aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}</div>
+        <div class="dots" role="group" aria-label="Choose walkthrough topic">${TOUR.map((t, i) => `<button class="dot" type="button" data-embla-dot aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}>${escapeHtml(t.label)}</button>`).join("\n")}</div>
         <button class="btn btn-outline" type="button" data-embla-next aria-label="Next screen">Next</button>
       </div>
     </div>
@@ -443,7 +443,7 @@ ${siteHeader({ action: { href: cta.href, label: cta.short } })}
   <section class="section section-tint">
     <div class="wrap split">
       <div><p class="kicker">Built for teams</p><h2 class="s-head">A small tool.<br>A proper home.</h2><p class="s-sub">Your sign-in, your workspace, your rules. Give colleagues room to build, with the controls your organization needs.</p><div class="feats">${TEAM.map(featItem).join("\n")}</div></div>
-      <div><p class="kicker">Restricted by default</p><h2 class="s-head">Yours to run.<br>Yours to trust.</h2><p class="s-sub">Open source under the MIT license. Self-host with Docker on a VPS or your own cloud. SQLite or Postgres, local disk or S3: each a config change.</p><div class="feats">${PRIVACY.map(featItem).join("\n")}</div><div class="cta-row"><a class="btn btn-outline" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a><a class="btn btn-outline" href="/docs">Self-host guide ${arrow}</a></div></div>
+      <div><p class="kicker">Restricted by default</p><h2 class="s-head">Yours to run.<br>Yours to trust.</h2><p class="s-sub">Open source under the MIT license. Self-host with Docker on a VPS or your own cloud. SQLite or Postgres, local disk or S3: each a config change.</p><div class="feats">${PRIVACY.map(featItem).join("\n")}</div><div class="cta-row"><a class="btn btn-outline" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a><a class="btn btn-outline" href="/docs/self-hosting/install">Self-host guide ${arrow}</a></div></div>
     </div>
   </section>
 </main>

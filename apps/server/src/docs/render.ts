@@ -71,6 +71,13 @@ const DOCS_STYLES = `${SITE_STYLES}
     display: block; min-height: 44px; padding: .6rem .65rem; font-size: .875rem; color: var(--fg); text-decoration: none;
   }
   .search-results a:hover { background: var(--surface-sunken); }
+  .search-results a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--surface-sunken); }
+  .search-results strong, .search-results a span { display: block; }
+  .search-results a span { margin-top: .25rem; color: var(--muted); font-size: .8125rem; line-height: 1.45; }
+  .search-count { margin: 0; padding: .6rem .65rem; border-bottom: 1px solid var(--border); color: var(--muted); font-size: .8125rem; }
+  .search-results button, .copy-command { min-height: 44px; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: .5rem; font: inherit; font-size: .875rem; color: var(--fg); background: var(--surface); cursor: pointer; }
+  .search-results button { margin: 0 .65rem .65rem; }
+  .search-results button:hover, .copy-command:hover { background: var(--surface-sunken); }
   .search-results .empty { color: var(--subtle); }
   nav.toc h2 { margin: 1.5rem 0 .5rem; font-size: .8125rem; font-weight: 600; color: var(--fg); }
   nav.toc ul { list-style: none; margin: 0 0 .5rem; padding: 0; }
@@ -101,6 +108,13 @@ const DOCS_STYLES = `${SITE_STYLES}
   .doc code { font-size: .85em; background: var(--surface-sunken); padding: .1em .35em; border-radius: .3rem; }
   .doc pre { margin: 1rem 0; padding: 1rem; overflow-x: auto; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: .6rem; }
   .doc pre code { background: none; padding: 0; font-size: .8125rem; line-height: 1.5; }
+  .copy-command { display: block; margin-top: 1rem; margin-left: auto; }
+  .copy-command + pre { margin-top: .35rem; }
+  .page-outline { margin-block: 1.5rem; border-block: 1px solid var(--border); padding-block: .75rem; }
+  .page-outline summary { cursor: pointer; font-weight: 550; min-height: 2rem; }
+  .page-outline ol { list-style: none; padding: 0; margin: .5rem 0; }
+  .page-outline a { display: block; padding-block: .35rem; font-size: .875rem; }
+  .page-outline .subheading { padding-left: 1rem; }
   .doc-table { margin: 1.5rem 0; overflow-x: auto; border: 1px solid var(--border); border-radius: calc(.6rem * var(--radius-scale)); }
   .doc table { width: 100%; min-width: 36rem; border-collapse: collapse; font-size: .875rem; overflow-wrap: normal; }
   .doc th, .doc td { min-width: 9rem; text-align: left; vertical-align: top; padding: .75rem 1rem; border-bottom: 1px solid var(--border); overflow-wrap: break-word; }
@@ -210,7 +224,16 @@ export function renderDocPage(
   if (!page) return null;
   // The precompiled sanitizer emits plain <table> tags. Keep native table layout
   // inside a separate scroll region so narrow screens cannot crush its columns.
+  const outline =
+    page.headings.length >= 4
+      ? `<details class="page-outline"><summary>On this page</summary><nav aria-label="On this page"><ol>${page.headings.map((heading) => `<li${heading.level === 3 ? ' class="subheading"' : ""}><a href="#${escapeHtml(heading.id)}">${escapeHtml(heading.text)}</a></li>`).join("")}</ol></nav></details>`
+      : "";
   const content = page.html
+    .replace(
+      /(<h1[^>]*>[\s\S]*?<\/h1>(?:\s*<p>[\s\S]*?<\/p>)?)/,
+      (opening) => `${opening}${outline}`,
+    )
+    .replace(/<(h[23]) id="([^"]+)"/g, '<$1 tabindex="-1" id="$2"')
     .replaceAll(
       "<table>",
       '<div class="doc-table" role="region" aria-label="Scrollable table" tabindex="0"><table>',

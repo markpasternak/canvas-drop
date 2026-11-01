@@ -41,7 +41,9 @@ function canvas(over: Record<string, unknown> = {}) {
   };
 }
 
-function stub(opts: { isAdmin?: boolean; canvases?: Array<ReturnType<typeof canvas>> } = {}) {
+function stub(
+  opts: { isAdmin?: boolean; canvases?: Array<ReturnType<typeof canvas>>; failure?: boolean } = {},
+) {
   const all = opts.canvases ?? [];
   vi.stubGlobal(
     "fetch",
@@ -62,11 +64,22 @@ function stub(opts: { isAdmin?: boolean; canvases?: Array<ReturnType<typeof canv
           authMode: "dev",
         });
       }
+      if (opts.failure)
+        return new Response(JSON.stringify({ code: "TEMPORARY", message: "Unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      const q = u.searchParams.get("q")?.toLowerCase() ?? "";
+      const matched = all.filter((item) =>
+        `${item.title} ${item.description ?? ""} ${item.slug}`.toLowerCase().includes(q),
+      );
+      const offset = Number(u.searchParams.get("offset") ?? 0);
+      const limit = Number(u.searchParams.get("limit") ?? 24);
       return json({
-        canvases: all,
-        total: all.length,
-        limit: 24,
-        offset: 0,
+        canvases: matched.slice(offset, offset + limit),
+        total: matched.length,
+        limit,
+        offset,
         summary: {
           active: all.length,
           archived: 0,
@@ -101,6 +114,8 @@ function renderPalette() {
   const routeTree = rootRoute.addChildren([
     leaf("/"),
     leaf("/gallery"),
+    leaf("/shared"),
+    leaf("/teams"),
     leaf("/admin"),
     leaf("/new"),
     leaf("/canvases/$id"),
@@ -177,7 +192,7 @@ describe("CommandPalette", () => {
     const input = await openPalette();
     await userEvent.type(input, "zzzzz");
     expect(screen.queryAllByRole("option")).toHaveLength(0);
-    expect(screen.getByText(/No matching commands/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No matching commands/i)).toBeInTheDocument();
   });
 
   it("ArrowDown/ArrowUp move the highlight; Enter runs the highlighted command", async () => {
@@ -244,5 +259,57 @@ describe("CommandPalette", () => {
     const option = await screen.findByRole("option", { name: /Reporting dashboard/ });
     await userEvent.click(option);
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/jump1"));
+  });
+  it("finds a canvas beyond the first library page through server search, including description matches", async () => {
+    stub({
+      canvases: [
+        ...Array.from({ length: 55 }, (_, index) =>
+          canvas({ id: `c-${index}`, title: `Canvas ${index}` }),
+        ),
+        canvas({ id: "later", title: "Planning report", description: "Quarterly budget" }),
+      ],
+    });
+    renderPalette();
+    const input = await openPalette();
+    await userEvent.type(input, "budget");
+    expect(await screen.findByRole("option", { name: /Planning report/ })).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("q=budget"))).toBe(
+      true,
+    );
+  });
+
+  it("loads subsequent matching pages and includes Shared and Teams commands", async () => {
+    stub({
+      canvases: Array.from({ length: 26 }, (_, index) =>
+        canvas({ id: `c-${index}`, title: `Budget ${index}` }),
+      ),
+    });
+    renderPalette();
+    const input = await openPalette();
+    expect(screen.getByRole("option", { name: "Go to Shared" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Go to Teams" })).toBeInTheDocument();
+    await userEvent.type(input, "budget");
+    const more = await screen.findByRole("button", { name: "Load more canvases" });
+    expect(screen.queryByRole("option", { name: /Budget 25/ })).toBeNull();
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Close command search" })).toHaveFocus();
+    await userEvent.tab();
+    expect(more).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("option", { name: /Budget 25/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more canvases" })).toBeNull();
+  });
+
+  it("distinguishes a failed search from an empty result and retries", async () => {
+    const options = { failure: true };
+    stub(options);
+    renderPalette();
+    const input = await openPalette();
+    await userEvent.type(input, "budget");
+    const retry = await screen.findByRole("button", { name: "Retry canvas search" });
+    expect(screen.queryByText(/No matching commands/)).toBeNull();
+    options.failure = false;
+    await userEvent.click(retry);
+    expect(await screen.findByText(/No matching commands or canvases/)).toBeInTheDocument();
   });
 });

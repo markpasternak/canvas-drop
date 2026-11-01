@@ -120,13 +120,12 @@ describe("CanvasGridCard — the unified cover-fills-card", () => {
     expect(screen.getAllByText("Budget chart")).toHaveLength(1);
   });
 
-  it("backs the overlaid text + actions on LOCAL translucent surfaces (readability on any preview)", () => {
+  it("keeps the caption on a themed opaque surface and actions above the preview", () => {
     const { container } = renderGridCard();
-    // The bottom safe-zone panel + the actions pill are frosted translucent surfaces
-    // (backdrop-blur on a semi-opaque fill) so text reads on bright/dark/busy covers.
-    const frosted = container.querySelectorAll(".backdrop-blur-md");
-    // At least the bottom content panel and the top-right actions surface.
-    expect(frosted.length).toBeGreaterThanOrEqual(2);
+    const name = screen.getByRole("link", { name: "Open Budget chart" });
+    expect(name.className).toContain("text-fg");
+    expect(name.closest("li")?.className).toContain("bg-surface");
+    expect(container.querySelectorAll(".backdrop-blur-md")).toHaveLength(1);
   });
 
   it("keeps the actions subordinate — the name link is the a11y-primary control, not the actions", () => {
@@ -163,8 +162,8 @@ describe("CanvasGridCard — the unified cover-fills-card", () => {
       );
       expect(screen.getByRole("link", { name: "Open Themed" })).toBeInTheDocument();
       expect(screen.getByText("Reads in both modes.")).toBeInTheDocument();
-      // The frosted overlay surface is present in both themes (it rides the image).
-      expect(container.querySelector(".backdrop-blur-md")).not.toBeNull();
+      // Captions follow the active theme; preview imagery cannot wash out the text.
+      expect(container.querySelector("li.bg-surface")).not.toBeNull();
       unmount();
     }
   });
