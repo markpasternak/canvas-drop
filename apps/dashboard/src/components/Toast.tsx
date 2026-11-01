@@ -9,7 +9,7 @@ const ToastContext = createContext<ToastFn | null>(null);
 
 let nextId = 1;
 
-/** Most simultaneous toasts to keep on screen (newest win). */
+/** Only routine confirmations expire or are displaced by newer confirmations. */
 const MAX_TOASTS = 3;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -36,8 +36,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       }, ms);
       timersRef.current.add(handle);
     };
-    // Cap the stack so a burst of failures can't pile up off-screen.
-    setToasts((t) => [...t, { id, message, tone }].slice(-MAX_TOASTS));
+    setToasts((t) => {
+      // Repeat failures need one readable message, not an ever-growing stack.
+      if (tone === "error" && t.some((x) => x.tone === tone && x.message === message)) return t;
+      const next = [...t, { id, message, tone }];
+      const confirmations = next.filter((x) => x.tone !== "error").slice(-MAX_TOASTS);
+      return next.filter((x) => x.tone === "error" || confirmations.includes(x));
+    });
+    if (tone === "error") return;
     arm(() => {
       // Two phase: mark exiting (data-state="closed" plays the exit anim), then
       // remove after the exit delay. Reduced-motion collapses the anim to ~0ms,
@@ -59,6 +65,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       }
     >
       {t.message}
+      {t.tone === "error" && (
+        <button
+          type="button"
+          aria-label={`Dismiss notification: ${t.message}`}
+          className="ml-3 min-h-11 shrink-0 rounded-md px-2 font-medium underline underline-offset-4"
+          onClick={() => setToasts((items) => items.filter((item) => item.id !== t.id))}
+        >
+          Dismiss
+        </button>
+      )}
     </div>
   );
 
@@ -69,7 +85,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           screen reader (role=alert / assertive); confirmations wait their turn
           (role=status / polite). Swapping a single region's role dynamically can
           make AT miss the new content, so we keep both mounted and stack them. */}
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[60] flex max-h-[50dvh] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center gap-2 overflow-y-auto">
         <div role="status" aria-live="polite" className="flex flex-col items-center gap-2">
           {toasts.filter((t) => t.tone !== "error").map(toastItem)}
         </div>
