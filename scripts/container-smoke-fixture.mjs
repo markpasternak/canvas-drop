@@ -128,7 +128,7 @@ if (mode === "seed") {
   console.log(`backup fidelity: ${expected.length} tables and ${keys.length} blob checked`);
 } else if (mode === "http") {
   const origin = "http://127.0.0.1:3000";
-  const headers = { Host: "canvas.example.com" };
+  const headers = { Host: "localhost:3000" };
   let healthy = false;
   for (let attempt = 0; attempt < 60; attempt++) {
     try {
@@ -163,6 +163,18 @@ if (mode === "seed") {
     assert.ok(response.headers.get("content-type")?.startsWith(type), `${path} content type`);
     assert.ok((await response.arrayBuffer()).byteLength > 100, `${path} is empty`);
   }
+  const discovery = await fetch(`${origin}/.well-known/oauth-authorization-server`, {
+    headers,
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(discovery.status, 200, "MCP OAuth discovery is unavailable");
+  assert.equal((await discovery.json()).issuer, "http://localhost:3000/");
+  const mcp = await fetch(`${origin}/mcp`, {
+    method: "POST",
+    headers,
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(mcp.status, 401, "MCP must reject requests without a bearer token");
   const signedInHeaders = {
     ...headers,
     "X-Auth-Request-Email": "smoke@example.com",
@@ -183,7 +195,7 @@ if (mode === "seed") {
   });
   assert.equal(bundle.status, 200, "built dashboard bundle missing");
   assert.ok((await bundle.arrayBuffer()).byteLength > 1000);
-  console.log("compiled server: health, docs/landing assets, skill ZIP and dashboard passed");
+  console.log("compiled server: health, assets, skill ZIP, MCP and dashboard passed");
 } else {
   throw new Error(`unknown container smoke mode: ${mode}`);
 }

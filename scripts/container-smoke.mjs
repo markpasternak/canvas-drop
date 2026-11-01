@@ -22,9 +22,14 @@ const config = [
   "-e",
   "CANVAS_DROP_SESSION_SECRET=ci-smoke-only-not-a-deployed-secret-00000000",
   "-e",
-  "CANVAS_DROP_URL_MODE=subdomain",
+  "CANVAS_DROP_URL_MODE=path",
   "-e",
-  "CANVAS_DROP_BASE_URL=http://canvas.example.com",
+  "CANVAS_DROP_BASE_URL=http://localhost:3000",
+  // The disposable fixture has no published ports. Localhost is the HTTP
+  // exception allowed by the MCP OAuth issuer, and path mode needs explicit
+  // acknowledgement with proxy auth even in this isolated compatibility drill.
+  "-e",
+  "CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true",
   "-e",
   "CANVAS_DROP_SQLITE_PATH=/data/source.db",
   "-e",
