@@ -94,7 +94,7 @@ A same-major pnpm maintenance bump to **11.28.9** is reasonable, with no pnpm 12
 - `.github/workflows/ci.yml` `PNPM_VERSION`;
 - the explicit versions in `docs/site/quickstart.md` and `docs/site/self-hosting/install.md` (and rebuild generated docs).
 
-Use `corepack pnpm ...` in the new worktree to select the declared version; do not globally upgrade the user's pnpm/Node installations. If version 11.28.9 produces unexpected lockfile-format or build-approval changes, keep 11.0.9 for this PR and record the toolchain migration separately rather than changing security posture to make installation pass.
+Use `pnpm ...` in the new worktree and verify `pnpm --version` reports the declared 11.28.9; the local pnpm shim selects it automatically. Do not globally upgrade the user's pnpm/Node installations. The host has a mise-managed pnpm 12 executable: running through Corepack exports an invocation marker that prevents this nested executable from switching to the project version, so nested package scripts fail with `ERR_PNPM_BAD_PM_VERSION`. Direct pnpm invocation preserves the strict version check and succeeds. CI installs the pinned pnpm using action-setup; Docker activates that same version via Corepack and has no competing mise binary. If version 11.28.9 produces unexpected lockfile-format or build-approval changes, keep 11.0.9 for this PR and record the toolchain migration separately rather than changing security posture to make installation pass.
 
 ## Transitive resolution and overrides
 
@@ -127,21 +127,21 @@ Do **not** add a deepmerge 4.3.2 override: that version was not published (regis
 Run from the fresh maintenance worktree after the manifest edits above. The commands are a future execution recipe, not actions already performed.
 
 ```sh
-corepack pnpm --version
-corepack pnpm install --lockfile-only --no-frozen-lockfile
-corepack pnpm audit --json > /tmp/canvas-dependency-after-resolution.json
-corepack pnpm why -r zod nodemailer undici fast-uri body-parser seroval @hono/node-server deepmerge katex
+pnpm --version
+pnpm install --lockfile-only --no-frozen-lockfile
+pnpm audit --json > /tmp/canvas-dependency-after-resolution.json
+pnpm why -r zod nodemailer undici fast-uri body-parser seroval @hono/node-server deepmerge katex
 ```
 
 Inspect the lockfile diff, advisory output, dependency origins, engines, peer-resolution warnings, and native optional packages before continuing. Fix manifest/override inconsistencies, then resolve again only if the files changed. Once reviewed:
 
 ```sh
-corepack pnpm install --frozen-lockfile
-corepack pnpm exec playwright install chromium
-corepack pnpm docs:build
-corepack pnpm docs:mermaid
-corepack pnpm landing:carousel
-corepack pnpm build
+pnpm install --frozen-lockfile
+pnpm exec playwright install chromium
+pnpm docs:build
+pnpm docs:mermaid
+pnpm landing:carousel
+pnpm build
 ```
 
 Required tracked generated output:
@@ -159,13 +159,13 @@ Use `pnpm test:file` via the supervised runner. **Never mix dashboard and server
 Representative bounded checks (separate calls, sequential; omit redundant reruns once full gates pass):
 
 ```sh
-corepack pnpm test:file -- scripts/test-runner.test.mjs scripts/build-docs.test.mjs scripts/landing-carousel.test.mjs
-corepack pnpm test:file -- packages/shared/src/config/env.test.ts packages/shared/src/capabilities/index.test.ts apps/server/src/auth/proxy.test.ts apps/server/src/auth/oidc.test.ts apps/server/src/auth/session.test.ts
-corepack pnpm test:file -- apps/server/src/mcp/server.test.ts apps/server/src/mcp/provider.test.ts apps/server/src/mcp/routes.test.ts apps/server/src/email/smtp.test.ts apps/server/src/email/templates.test.ts apps/server/src/ai/provider.test.ts
-corepack pnpm test:file -- apps/server/src/db/db.test.ts apps/server/src/db/migrate-populated.test.ts apps/server/src/ops/backup.test.ts apps/server/src/storage/s3.test.ts
-corepack pnpm test:file -- apps/server/src/docs/render.test.ts apps/server/src/docs/integrity.test.ts apps/server/src/docs/routes.test.ts apps/server/src/http/landing-page.test.ts
-corepack pnpm test:file -- apps/dashboard/src/test/new.test.tsx apps/dashboard/src/test/create-recovery.test.tsx apps/dashboard/src/test/create-preview.test.tsx apps/dashboard/src/test/editor.test.tsx apps/dashboard/src/test/code-editor.test.tsx apps/dashboard/src/test/versions.test.tsx
-corepack pnpm test:file -- apps/dashboard/src/test/native-select.test.tsx apps/dashboard/src/test/people-email-combobox.test.tsx apps/dashboard/src/test/gallery.test.tsx apps/dashboard/src/test/filters.test.tsx
+pnpm test:file -- scripts/test-runner.test.mjs scripts/build-docs.test.mjs scripts/landing-carousel.test.mjs
+pnpm test:file -- packages/shared/src/config/env.test.ts packages/shared/src/capabilities/index.test.ts apps/server/src/auth/proxy.test.ts apps/server/src/auth/oidc.test.ts apps/server/src/auth/session.test.ts
+pnpm test:file -- apps/server/src/mcp/server.test.ts apps/server/src/mcp/provider.test.ts apps/server/src/mcp/routes.test.ts apps/server/src/email/smtp.test.ts apps/server/src/email/templates.test.ts apps/server/src/ai/provider.test.ts
+pnpm test:file -- apps/server/src/db/db.test.ts apps/server/src/db/migrate-populated.test.ts apps/server/src/ops/backup.test.ts apps/server/src/storage/s3.test.ts
+pnpm test:file -- apps/server/src/docs/render.test.ts apps/server/src/docs/integrity.test.ts apps/server/src/docs/routes.test.ts apps/server/src/http/landing-page.test.ts
+pnpm test:file -- apps/dashboard/src/test/new.test.tsx apps/dashboard/src/test/create-recovery.test.tsx apps/dashboard/src/test/create-preview.test.tsx apps/dashboard/src/test/editor.test.tsx apps/dashboard/src/test/code-editor.test.tsx apps/dashboard/src/test/versions.test.tsx
+pnpm test:file -- apps/dashboard/src/test/native-select.test.tsx apps/dashboard/src/test/people-email-combobox.test.tsx apps/dashboard/src/test/gallery.test.tsx apps/dashboard/src/test/filters.test.tsx
 ```
 
 Confirm exact test paths exist after the UX merge before running; use the full suite instead of making up an alternate path. SMTP tests currently mock Nodemailer, so add/use a small **real package, no-network JSON-transport** smoke check for normal sender/recipient, envelope, and HTML/text behavior; do not send email. No live Anthropic, SMTP, OIDC, or S3 production calls. The existing AI/type and mocked service tests establish API compatibility; CI provides real isolated Postgres/S3-compatible coverage.
@@ -173,7 +173,7 @@ Confirm exact test paths exist after the UX merge before running; use the full s
 After Playwright installation, exercise the existing product capture integration (not an ad-hoc browser automation script):
 
 ```sh
-CANVAS_DROP_TEST_SCREENSHOTS=1 CANVAS_DROP_TEST_MAX_WORKERS=1 corepack pnpm test:file -- apps/server/src/screenshots/capture.integration.test.ts --testTimeout=90000 --hookTimeout=90000
+CANVAS_DROP_TEST_SCREENSHOTS=1 CANVAS_DROP_TEST_MAX_WORKERS=1 pnpm test:file -- apps/server/src/screenshots/capture.integration.test.ts --testTimeout=90000 --hookTimeout=90000
 ```
 
 The screenshot tests cover real Chromium rendition dimensions/top-of-page behavior, host resolution, and the network fence. Separately exercise the normal local screenshot worker with compact content plus a fixed-width canvas and verify output manually, preserving the UX round's 900×600/DPR2 and wide fallback behavior.
@@ -208,12 +208,12 @@ Primary evidence: [Mermaid12 release](https://github.com/mermaid-js/mermaid/rele
 - Full local `lint`, `typecheck`, dual-dialect plus dashboard `test`, build, and generated parity must pass on the final diff. Prefer the standard worker budget when the machine is free; use the documented one-worker invocation under contention, without committing timeout relaxations:
 
 ```sh
-corepack pnpm lint
-corepack pnpm typecheck
-CANVAS_DROP_TEST_MAX_WORKERS=1 corepack pnpm test --testTimeout=90000 --hookTimeout=90000
-corepack pnpm build
-corepack pnpm audit --json > /tmp/canvas-dependency-final-audit.json
-corepack pnpm outdated -r --format json > /tmp/canvas-dependency-final-outdated.json
+pnpm lint
+pnpm typecheck
+CANVAS_DROP_TEST_MAX_WORKERS=1 pnpm test --testTimeout=90000 --hookTimeout=90000
+pnpm build
+pnpm audit --json > /tmp/canvas-dependency-final-audit.json
+pnpm outdated -r --format json > /tmp/canvas-dependency-final-outdated.json
 ```
 
 - Re-run generators once after staging their intended outputs and check **unstaged** diff is empty for generated-content.ts, mermaid.js and landing-carousel.js. CI must also regenerate docs/Mermaid without drift. A resolved lockfile alone cannot prove served bundles are patched.

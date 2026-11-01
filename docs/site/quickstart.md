@@ -9,7 +9,7 @@ URL mode, and `dev` auth that signs you in automatically.
 ## Run an instance locally
 
 You need Node 24 or newer (`.nvmrc` says `24`) and pnpm; the repo pins
-`pnpm@11.0.9` in `package.json`.
+`pnpm@11.28.9` in `package.json`.
 
 ```sh
 git clone https://github.com/markpasternak/canvas-drop.git

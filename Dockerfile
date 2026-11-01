@@ -19,7 +19,7 @@ RUN apt-get update \
 # pnpm via corepack, pinned to the repo's packageManager.
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@11.0.9 --activate
+RUN corepack enable && corepack prepare pnpm@11.28.9 --activate
 
 # Whole workspace (the .dockerignore keeps node_modules/dist/.env/.git out), then
 # install + build in topo order (shared → sdk → dashboard → server).
