@@ -1,7 +1,7 @@
 # Full-scope UX reliability, workspace and publishing round
 
 Date: 2026-11-01 · Issue: [#148](https://github.com/markpasternak/canvas-drop/issues/148)
-Status: implementation and local verification complete; required PR CI and authorized merge are the remaining release gates.
+Status: completed. [PR #149](https://github.com/markpasternak/canvas-drop/pull/149) squash-merged as `4b8fc645bc942e6e6a4805c21fb27e4187eb10c5` after green CI. Issue #148 is closed; main was pulled clean.
 Integration branch: `feat/ux-full-scope-2026-11`.
 
 ## Outcome
@@ -226,7 +226,7 @@ One Impeccable detector run over 61 files found no issues before the footer and
 dropdown follow-up. The earlier independent visual/language finisher reviewed nine captures
 under its disclosed generic/degraded contract and returned “ship”; the documenter
 preserved the existing design authority and reported older drift without repairing it.
-The combined full suite also passed; required PR CI remains the authoritative merge gate.
+The combined full suite also passed; required PR CI also passed before merge.
 
 ### U6 — Independent review and release (root)
 
@@ -237,15 +237,15 @@ The combined full suite also passed; required PR CI remains the authoritative me
       the full gate remains the next item.
 - [x] `pnpm lint`, `pnpm typecheck`, full `pnpm test` (SQLite + PGlite + dashboard), build,
       generated docs and Mermaid parity pass before push.
-- [ ] Open one PR closing #148; wait for every required CI job (including real PostgreSQL
+- [x] Open one PR closing #148; wait for every required CI job (including real PostgreSQL
       and S3-compatible smoke tests), fix failures, squash merge and delete branch.
-- [ ] Update tracking checklist after merge, pull clean main and report merge/test evidence.
+- [x] Update tracking checklist after merge, pull clean main and report merge/test evidence.
 
 Final local gates passed after the dropdown changes: lint (837 files), typecheck,
 build, generated-docs parity, bundled-Mermaid parity, and the full suite. The final
 run passed 3,620 root tests (193 files; nine skipped in two files) and 880 dashboard
 tests (91 files). This includes the corrected stable landing-region assertion and
-all dropdown regressions. Required PR CI and merge remain release gates.
+all dropdown regressions. All required CI jobs, including real PostgreSQL/S3-compatible tests and secret scanning, passed. PR #149 merged and the tracking checklist is complete.
 
 ## Retained behavior and deliberate boundaries
 

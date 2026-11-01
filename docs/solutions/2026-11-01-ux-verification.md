@@ -285,8 +285,11 @@ These were reported rather than turned into new design rules.
 ## Release gates and limits
 
 Integrated journeys, visual checks, image refreshes and independent reviews are
-complete, and the full local suite is green. Pending: required PR CI, squash merge
-and post-merge status/checklist updates. No merge success is claimed at this snapshot.
+complete, and the full local suite is green. All required CI and secret-scan jobs
+passed for `ce7656e7ab475b208784783f99d9174fdcd81f85`. [PR #149](https://github.com/markpasternak/canvas-drop/pull/149)
+was squash-merged as `4b8fc645bc942e6e6a4805c21fb27e4187eb10c5` on 1 November.
+Issue #148 is closed with its checklist complete, the remote branch was deleted
+by GitHub, and the shared main checkout was pulled clean. No production deployment occurred.
 
 Physical-device touch, real screen-reader/voice operation, live OIDC identity-provider
 sessions and production load are outside the available local evidence. Semantic

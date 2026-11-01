@@ -7,10 +7,15 @@ The [full-scope UX round](plans/2026-11-01-001-feat-full-scope-ux-plan.md), trac
 and editor recovery, draft-first publishing, read-only version comparison, discovery,
 access and administration, public documentation, and responsive visual polish.
 The [verification ledger](solutions/2026-11-01-ux-verification.md) records screen
-coverage, independent review findings and test evidence. Implementation and local
-verification are complete (4,500 passing tests); required PR CI and merge are the
-remaining release gates.
+coverage, independent review findings and test evidence. The round shipped in
+[PR #149](https://github.com/markpasternak/canvas-drop/pull/149) after 4,500 local tests
+and all required CI checks passed; issue #148 is closed.
 This round does not deploy to production or close the deferred M10 pilot/load test.
+
+The separate [dependency maintenance round](plans/2026-11-01-002-chore-dependency-maintenance-plan.md)
+is active under [issue #150](https://github.com/markpasternak/canvas-drop/issues/150).
+It addresses package advisories and compatible upgrades, with disruptive major
+migrations deferred and no production deployment.
 
 **v1 is feature-complete**, built unit by unit from [`BUILD_BRIEF.md`](../BUILD_BRIEF.md) with CI green on both dialects at every merge. Milestones M1 through M9 are shipped: foundation, hosting and deploy, the dashboard, canvas management, the editor and draft/publish model, the original five primitives and the SDK, admin and hardening, the gallery, and AI and realtime.
 
