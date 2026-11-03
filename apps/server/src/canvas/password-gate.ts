@@ -50,6 +50,23 @@ function verifyGrant(secret: string, canvas: Canvas, cookieValue: string | undef
 }
 
 /**
+ * Check a gate submission. The exact input is tried first, so a password whose owner
+ * set it with surrounding spaces keeps working. If that fails and the input carries
+ * leading or trailing whitespace (a copy from chat or email often adds a space), the
+ * trimmed input gets one more try. Passwords are trimmed when set, so for new passwords
+ * this only ever forgives whitespace the visitor added by accident.
+ */
+async function verifyGatePassword(
+  storedHash: string,
+  password: string,
+  log: Parameters<typeof verifyPassword>[2],
+): Promise<boolean> {
+  if (await verifyPassword(storedHash, password, log)) return true;
+  const trimmed = password.trim();
+  return trimmed !== password && trimmed !== "" && verifyPassword(storedHash, trimmed, log);
+}
+
+/**
  * Cookie scope. Subdomain mode: each canvas is its own origin, so the grant is
  * host-only (no Domain) and never sent to sibling canvas subdomains. Path mode:
  * all canvases share one host, so the grant is scoped to the canvas path prefix.
@@ -59,7 +76,11 @@ function gateCookieOptions(config: Config, slug: string) {
     httpOnly: true,
     secure: config.isProduction,
     sameSite: "Lax" as const,
-    path: config.urlMode === "subdomain" ? "/" : `/c/${slug}/`,
+    // No trailing slash: a cookie path of `/c/<slug>/` is not sent for `/c/<slug>`, so a
+    // visitor who opened the link without the slash was redirected back to a gate that
+    // could never see the grant it had just minted. `/c/<slug>` still never matches a
+    // sibling like `/c/<slug>-2` (RFC 6265 §5.1.4 requires a `/` after the prefix).
+    path: config.urlMode === "subdomain" ? "/" : `/c/${slug}`,
   };
 }
 
@@ -113,7 +134,7 @@ export function passwordGate(deps: PasswordGateDeps) {
       let ok = false;
       try {
         ok = canvas.passwordHash
-          ? await verifyPassword(canvas.passwordHash, password, c.get("log"))
+          ? await verifyGatePassword(canvas.passwordHash, password, c.get("log"))
           : false;
       } catch (err) {
         if (!(err instanceof PasswordCheckBusy)) throw err;
@@ -232,7 +253,7 @@ ${SYSTEM_PAGE_BRAND}
       ${error ? `<div class="err" id="password-error" role="alert">${error}</div>` : ""}
       <form method="POST">
         <label for="password">Password</label>
-        <input id="password" type="password" name="password" autofocus autocomplete="current-password" required aria-describedby="password-help${error ? " password-error" : ""}"${state?.kind === "incorrect" ? ' aria-invalid="true"' : ""}/>
+        <input id="password" type="password" name="password" autofocus autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" required aria-describedby="password-help${error ? " password-error" : ""}"${state?.kind === "incorrect" ? ' aria-invalid="true"' : ""}/>
         <label class="show" hidden id="show-password-label"><input id="show-password" type="checkbox"/>Show password</label>
         <button type="submit">Unlock</button>
       </form>

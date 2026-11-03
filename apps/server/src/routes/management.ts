@@ -207,7 +207,7 @@ const settingsSchema = z.object({
   guestAiCap: z.number().min(0).optional(),
   shared: z.boolean().optional(),
   sharedExpiresAt: z.number().int().positive().nullable().optional(),
-  password: z.string().min(1).nullable().optional(), // set, or null to clear
+  password: z.string().trim().min(1).nullable().optional(), // set (trimmed), or null to clear
   spaFallback: z.boolean().optional(),
   // Preview policy: auto (screenshot on publish) or off (generative cover). `custom`
   // is set only by uploading an image via PUT /:id/preview, never through settings.

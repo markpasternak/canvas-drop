@@ -260,6 +260,53 @@ describe("passwordGate", () => {
     expect(await auditRepository(client).recent()).toEqual([]);
   });
 
+  it("forgives whitespace a visitor pasted around the password, but not other differences", async () => {
+    const cv = canvas({ passwordHash: await hashPassword("k7mp-x3qa-9hzt-4wce-rn2d") });
+    const app = buildApp(cv, await mkAudit());
+    const post = (pw: string) =>
+      app.request("/c/s/", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: `password=${encodeURIComponent(pw)}`,
+      });
+    expect((await post(" k7mp-x3qa-9hzt-4wce-rn2d \t")).status).toBe(303);
+    expect((await post("K7MP-X3QA-9HZT-4WCE-RN2D")).status).toBe(401);
+    expect((await post("k7mp-x3qa-9hzt-4wce-rn2")).status).toBe(401);
+    expect((await post("   ")).status).toBe(401);
+  });
+
+  it("a password set with surrounding spaces still matches its exact form", async () => {
+    const cv = canvas({ passwordHash: await hashPassword(" spaced ") });
+    const res = await buildApp(cv, await mkAudit()).request("/c/s/", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `password=${encodeURIComponent(" spaced ")}`,
+    });
+    expect(res.status).toBe(303);
+  });
+
+  it("path mode: the grant cookie covers the slash-less canvas URL it redirects back to", async () => {
+    const cv = canvas({ passwordHash: await hashPassword("right") });
+    const res = await buildApp(cv, await mkAudit()).request("/c/s", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "password=right",
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/c/s");
+    const raw = res.headers.getSetCookie().find((c) => c.startsWith(GATE_COOKIE));
+    // A browser sends a cookie only when its Path is a prefix of the request path, so
+    // `Path=/c/s/` would never reach `/c/s` and the visitor would loop on the gate.
+    expect(raw).toMatch(/Path=\/c\/s(;|$)/);
+  });
+
+  it("gate input does not let phones capitalize or autocorrect the password", () => {
+    const html = gatePage("Secret");
+    expect(html).toContain('autocapitalize="none"');
+    expect(html).toContain('autocorrect="off"');
+    expect(html).toContain('spellcheck="false"');
+  });
+
   it("labels the password, associates errors, and progressively offers show password", () => {
     const html = gatePage("Secret", { kind: "incorrect" });
     expect(html).toContain('<label for="password">Password</label>');
