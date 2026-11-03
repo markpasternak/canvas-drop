@@ -2773,6 +2773,18 @@ describe("managementRoutes — listability rules (plan 002 U5)", () => {
     });
   });
 
+  it("trims a password when it is set and refuses a whitespace-only one", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await makeCanvas(owner.id, true);
+
+    expect((await patch(app, id, { password: "   " })).status).toBe(400);
+    expect((await patch(app, id, { password: "  k7mp-x3qa \n" })).status).toBe(200);
+    const stored = await canvasesRepository(client).findById(id);
+    expect(await verifyPassword(stored?.passwordHash as string, "k7mp-x3qa")).toBe(true);
+  });
+
   it("setting a password on a listed canvas un-lists it and clears templatable", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

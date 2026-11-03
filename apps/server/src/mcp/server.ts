@@ -1458,6 +1458,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           ),
         password: z
           .string()
+          .trim()
           .min(1)
           .nullable()
           .optional()

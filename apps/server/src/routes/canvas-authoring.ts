@@ -71,7 +71,7 @@ const publishMeta = z.object({
   slug: z.string().optional(),
   tags: z.array(z.string().min(1).max(64)).max(20).optional(),
   access: accessEnum.optional(),
-  password: z.string().min(1).max(200).optional(),
+  password: z.string().trim().min(1).max(200).optional(),
   expiresAt: z.number().int().positive().optional(),
   metadata: metadataSchema.optional(),
 });
@@ -82,7 +82,7 @@ const updateMeta = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   tags: z.array(z.string().min(1).max(64)).max(20).optional(),
   access: accessEnum.optional(),
-  password: z.string().min(1).max(200).nullable().optional(),
+  password: z.string().trim().min(1).max(200).nullable().optional(),
   expiresAt: z.number().int().positive().nullable().optional(),
   /** Compare-and-swap token returned as AuthoredCanvas.updatedAt. */
   expectedUpdatedAt: z.number().int().positive().optional(),

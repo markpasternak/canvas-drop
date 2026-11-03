@@ -474,12 +474,12 @@ function ShareCanvas({ id }: { id: string }) {
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={!password}
+                disabled={!password.trim()}
                 loading={update.isPending}
                 onClick={() =>
                   canvas.galleryListed
                     ? setConfirm("password-unlist")
-                    : setOrClearPassword(password)
+                    : setOrClearPassword(password.trim())
                 }
               >
                 {canvas.hasPassword ? "Change password" : "Set password"}
@@ -731,7 +731,7 @@ function ShareCanvas({ id }: { id: string }) {
         onClose={() => setConfirm(null)}
         onConfirm={async () => {
           setConfirm(null);
-          await setOrClearPassword(password);
+          await setOrClearPassword(password.trim());
         }}
         title="Add a password and unlist?"
         actionLabel="Add password & remove from gallery"
