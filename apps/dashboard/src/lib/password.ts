@@ -4,13 +4,13 @@
  * on phones that capitalize the first letter, and a mixed-case password fails on any
  * of those for a reason the visitor can't see. 31 symbols, ~4.95 bits each.
  */
-export const PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+export const UNAMBIGUOUS_CHARS = "abcdefghjkmnpqrstuvwxyz23456789";
 
 /** A strong, shareable password such as `k7mp-x3qa-9hzt-4wce-rn2d`: five groups of four
  *  (~99 bits), dash-separated so it is easy to read back. Uses the CSPRNG with
  *  rejection sampling so the distribution stays uniform for any alphabet size. */
 export function generatePassword(groups = 5, groupLength = 4): string {
-  const alphabet = PASSWORD_ALPHABET;
+  const alphabet = UNAMBIGUOUS_CHARS;
   const length = groups * groupLength;
   const max = Math.floor(256 / alphabet.length) * alphabet.length;
   const out: string[] = [];

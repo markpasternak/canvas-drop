@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generatePassword, PASSWORD_ALPHABET } from "./password.js";
+import { generatePassword, UNAMBIGUOUS_CHARS } from "./password.js";
 
 const AMBIGUOUS = new Set(["0", "O", "o", "1", "l", "I", "i"]);
 const SHAPE = /^[a-z2-9]{4}(?:-[a-z2-9]{4}){4}$/;
@@ -21,7 +21,7 @@ describe("generatePassword", () => {
       const pw = generatePassword();
       expect(pw).toMatch(SHAPE);
       for (const ch of pw.replaceAll("-", "")) {
-        expect(PASSWORD_ALPHABET.includes(ch)).toBe(true);
+        expect(UNAMBIGUOUS_CHARS.includes(ch)).toBe(true);
         expect(AMBIGUOUS.has(ch)).toBe(false);
       }
     }
@@ -29,6 +29,6 @@ describe("generatePassword", () => {
 
   it("keeps at least ~96 bits of entropy", () => {
     const symbols = generatePassword().replaceAll("-", "").length;
-    expect(symbols * Math.log2(PASSWORD_ALPHABET.length)).toBeGreaterThanOrEqual(96);
+    expect(symbols * Math.log2(UNAMBIGUOUS_CHARS.length)).toBeGreaterThanOrEqual(96);
   });
 });
