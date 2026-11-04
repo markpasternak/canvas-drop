@@ -163,6 +163,11 @@ describe.each(DIALECTS)("MCP OAuth authorize consent [%s]", (dialect) => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("Some Agent");
     expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    // Browsers check form-action on every redirect hop of the form submission, so the
+    // client's callback origin must be allowed or Allow/Cancel is blocked in Chrome.
+    expect(res.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://client.example.net",
+    );
   });
 
   it("approving on the consent page issues a code, and the approval is remembered", async () => {
