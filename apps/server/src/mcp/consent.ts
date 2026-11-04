@@ -73,13 +73,47 @@ export function carriedParams(source: URLSearchParams): URLSearchParams {
   return out;
 }
 
-/** Headers for the consent page: never framed, never cached. */
-export const CONSENT_HEADERS: Record<string, string> = {
-  "Content-Type": "text/html; charset=utf-8",
-  "Cache-Control": "no-store",
-  "Content-Security-Policy": "frame-ancestors 'none'; form-action 'self'",
-  "X-Frame-Options": "DENY",
-};
+/**
+ * The CSP source for where an approved (or cancelled) consent form ends up.
+ *
+ * Browsers apply `form-action` to every hop of a form submission's redirect chain,
+ * not just the form's own `action` (CSP3 §6.2.4; Chrome enforces it). The consent
+ * POST is same-origin, but Allow goes 303 → `/authorize` → 302 to the client's
+ * `redirect_uri`, and Cancel goes 303 straight there. With `form-action 'self'`
+ * alone the browser blocks that last hop whenever the client lives on another
+ * origin (claude.ai, a localhost loopback, a custom-scheme app), and reports the
+ * pre-redirect URL, `/authorize/consent`, as the blocked target.
+ *
+ * Returns the redirect URI's origin for http(s), its scheme (`cursor:`) for a
+ * custom-scheme app, or null when it can't be expressed safely as one source
+ * token. The URI was already validated against the client's registration.
+ */
+export function redirectFormSource(redirectUri: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(redirectUri);
+  } catch {
+    return null;
+  }
+  const source = url.protocol === "https:" || url.protocol === "http:" ? url.origin : url.protocol;
+  // One CSP token only: no whitespace, `;`, `,` or quotes can ride in.
+  return /^[a-z][a-z0-9+.-]*:(\/\/[a-z0-9.\-[\]:]+)?$/i.test(source) ? source : null;
+}
+
+/**
+ * Headers for the consent page: never framed, never cached, and forms may only
+ * post here and land back at this request's own registered redirect.
+ */
+export function consentHeaders(redirectUri: string): Record<string, string> {
+  const target = redirectFormSource(redirectUri);
+  const formAction = target ? `form-action 'self' ${target}` : "form-action 'self'";
+  return {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": `frame-ancestors 'none'; ${formAction}`,
+    "X-Frame-Options": "DENY",
+  };
+}
 
 export function renderConsentPage(input: {
   client: OAuthClientInformationFull;

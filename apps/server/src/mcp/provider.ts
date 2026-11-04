@@ -26,9 +26,9 @@ import type { UsersRepository } from "../db/repositories/users.js";
 import { isSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import {
-  CONSENT_HEADERS,
   CONSENT_PARAM,
   carriedParams,
+  consentHeaders,
   renderConsentPage,
   signConsent,
   verifyConsent,
@@ -145,7 +145,7 @@ export class McpOAuthProvider implements OAuthServerProvider {
           accountEmail: user.email,
           params: carriedParams(new URL(c.req.url).searchParams),
         }),
-        { status: 200, headers: CONSENT_HEADERS },
+        { status: 200, headers: consentHeaders(params.redirectUri) },
       );
       return;
     }
