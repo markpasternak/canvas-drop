@@ -48,6 +48,37 @@ describe("resolveRequest — subdomain mode", () => {
   });
 });
 
+describe("resolveRequest — subdomain mode with a dedicated Deploy API host", () => {
+  const split: Config = loadConfig({
+    CANVAS_DROP_AUTH_MODE: "dev",
+    CANVAS_DROP_URL_MODE: "subdomain",
+    CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+    CANVAS_DROP_API_BASE_URL: "https://api.canvases.example.com",
+  });
+  const r = (host: string, pathname: string) => resolveRequest({ host, pathname }, split);
+
+  it("routes the API host to deploy-api, not to a canvas named after its label", () => {
+    expect(r("api.canvases.example.com", "/v1/canvases/abc/deploy")).toEqual({
+      role: "deploy-api",
+    });
+    expect(r("API.canvases.example.com:443", "/v1/canvases/abc")).toEqual({ role: "deploy-api" });
+  });
+
+  it("leaves other canvas subdomains and the base host unchanged", () => {
+    expect(r("quiet-otter.canvases.example.com", "/")).toEqual({
+      role: "canvas",
+      canvasSlug: "quiet-otter",
+    });
+    expect(r("canvases.example.com", "/auth/login")).toEqual({ role: "auth" });
+  });
+
+  it("without a separate API host, api.{base} is still a canvas host", () => {
+    expect(
+      resolveRequest({ host: "api.canvases.example.com", pathname: "/" }, subdomainConfig),
+    ).toEqual({ role: "canvas", canvasSlug: "api" });
+  });
+});
+
 describe("resolveRequest — path mode", () => {
   const r = (pathname: string) => resolveRequest({ host: "localhost:3000", pathname }, pathConfig);
 

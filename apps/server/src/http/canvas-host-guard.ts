@@ -42,12 +42,23 @@ function isPlatformPath(path: string): boolean {
   return PLATFORM_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 }
 
+/** Paths a dedicated Deploy API host (`CANVAS_DROP_API_BASE_URL`) answers. */
+function isDeployApiPath(path: string): boolean {
+  return path === "/healthz" || path === "/v1/canvases" || path.startsWith("/v1/canvases/");
+}
+
 export function canvasHostGuard(config: Config) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const { role } = resolveRequest(
       { host: c.req.header("host") ?? "", pathname: c.req.path },
       config,
     );
+    // A dedicated Deploy API host serves the keyed Deploy API only: the dashboard,
+    // sign-in, MCP and runtime API stay on the base host.
+    if (role === "deploy-api") {
+      if (isDeployApiPath(c.req.path)) return next();
+      return c.json({ error: "not_found" }, 404);
+    }
     if (role !== "canvas" || !isPlatformPath(c.req.path)) return next();
     // Two sign-in pages are reached from canvas hosts by navigation: the gateway sends
     // a signed-out visitor to a relative `/auth/login`, and the account chooser has
