@@ -114,6 +114,27 @@ When adding browser APIs, stub/guard them in `apps/dashboard/src/test/setup.ts`
 (`matchMedia`, `ResizeObserver`, `IntersectionObserver`) so jsdom crashes do not
 look like route timeouts.
 
+## Dashboard flake: a stale unsaved-changes blocker swallowed a navigation
+
+`new.test.tsx` "restores HTML/title across navigation" timed out on loaded CI
+runners (1 and 9 November 2026) while passing in ~0.4s locally. Two causes,
+reproduced by running the file 16 times in parallel on 4 cores:
+
+- `useBlocker` unregisters in a passive effect. The test waited for the `/new`
+  form to leave the DOM, then navigated back; under load React had not yet run
+  the passive cleanup, so the old (dirty) blocker blocked the navigation behind
+  a dialog that no longer existed, and the router sat idle on `/teams`.
+  `useUnsavedChanges` now tracks mount state with a layout effect (whose cleanup
+  runs in the unmount commit) and never blocks once unmounted.
+- `setup.ts` lets one `findBy`/`waitFor` wait 5s for lazy route chunks, which was
+  also Vitest's whole per-test budget. The dashboard config now sets
+  `testTimeout: 20_000`, matching the root config.
+
+To reproduce a dashboard timing flake, run the file in parallel copies
+(`for i in $(seq 16); do npx vitest run <file> & done; wait`) and log step
+timestamps to a file (test console output is suppressed) to tell slowness from
+a hang.
+
 ## Branch protection on a private repo needs Pro
 
 GitHub gates both classic branch protection AND rulesets behind Pro for **private**
