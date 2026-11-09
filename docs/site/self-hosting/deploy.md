@@ -141,8 +141,10 @@ Configure the IAP to let `/v1/canvases/*`, `/mcp`, `/.well-known/*`, `/register`
 the app rejects bad or missing tokens with `401`. In subdomain mode a common layout is a
 dedicated API host: set `CANVAS_DROP_API_BASE_URL` (for example
 `https://api.canvases.example.com`) so the MCP tools advertise the right endpoints to
-agents; `api`, `v1`, `sdk`, `auth`, and `mcp` are reserved slugs, so no canvas can
-collide with it. The demo Caddyfile strips `Authorization` on purpose, which is why the
+agents. The app recognizes that host and serves only the Deploy API (`/v1/canvases/*`)
+and `/healthz` there; every other path answers `404`, so the dashboard, sign-in and MCP
+stay on the base host. `api`, `v1`, `sdk`, `auth`, and `mcp` are reserved slugs, so no
+canvas can collide with it; pick one of those labels for the API host. The demo Caddyfile strips `Authorization` on purpose, which is why the
 Deploy API is unreachable in the demo.
 
 Two related facts about anonymous traffic. `GET /healthz` is unauthenticated at the app;

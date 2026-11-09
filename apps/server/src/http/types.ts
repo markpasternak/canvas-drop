@@ -1,6 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, User } from "@canvas-drop/shared/db";
 import type { Logger } from "../log/logger.js";
+import type { RequestRole } from "../routing/resolve-request.js";
 
 /**
  * The principal a canvas-facing request acts as (D4 access ladder, U3). Three
@@ -64,7 +65,7 @@ export interface AppVariables {
    *  layer serves files but every primitive is refused (R17, enforced in U9/U11). */
   staticOnly?: boolean;
   /** Resolved request role (set by the app's role middleware, U11/U19). */
-  role?: "dashboard" | "auth" | "platform-api" | "canvas";
+  role?: RequestRole;
   /** Canvas slug from resolveRequest (canvas + platform-api roles). */
   canvasSlug?: string;
   /** The authorized canvas — set by canvasAccess (U15) on allow. */

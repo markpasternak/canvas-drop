@@ -6,7 +6,7 @@ import type { Config } from "@canvas-drop/shared";
  * branches on URL mode. Pure — no I/O, no DB. Slug→canvas resolution happens
  * later in the request pipeline; this only classifies and extracts the slug.
  */
-export type RequestRole = "dashboard" | "auth" | "platform-api" | "canvas";
+export type RequestRole = "dashboard" | "auth" | "platform-api" | "canvas" | "deploy-api";
 
 export interface ResolvedRequest {
   role: RequestRole;
@@ -29,6 +29,12 @@ export function resolveRequest(req: RequestParts, config: Config): ResolvedReque
 
   if (config.urlMode === "subdomain") {
     const baseHost = new URL(config.baseUrl).hostname.toLowerCase();
+    // A dedicated Deploy API host (`CANVAS_DROP_API_BASE_URL`, e.g. `api.{baseHost}`)
+    // is matched before the canvas-subdomain rule: otherwise its label reads as a
+    // canvas slug and every `/v1/canvases/*` call 404s on the canvas host guard.
+    // The host serves only the keyed Deploy API (see canvas-host-guard.ts).
+    const apiHost = new URL(config.apiBaseUrl).hostname.toLowerCase();
+    if (apiHost !== baseHost && host === apiHost) return { role: "deploy-api" };
     if (host !== baseHost) {
       // A `{slug}.{baseHost}` request serves canvas content. A single label only
       // (multi-level or unrelated hosts fall through to the safe dashboard default).
