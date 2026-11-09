@@ -15,6 +15,11 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.tsx"],
     css: false,
+    // setup.ts lets a single findBy/waitFor wait up to 5s for lazy route chunks
+    // under load, so the per-test budget must sit well above that. With
+    // Vitest's 5s default, multi-step router tests (new.test.tsx) passed in
+    // ~0.4s idle but timed out on loaded CI runners.
+    testTimeout: 20_000,
     maxWorkers: workerSetting(),
   },
 });

@@ -1,5 +1,5 @@
 import { useBlocker } from "@tanstack/react-router";
-import { useCallback, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 
 /** Keep the current view mounted until saving succeeds or the person explicitly
  * chooses to leave. Callers render a recovery dialog from the returned resolver.
@@ -10,8 +10,20 @@ export function useUnsavedChanges(options: {
 }) {
   const latest = useRef(options);
   latest.current = options;
+  // useBlocker unregisters in a passive effect, which React can run a task
+  // after the view has left the DOM. A navigation in that gap would still
+  // consult this blocker and stay blocked behind a dialog nobody can see.
+  // Layout cleanup runs during the unmount commit, so an unmounted view
+  // never blocks.
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const shouldBlockFn = useCallback(async () => {
-    if (!latest.current.dirty) return false;
+    if (!mounted.current || !latest.current.dirty) return false;
     if (!latest.current.saveBeforeLeave) return true;
     try {
       return !(await latest.current.saveBeforeLeave());
@@ -20,6 +32,6 @@ export function useUnsavedChanges(options: {
       return true;
     }
   }, []);
-  const enableBeforeUnload = useCallback(() => latest.current.dirty, []);
+  const enableBeforeUnload = useCallback(() => mounted.current && latest.current.dirty, []);
   return useBlocker({ shouldBlockFn, enableBeforeUnload, withResolver: true });
 }
