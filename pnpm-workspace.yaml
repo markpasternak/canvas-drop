@@ -27,7 +27,9 @@ allowBuilds:
 #           express-rate-limit <- MCP SDK)
 # hono      GHSA-8j4g-w8fx-2239, GHSA-f23p-vx2j-j53r, GHSA-79qm-7rj5-m7r9,
 #           GHSA-54fx-42gc-7vw4, plus parseBody nesting, query-after-fragment,
-#           toSSG and jsx boundary fixes (<4.13.13, via @hono/mcp and the MCP SDK)
+#           toSSG and jsx boundary fixes, plus the 2026-11 batch (GHSA-4m76-xfj5-7975,
+#           GHSA-h7mg-cq63-vhpq, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v,
+#           GHSA-3gg2-335m-rxc6) (<4.13.16, via @hono/mcp and the MCP SDK)
 # proxy-addr IPv4-mapped IPv6 trust-subnet spoofing (<2.0.8, via express <- MCP SDK;
 #           canvas-drop never mounts express, so defence in depth)
 # qs        arrayLimit bypass + isBuffer DoS (<6.16.0, via express <- MCP SDK)
@@ -36,7 +38,8 @@ allowBuilds:
 # body-parser GHSA-27r3-jxmh-p828 (<2.4.0, via Express <- MCP SDK)
 # seroval GHSA-f86p-h4j2-7qgj / GHSA-9wx9-5pv9-3349 (<1.6.11, via Router)
 # MCP SDK 1.32.2 accepts node-server ^1.19.9 || ^2.0.5. Select its supported
-# 2.x alternative to avoid GHSA-rmxm-3fg6-px4f (no fixed 1.x release); leave
+# 2.x alternative (>=2.1.6 for GHSA-qv5m-9pm6-hqp3 and GHSA-jpvv-r467-5p4w) to
+# avoid GHSA-rmxm-3fg6-px4f (no fixed 1.x release); leave
 # other parents on their declared major rather than globally forcing 1.x to 2.x.
 #
 # Mermaid 12 resolves the patched KaTeX 0.18 line within its supported range.
@@ -56,7 +59,7 @@ overrides:
   "dompurify@>=3.0.0 <3.4.16": "^3.4.16"
   "fast-uri@>=3.0.0 <3.1.9": "^3.1.9"
   "ip-address@>=10.0.0 <10.7.1": "^10.7.1"
-  "hono@>=4.0.0 <4.13.13": "^4.13.13"
+  "hono@>=4.0.0 <4.13.16": "^4.13.16"
   "@hono/node-server@>=1.0.0 <1.19.15": "^1.19.15"
   "proxy-addr@>=2.0.0 <2.0.8": "^2.0.8"
   "qs@>=6.0.0 <6.16.0": "^6.16.0"
@@ -64,4 +67,4 @@ overrides:
   "fast-copy@>=4.0.0 <4.1.0": "^4.1.0"
   "body-parser@>=2.0.0 <2.4.0": "^2.4.0"
   "seroval@>=1.0.0 <1.6.11": "^1.6.11"
-  "@modelcontextprotocol/sdk@>=1.32.2 <2>@hono/node-server": "^2.1.5"
+  "@modelcontextprotocol/sdk@>=1.32.2 <2>@hono/node-server": "^2.1.6"
