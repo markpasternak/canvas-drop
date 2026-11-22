@@ -91,6 +91,19 @@ describe.each(DIALECTS)("MCP OAuth CORS scope (%s)", (dialect) => {
     expect(body.registration_endpoint).toBe("http://localhost:3000/register");
   });
 
+  it("serves the /mcp protected-resource document to a signed-out caller (not the gateway's 401)", async () => {
+    client = await makeTestDb(dialect);
+    const app = appFor(client);
+    const res = await app.request("/.well-known/oauth-protected-resource/mcp", { headers: EVIL });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(((await res.json()) as { resource: string }).resource).toBe("http://localhost:3000/mcp");
+    const unauth = await app.request("/mcp", { method: "POST", headers: EVIL });
+    expect(unauth.headers.get("www-authenticate")).toContain(
+      'resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource/mcp"',
+    );
+  });
+
   it("the bearer-only /mcp endpoint keeps CORS and exposes its auth challenge", async () => {
     client = await makeTestDb(dialect);
     const app = appFor(client);

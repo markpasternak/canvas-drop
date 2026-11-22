@@ -39,10 +39,14 @@ its URL serves content only to you until you widen access with `update_canvas`.
 canvas-drop is its own OAuth 2.1 authorization server; it does not proxy your identity
 provider. A compliant client needs nothing but the URL:
 
-1. **Discovery.** `{base}/.well-known/oauth-authorization-server` and
-   `{base}/.well-known/oauth-protected-resource` (RFC 8414 and RFC 9728). The issuer is
-   `{base}`; the only scope is `canvas-drop`.
-2. **Registration.** `POST {base}/register` (Dynamic Client Registration).
+1. **Discovery.** `{base}/.well-known/oauth-authorization-server` (RFC 8414) and
+   `{base}/.well-known/oauth-protected-resource/mcp` (RFC 9728), whose `resource` is
+   `{base}/mcp`. The root `{base}/.well-known/oauth-protected-resource` is still served,
+   with `resource` `{base}/`. The issuer is `{base}`; the only scope is `canvas-drop`.
+   Both identifiers are accepted as the RFC 8707 `resource` parameter.
+2. **Registration.** `POST {base}/register` (Dynamic Client Registration). Both public
+   clients (`token_endpoint_auth_method: "none"`, PKCE only) and `client_secret_post`
+   clients are supported, and the metadata advertises both.
 3. **Authorization.** `{base}/authorize` resolves identity server-side with the same auth
    strategy the dashboard uses, then checks the email allowlist and the blocked flag. In
    `oidc` mode a signed-out browser goes through the normal login and back; in `proxy`
@@ -59,7 +63,8 @@ provider. A compliant client needs nothing but the URL:
 4. **Tokens.** `POST {base}/token` exchanges the single-use code (60 s lifetime; client
    id and redirect URI must match) for an access token (`token_type: "bearer"`,
    `expires_in: 3600`) and a refresh token. Refresh tokens rotate on every use.
-   `POST {base}/revoke` revokes.
+   `POST {base}/revoke` revokes (RFC 7009, form or JSON body). A client can revoke only
+   its own tokens; any other token answers `200` and stays live.
 
 These endpoints are rate-limited per client IP: `/register` 30 per hour, `/authorize`
 120, `/authorize/consent` 60, `/token` 300 and `/revoke` 120 per 15 minutes. Over the
@@ -71,7 +76,7 @@ hashed. On each call the server looks the token up and re-checks that the accoun
 still active, so blocking a user or removing their email domain from the allowlist ends
 a live token on the next request. A missing or rejected token answers
 `401 { "error": "unauthorized" }` with a `WWW-Authenticate: Bearer` header whose
-`resource_metadata` points at `{base}/.well-known/oauth-protected-resource`. Nothing the
+`resource_metadata` points at `{base}/.well-known/oauth-protected-resource/mcp`. Nothing the
 client asserts about identity reaches the tools; org membership is resolved server-side
 on every request. Sign-in and token events are audited (`mcp_authorize_ok`,
 `mcp_authorize_denied`, `mcp_token_issue`, `mcp_token_revoke`).

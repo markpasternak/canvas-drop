@@ -299,11 +299,14 @@ export class McpOAuthProvider implements OAuthServerProvider {
   }
 
   async revokeToken(
-    _client: OAuthClientInformationFull,
+    client: OAuthClientInformationFull,
     request: OAuthTokenRevocationRequest,
   ): Promise<void> {
     // Resolve the owner first so the audit row is attributed (best-effort).
     const row = await this.deps.oauth.tokens.findLive(request.token);
+    // RFC 7009 §2.1: a client may revoke only its own tokens. Another client's token
+    // (or an unknown one) is a silent no-op, so the 200 reveals nothing about it.
+    if (row && row.clientId !== client.client_id) return;
     await this.deps.oauth.tokens.revoke(request.token);
     this.deps.audit?.record({ action: "mcp_token_revoke", actorId: row?.userId });
   }

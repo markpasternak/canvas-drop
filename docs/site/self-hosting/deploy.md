@@ -132,7 +132,8 @@ Two surfaces authenticate themselves and never carry the IAP's browser session:
   (`Authorization: Bearer cd_...`).
 - **The MCP endpoint**, `/mcp`, authenticates with an OAuth 2.1 bearer token issued by the
   app itself. Clients discover the endpoints at `/.well-known/oauth-authorization-server`
-  and `/.well-known/oauth-protected-resource`, register at `/register`, and exchange
+  and `/.well-known/oauth-protected-resource/mcp` (plus the root
+  `/.well-known/oauth-protected-resource`), register at `/register`, and exchange
   codes at `/token` (`/revoke` revokes). Only the `/authorize` step (with its
   `/authorize/consent` form post) is a browser round-trip, and it does go through the IAP.
 

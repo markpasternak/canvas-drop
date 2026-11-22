@@ -4,11 +4,19 @@ import {
   authorizeHandler,
   clientRegistrationHandler,
   createOAuthMetadata,
-  revokeHandler,
   tokenHandler,
   wellKnownRouter,
 } from "@hono/mcp/auth";
-import { Hono, type MiddlewareHandler } from "hono";
+import {
+  InvalidRequestError,
+  OAuthError,
+  ServerError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import {
+  type OAuthClientInformationFull,
+  OAuthTokenRevocationRequestSchema,
+} from "@modelcontextprotocol/sdk/shared/auth.js";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
@@ -102,8 +110,10 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
 
   // Built from the configured base URL (not the request origin) so the scheme is
   // correct behind a TLS-terminating proxy — the internal hop is plain http, which
-  // would otherwise advertise an http:// metadata URL on an https instance.
-  const resourceMetadataUrl = `${new URL(deps.config.baseUrl).origin}/.well-known/oauth-protected-resource`;
+  // would otherwise advertise an http:// metadata URL on an https instance. It names
+  // the path-inserted document for the `/mcp` resource (RFC 9728 §3.1), which strict
+  // clients require to match the MCP endpoint URL.
+  const resourceMetadataUrl = `${new URL(deps.config.baseUrl).origin}${MCP_PRM_PATH}`;
 
   /** Shared live-token + per-caller throttle for JSON-RPC and binary exports. */
   const bearerGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -239,6 +249,9 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   return app;
 }
 
+/** The RFC 9728 path-inserted metadata document for the `/mcp` resource. */
+const MCP_PRM_PATH = "/.well-known/oauth-protected-resource/mcp";
+
 /** The OAuth AS paths a browser-based MCP client may call cross-origin. */
 export const OAUTH_CORS_PATHS = [
   "/authorize",
@@ -247,7 +260,17 @@ export const OAUTH_CORS_PATHS = [
   "/revoke",
   "/.well-known/oauth-authorization-server",
   "/.well-known/oauth-protected-resource",
+  MCP_PRM_PATH,
 ] as const;
+
+/**
+ * Client authentication methods the token and revocation endpoints accept. Public
+ * clients (`none`, PKCE S256 only) have always been accepted: `authenticateClient`
+ * only demands a secret from a client registered with one. `@hono/mcp`'s metadata
+ * advertises `client_secret_post` alone, which made strict clients refuse to register
+ * as public clients.
+ */
+const CLIENT_AUTH_METHODS = ["none", "client_secret_post"];
 
 /**
  * The routes `@hono/mcp`'s `mcpAuthRouter` builds, assembled from its exported
@@ -257,7 +280,11 @@ export const OAUTH_CORS_PATHS = [
  * library's limiters are not wired in.
  */
 function oauthServerRouter(provider: McpOAuthProvider, issuerUrl: URL): Hono {
-  const metadata = createOAuthMetadata({ provider, issuerUrl, scopesSupported: ["canvas-drop"] });
+  const metadata = {
+    ...createOAuthMetadata({ provider, issuerUrl, scopesSupported: ["canvas-drop"] }),
+    token_endpoint_auth_methods_supported: CLIENT_AUTH_METHODS,
+    revocation_endpoint_auth_methods_supported: CLIENT_AUTH_METHODS,
+  };
   const router = new Hono();
   for (const path of OAUTH_CORS_PATHS) router.use(path, cors());
   // The MCP endpoint is bearer-only (no cookies), so any origin may call it; browser
@@ -269,7 +296,10 @@ function oauthServerRouter(provider: McpOAuthProvider, issuerUrl: URL): Hono {
   router.on(["GET", "POST"], "/authorize", authorizeHandler(provider));
   router.post("/token", clientAuth, tokenHandler(provider));
   router.post("/register", clientRegistrationHandler({ clientsStore: provider.clientsStore }));
-  router.post("/revoke", clientAuth, revokeHandler(provider));
+  router.post("/revoke", clientAuth, revokeTokenHandler(provider));
+  // The root document keeps its `resource` (the origin) for clients that already use
+  // it. Tokens are opaque and never audience-checked, so both identifiers reach the
+  // same tokens.
   router.route(
     "/",
     wellKnownRouter({
@@ -279,5 +309,43 @@ function oauthServerRouter(provider: McpOAuthProvider, issuerUrl: URL): Hono {
       resourceName: "canvas-drop",
     }),
   );
+  // The `/mcp` resource's own document (RFC 9728 §3.1). Clients probe this path first
+  // and stop at anything but a 200 or 404, so it is served here, ahead of the session
+  // gateway that would otherwise answer a signed-out caller with 401.
+  const mcpResource = new URL("/mcp", metadata.issuer).href;
+  router.get(MCP_PRM_PATH, (c) =>
+    c.json({
+      resource: mcpResource,
+      authorization_servers: [metadata.issuer],
+      scopes_supported: ["canvas-drop"],
+      resource_name: "canvas-drop",
+    }),
+  );
   return router;
+}
+
+/**
+ * Token revocation (RFC 7009). Replaces `@hono/mcp`'s `revokeHandler`, which always
+ * parses a JSON body: an RFC 7009 client posts `application/x-www-form-urlencoded`, so
+ * every standard revoke answered 500. `authenticateClient` has already parsed the body
+ * the same way (Hono caches it) and set the client.
+ */
+function revokeTokenHandler(provider: McpOAuthProvider) {
+  return async (c: Context) => {
+    c.header("Cache-Control", "no-store");
+    try {
+      const body = (c.req.header("Content-Type") ?? "").startsWith("application/json")
+        ? await c.req.json()
+        : await c.req.parseBody();
+      const parsed = OAuthTokenRevocationRequestSchema.safeParse(body);
+      if (!parsed.success) throw new InvalidRequestError(parsed.error.message);
+      const client = c.get("client") as OAuthClientInformationFull | undefined;
+      if (!client) throw new ServerError("Internal Server Error");
+      await provider.revokeToken(client, parsed.data);
+      return c.json({});
+    } catch (error) {
+      const err = error instanceof OAuthError ? error : new ServerError("Internal Server Error");
+      return c.json(err.toResponseObject(), err instanceof ServerError ? 500 : 400);
+    }
+  };
 }
