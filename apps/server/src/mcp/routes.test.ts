@@ -120,8 +120,90 @@ describe("MCP routes (config-gated mount)", () => {
     // The resource_metadata URL is built from the configured base URL (with its
     // port/scheme), not the request origin — so it's correct behind a TLS proxy.
     expect(res.headers.get("www-authenticate")).toContain(
-      'resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource"',
+      'resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource/mcp"',
     );
+  });
+
+  it("advertises public PKCE clients (`none`) for the token and revocation endpoints", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, onConfig);
+    const meta = (await (await a.request("/.well-known/oauth-authorization-server")).json()) as {
+      token_endpoint_auth_methods_supported: string[];
+      revocation_endpoint_auth_methods_supported: string[];
+      code_challenge_methods_supported: string[];
+    };
+    expect(meta.token_endpoint_auth_methods_supported).toEqual(["none", "client_secret_post"]);
+    expect(meta.revocation_endpoint_auth_methods_supported).toEqual(["none", "client_secret_post"]);
+    expect(meta.code_challenge_methods_supported).toEqual(["S256"]);
+  });
+
+  it("serves the /mcp protected-resource document and keeps the root one", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, onConfig);
+    const mcp = await a.request("/.well-known/oauth-protected-resource/mcp");
+    expect(mcp.status).toBe(200);
+    expect(await mcp.json()).toEqual({
+      resource: "http://localhost:3000/mcp",
+      authorization_servers: ["http://localhost:3000/"],
+      scopes_supported: ["canvas-drop"],
+      resource_name: "canvas-drop",
+    });
+    const root = (await (await a.request("/.well-known/oauth-protected-resource")).json()) as {
+      resource: string;
+    };
+    expect(root.resource).toBe("http://localhost:3000/");
+  });
+
+  it("revokes a public client's token from an RFC 7009 form body, and only its own", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, onConfig);
+    const register = async () => {
+      const res = await a.request("/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "Native client",
+          redirect_uris: ["http://127.0.0.1:33418/callback"],
+          token_endpoint_auth_method: "none",
+        }),
+      });
+      return ((await res.json()) as { client_id: string }).client_id;
+    };
+    const mine = await register();
+    const theirs = await register();
+    const owner = await usersRepository(client).upsert({
+      providerSub: "revoke-owner",
+      email: "revoke-owner@example.com",
+      name: "Owner",
+      isAdmin: false,
+    });
+    const oauth = oauthRepository(client);
+    const mint = (token: string, clientId: string) =>
+      oauth.tokens.create({
+        token,
+        kind: "access",
+        clientId,
+        userId: owner.id,
+        scopes: ["canvas-drop"],
+        expiresAt: Date.now() + 60_000,
+      });
+    await mint("my-token", mine);
+    await mint("their-token", theirs);
+    const revoke = (clientId: string, token: string) =>
+      a.request("/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: clientId, token }).toString(),
+      });
+
+    // Another client's token: 200 (RFC 7009 reveals nothing) but it stays live.
+    expect((await revoke(mine, "their-token")).status).toBe(200);
+    expect(await oauth.tokens.findLive("their-token", "access")).not.toBeNull();
+    // Its own token: revoked.
+    expect((await revoke(mine, "my-token")).status).toBe(200);
+    expect(await oauth.tokens.findLive("my-token", "access")).toBeNull();
+    // An unknown token is a no-op, not an error.
+    expect((await revoke(mine, "no-such-token")).status).toBe(200);
   });
 
   it("rejects an invalid bearer token on /mcp", async () => {
